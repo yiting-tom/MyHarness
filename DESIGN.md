@@ -173,7 +173,7 @@ analysis_drill(job_id, section_id)   → 章節全文
 ### 4.7 Event log
 
 ```jsonl
-{"t":"job.start","job":"j7","task":"...","budget_usd":5.0}
+{"t":"job.start","seq":0,"ts":"2026-08-18T15:04:05Z","job_id":"j7","task":"...","budget_usd":5.0}
 {"t":"plan.update","lanes":[...],"routing_table":[...]}
 {"t":"ingress","payload":"blob:raw/txns-2024","bytes":52428800,"sample_tokens":1840}
 {"t":"proxy.route","payload":"...","lane":"txn-2024","reason":"...","tokens":{"in":2140,"out":48},"ms":890}
@@ -184,7 +184,12 @@ analysis_drill(job_id, section_id)   → 章節全文
 {"t":"job.finish","report":"report.md","usd":2.14,"dispatches":23}
 ```
 
+每筆事件都帶 `t` / `seq` / `ts` / `job_id` 四個共通欄位，其餘一律放在同層的自由欄位 ——
+新增欄位或新增整個事件型別因此永遠是純加法，讀取端對未知型別寬容。
+
 成本報表、TUI、OpenTelemetry、回歸測試全部是這份 log 的投影。
+已實作於 `myharness/events/`：`summarize()` 一次給出 context 峰值、重複 dispatch 數、
+總成本與 caveats；`derive_caveats()` 從事件流推導報告的「未做到什麼」。
 
 ## 5. Context 預算（中型 job，<50 dispatch）
 
@@ -282,17 +287,24 @@ CLI 即使在 `setting_sources=[]` 下仍會送出全部內建工具定義（spi
 
 ```
 jobs/<job_id>/
-  plan.md                       orchestrator 的全局狀態（resume 與可觀測性）
-  blobs/                        原始資料，永不進 context
-  lanes/<lane_id>/
-    charter.md                  角色定義（穩定前綴，吃 prompt cache）
-    state.md                    累積認知，硬上限 8k；分 stable(只增) / working(可覆寫)
-    findings/*.md               完整分析產出
+  blobs/<name>                  原始資料，永不進 context
+  notes/                        LLM 產出的文字（id 為 <job>/note/<name>）
+    plan.md                     orchestrator 的全局狀態（resume 與可觀測性）
+    report.md
+    lanes/<lane_id>/
+      charter.md                角色定義（穩定前綴，吃 prompt cache）
+      state.md                  累積認知，硬上限 8k；分 stable(只增) / working(可覆寫)
+      findings/*.md             完整分析產出
   traces/d<n>.jsonl             每次 dispatch 的完整 worker transcript
   events.jsonl                  event log
-  report.md
-  index.sqlite                  id → {kind, path, bytes, est_tokens, schema, produced_by, ts}
+  index.sqlite                  id → {kind, bytes, est_tokens, schema, sections,
+                                      produced_by, created_at, revision}
 ```
+
+blob 與 note 分屬兩棵子樹，因為兩者的存取規則完全不同（見 §4.4），
+混在同一個命名空間會讓 `notes/blobs/x` 這種名稱產生歧義。
+路徑組成由 `myharness/local_layout.py` 獨佔，其他模組一律走 store 介面
+（由 `tests/unit/test_layout_is_private.py` 靜態檢查強制）。
 
 ## 8. 待驗證的 Spike（動工前）
 
