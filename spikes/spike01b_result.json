@@ -1,0 +1,147 @@
+[
+  {
+    "case": "readOnly=T",
+    "n": 3,
+    "wall": 11.8,
+    "span": 4.6,
+    "busy": 12.0,
+    "avg_concurrency": 2.59,
+    "peak_concurrency": 3,
+    "calls": [
+      {
+        "label": "A",
+        "start": 0.0,
+        "end": 4.006
+      },
+      {
+        "label": "B",
+        "start": 0.564,
+        "end": 4.566
+      },
+      {
+        "label": "C",
+        "start": 0.627,
+        "end": 4.628
+      }
+    ]
+  },
+  {
+    "case": "readOnly=T + destructive=T + idempotent=F",
+    "n": 3,
+    "wall": 12.0,
+    "span": 4.6,
+    "busy": 12.0,
+    "avg_concurrency": 2.59,
+    "peak_concurrency": 3,
+    "calls": [
+      {
+        "label": "A",
+        "start": 0.0,
+        "end": 4.003
+      },
+      {
+        "label": "B",
+        "start": 0.537,
+        "end": 4.538
+      },
+      {
+        "label": "C",
+        "start": 0.64,
+        "end": 4.641
+      }
+    ]
+  },
+  {
+    "case": "readOnly=F + idempotent=T",
+    "n": 3,
+    "wall": 19.4,
+    "span": 12.0,
+    "busy": 12.0,
+    "avg_concurrency": 1.0,
+    "peak_concurrency": 1,
+    "calls": [
+      {
+        "label": "A",
+        "start": 0.0,
+        "end": 4.001
+      },
+      {
+        "label": "B",
+        "start": 4.025,
+        "end": 8.027
+      },
+      {
+        "label": "C",
+        "start": 8.038,
+        "end": 12.039
+      }
+    ]
+  },
+  {
+    "case": "annotations=None",
+    "n": 3,
+    "wall": 20.7,
+    "span": 12.0,
+    "busy": 12.0,
+    "avg_concurrency": 1.0,
+    "peak_concurrency": 1,
+    "calls": [
+      {
+        "label": "A",
+        "start": 0.0,
+        "end": 4.001
+      },
+      {
+        "label": "B",
+        "start": 4.014,
+        "end": 8.015
+      },
+      {
+        "label": "C",
+        "start": 8.025,
+        "end": 12.026
+      }
+    ]
+  },
+  {
+    "case": "readOnly=T, n=6 (\u627e\u4e0a\u9650)",
+    "n": 6,
+    "wall": 13.5,
+    "span": 6.0,
+    "busy": 24.0,
+    "avg_concurrency": 3.98,
+    "peak_concurrency": 6,
+    "calls": [
+      {
+        "label": "A",
+        "start": 0.0,
+        "end": 4.003
+      },
+      {
+        "label": "B",
+        "start": 0.474,
+        "end": 4.476
+      },
+      {
+        "label": "C",
+        "start": 1.021,
+        "end": 5.022
+      },
+      {
+        "label": "D",
+        "start": 1.568,
+        "end": 5.569
+      },
+      {
+        "label": "E",
+        "start": 2.032,
+        "end": 6.033
+      },
+      {
+        "label": "F",
+        "start": 2.035,
+        "end": 6.039
+      }
+    ]
+  }
+]
