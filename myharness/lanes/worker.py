@@ -16,7 +16,6 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-import anyio
 from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
@@ -30,9 +29,17 @@ from claude_agent_sdk import (
 from myharness.artifacts.ids import ArtifactId
 from myharness.artifacts.store import ArtifactStore
 from myharness.artifacts.types import GrantSet
+from myharness.backends.gate import BackendGate, ThrottleReport, gates
 from myharness.backends.profile import BackendCapability, BackendProfile
 from myharness.events.log import EventLog
-from myharness.events.types import CTX, DISPATCH_END, DISPATCH_START
+from myharness.events.types import (
+    CTX,
+    DISPATCH_END,
+    DISPATCH_START,
+    THROTTLE_COOLDOWN,
+    THROTTLE_GAVE_UP,
+    THROTTLE_WAIT,
+)
 from myharness.lanes.contract import (
     MAX_SCHEMA_RETRIES,
     ContractPath,
@@ -46,10 +53,11 @@ from myharness.lanes.tools import WorkerToolbox
 from myharness.lanes.transport import SdkTransport, WorkerTransport
 from myharness.lanes.types import LaneInstance
 
-#: How many times to retry when the backend itself is unavailable. The SDK
-#: already retries 429/5xx internally; this catches the case where it gave up.
-MAX_TRANSIENT_RETRIES = 2
-TRANSIENT_BACKOFF_S = (2.0, 8.0)
+#: Runaway backstop only. The *real* limit is the gate's time budget: a rate
+#: limit recovers on the order of minutes, so a fixed count of short backoffs
+#: gives up long before the backend does (spikes/RESULTS.md §Spike #6). Set high
+#: enough that the budget is what normally ends the loop.
+MAX_TRANSIENT_RETRIES = 32
 
 #: HTTP statuses the SDK reports through ``api_retry`` system messages.
 TRANSIENT_STATUSES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
@@ -275,10 +283,16 @@ async def run_lane_worker(
     )
 
     prompt = build_prompt(request, state)
-    acc, handle = await _attempt_all(
-        request, profile, toolbox, transport,
-        prompt=prompt, charter=charter, enforce=enforce,
-    )
+    gate = gates.for_backend(profile.name)
+    throttle = ThrottleReport()
+    async with gate.acquire():
+        await gate.wait_for_clearance(throttle)
+        acc, handle = await _attempt_all(
+            request, profile, toolbox, transport,
+            prompt=prompt, charter=charter, enforce=enforce,
+            gate=gate, throttle=throttle,
+        )
+    await _emit_throttle(event_log, request, profile, throttle)
 
     transcript_id = await _persist_transcript(store, request, acc)
     handle = clamp_handle(
@@ -316,6 +330,28 @@ async def run_lane_worker(
     return handle
 
 
+async def _emit_throttle(
+    event_log: EventLog, request: WorkerRequest, profile: BackendProfile,
+    throttle: ThrottleReport,
+) -> None:
+    """Rate-limit waiting must be visible, or it reads as a slow model."""
+    if throttle.cooldowns_triggered:
+        await event_log.append(
+            request.job_id, THROTTLE_COOLDOWN, backend=profile.name, lane=request.lane.id,
+            count=throttle.cooldowns_triggered, reason="rate_limit",
+        )
+    if throttle.waits:
+        await event_log.append(
+            request.job_id, THROTTLE_WAIT, backend=profile.name, lane=request.lane.id,
+            seconds=round(throttle.waited_s, 3), waits=throttle.waits,
+        )
+    if throttle.gave_up:
+        await event_log.append(
+            request.job_id, THROTTLE_GAVE_UP, backend=profile.name, lane=request.lane.id,
+            waited_s=round(throttle.waited_s, 3),
+        )
+
+
 def _as_kwargs(handle: LaneHandle) -> dict[str, Any]:
     return {
         "artifact": handle.artifact, "headline": handle.headline,
@@ -336,8 +372,14 @@ async def _attempt_all(
     prompt: str,
     charter: str,
     enforce: bool,
+    gate: BackendGate,
+    throttle: ThrottleReport,
 ) -> tuple[Accumulated, LaneHandle]:
-    """Transient retries on the outside, schema retries on the inside."""
+    """Transient retries on the outside, schema retries on the inside.
+
+    The outer loop defers to the backend's shared gate rather than backing off
+    on its own, so concurrent lanes do not each rediscover the same rate limit.
+    """
     acc = Accumulated()
     schema_problems: tuple[str, ...] = ()
     current_prompt = prompt
@@ -390,8 +432,13 @@ async def _attempt_all(
         run_failed = acc.result is None or acc.result.is_error
         if not (acc.saw_transient and run_failed):
             break
-        if transient_attempt < MAX_TRANSIENT_RETRIES and acc.saw_transient:
-            await anyio.sleep(TRANSIENT_BACKOFF_S[min(transient_attempt, len(TRANSIENT_BACKOFF_S) - 1)])
+        if acc.saw_transient:
+            if transient_attempt >= MAX_TRANSIENT_RETRIES - 1:
+                # Hit the backstop rather than the budget; still a giving-up.
+                throttle.gave_up = True
+                break
+            if not await gate.back_off(transient_attempt, throttle):
+                break
             current_prompt = prompt
             continue
         break
@@ -399,9 +446,13 @@ async def _attempt_all(
     if acc.saw_transient and (acc.result is None or acc.result.is_error):
         return acc, failure_handle(
             HandleStatus.BACKEND_UNAVAILABLE,
-            headline="後端持續不可用（速率限制或伺服器錯誤）",
+            headline=(
+                f"後端持續限流，等待 {throttle.waited_s:.0f}s 後放棄"
+                if throttle.waited_s else "後端不可用（速率限制或伺服器錯誤）"
+            ),
             detail=f"observed statuses: {sorted(set(acc.retry_statuses))}",
-            suggest="稍後重試，或改用其他 backend profile",
+            suggest="稍後重試，改用其他 backend profile，或調高 retry budget",
+            metrics={"throttle_waited_s": round(throttle.waited_s, 1)},
         )
     return acc, failure_handle(
         HandleStatus.SCHEMA_VIOLATION,

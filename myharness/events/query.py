@@ -24,6 +24,9 @@ from myharness.events.types import (
     PROXY_ROUTE,
     STATUS_DUPLICATE,
     STATUS_OK,
+    THROTTLE_COOLDOWN,
+    THROTTLE_GAVE_UP,
+    THROTTLE_WAIT,
     Event,
 )
 
@@ -70,6 +73,24 @@ def tokens_by_lane(events: Iterable[Event]) -> dict[str, dict[str, int]]:
 
 def total_cost_usd(events: Iterable[Event]) -> float:
     return sum(float(e.get("usd") or 0.0) for e in events)
+
+
+def throttle_seconds(events: Iterable[Event]) -> float:
+    """Total wall-clock a job spent waiting on rate limits.
+
+    Without this, throttling delay is indistinguishable from the model simply
+    being slow -- and the two call for completely different responses.
+    """
+    return round(
+        sum(float(e.get("seconds") or 0.0) for e in of_type(events, THROTTLE_WAIT)), 3
+    )
+
+
+def throttled_backends(events: Iterable[Event]) -> dict[str, float]:
+    per: dict[str, float] = defaultdict(float)
+    for e in of_type(events, THROTTLE_WAIT):
+        per[str(e.get("backend") or "(unknown)")] += float(e.get("seconds") or 0.0)
+    return {k: round(v, 3) for k, v in per.items()}
 
 
 def failures(events: Iterable[Event]) -> Sequence[Event]:
@@ -125,6 +146,19 @@ def derive_caveats(events: Sequence[Event]) -> Sequence[Caveat]:
                 )
             )
 
+    for e in of_type(events, THROTTLE_GAVE_UP):
+        caveats.append(
+            Caveat(
+                kind="rate_limited",
+                detail=(
+                    f"backend {e.get('backend')} 持續限流，等待 "
+                    f"{float(e.get('waited_s') or 0):.0f}s 後放棄"
+                ),
+                context={"backend": e.get("backend"), "lane": e.get("lane"),
+                         "waited_s": e.get("waited_s")},
+            )
+        )
+
     answered = {e.get("qid") for e in of_type(events, ASK_ANSWER)}
     for e in of_type(events, ASK_USER):
         qid = e.get("qid")
@@ -170,6 +204,7 @@ class JobSummary:
     total_usd: float
     context_peak: int
     cost_by_lane: dict[str, float]
+    throttle_seconds: float
     caveats: Sequence[Caveat]
 
 
@@ -183,5 +218,6 @@ def summarize(events: Sequence[Event]) -> JobSummary:
         total_usd=round(total_cost_usd(events), 6),
         context_peak=context_peak(events),
         cost_by_lane=cost_by_lane(events),
+        throttle_seconds=throttle_seconds(events),
         caveats=derive_caveats(events),
     )

@@ -84,6 +84,40 @@ def _register_test_backends():
     registry.register(DEGRADED)
 
 
+class FakeClock:
+    """Virtual time: sleeping advances the clock instead of the wall.
+
+    The gate mixes sleeps with a monotonic clock, so a no-op sleep would leave
+    ``wait_for_clearance`` spinning forever. Both have to move together.
+    """
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    async def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+
+@pytest.fixture(autouse=True)
+def fast_gates(monkeypatch):
+    """Give every test a fresh, instant, deterministic backend gate."""
+    import random as _random
+
+    from myharness.backends import gate as gate_module
+
+    clock = FakeClock()
+    fresh = gate_module.GateRegistry(
+        retry_budget_s=60.0, clock=clock, sleep=clock.sleep, rng=_random.Random(0)
+    )
+    monkeypatch.setattr(gate_module, "gates", fresh)
+    monkeypatch.setattr("myharness.lanes.worker.gates", fresh)
+    fresh.clock = clock
+    return fresh
+
+
 # --- bench ----------------------------------------------------------------
 
 

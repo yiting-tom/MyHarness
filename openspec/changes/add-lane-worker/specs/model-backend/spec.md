@@ -61,3 +61,51 @@ Backend profile SHALL 宣告其支援的能力，至少涵蓋結構化輸出、p
 #### Scenario: 未映射的別名明確失敗
 - **WHEN** lane type 使用一個該 backend 未映射的別名
 - **THEN** 系統 SHALL 在執行前失敗，並列出該 backend 可用的別名
+
+### Requirement: 每個後端共享的節流閘
+同一個 backend 上的所有 worker SHALL 通過一個共享的節流閘，而非各自獨立重試。
+當任一 worker 觀察到速率限制時，該 backend 進入冷卻，**所有**後續要求該 backend 的
+worker SHALL 等待冷卻結束，而不是各自去撞一次才發現。節流閘 SHALL 同時限制該
+backend 的並行請求數。
+
+#### Scenario: 一個 worker 觸發的冷卻對所有 worker 生效
+- **WHEN** 某個 worker 在 backend A 上遇到速率限制而進入冷卻
+- **AND** 另一個 worker 隨後要在 backend A 上執行
+- **THEN** 後者 SHALL 先等待冷卻結束才送出請求
+
+#### Scenario: 不同後端的冷卻互不影響
+- **WHEN** backend A 進入冷卻
+- **THEN** 使用 backend B 的 worker SHALL 不受影響
+
+#### Scenario: 並行請求數受限
+- **WHEN** 同時有超過設定上限的 worker 要在同一個 backend 上執行
+- **THEN** 超出的部分 SHALL 排隊等待，而非同時送出
+
+### Requirement: 重試以時間預算為界，且帶隨機抖動
+Transient 重試 SHALL 由一個明確的時間預算界定，而非僅由次數界定 ——
+速率限制的恢復時間以分鐘計，固定次數的短退避只會在還沒恢復時就放棄。
+退避 SHALL 為指數成長並加入隨機抖動，使同時被拒絕的多個 worker 不會同步重試。
+
+#### Scenario: 短暫限流在時間預算內恢復
+- **WHEN** 後端短暫回速率限制，並在時間預算內恢復
+- **THEN** worker SHALL 成功完成，且呼叫端不感知該次等待
+
+#### Scenario: 超過時間預算後成為失敗值
+- **WHEN** 速率限制持續超過設定的時間預算
+- **THEN** worker SHALL 回傳表示後端不可用的 handle，並註明已等待的時間
+
+#### Scenario: 退避帶抖動
+- **WHEN** 連續計算多次退避時間
+- **THEN** 相同重試次數下的等待時間 SHALL NOT 完全相同
+
+### Requirement: 節流事件寫入事件流
+進入冷卻、等待冷卻、以及因限流而放棄，SHALL 各自寫入事件，使「這個 job 有多少時間
+花在等待限流」可被事後量化。若沒有這些事件，限流造成的延遲會被誤認為模型很慢。
+
+#### Scenario: 冷卻被記錄
+- **WHEN** 某個 backend 因速率限制進入冷卻
+- **THEN** 事件流中出現一筆節流事件，含 backend 名稱、觸發原因與冷卻長度
+
+#### Scenario: 等待時間可被加總
+- **WHEN** 查詢一個 job 的節流事件
+- **THEN** 可得出該 job 因限流而等待的總時間

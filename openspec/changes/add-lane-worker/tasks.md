@@ -70,6 +70,16 @@
 - [ ] 8.6 **Live**：以 OpenRouter 的非 Anthropic 模型執行一次，驗證 handle 契約仍成立
 - [ ] 8.7 量測並記錄：裁切前後的固定 prefix token 數、prompt cache 命中率、單次執行成本，寫入 `spikes/RESULTS.md`
 
+## 10. 後端節流（live 測試發現：付費模型仍持續 429）
+
+- [x] 10.1 定義 `BackendGate`：per-backend 的並行 semaphore + 共享冷卻狀態（規格：每個後端共享的節流閘）
+- [x] 10.2 實作冷卻的取得與設定，含「不同後端互不影響」（規格：不同後端的冷卻互不影響）
+- [x] 10.3 實作帶 full jitter 的指數退避與時間預算（規格：重試以時間預算為界，且帶隨機抖動）
+- [x] 10.4 以 `CLAUDE_CODE_MAX_RETRIES` 壓低 SDK 內建重試，讓節流政策由 gate 單一掌控
+- [x] 10.5 將 gate 接入 `run_lane_worker`，取代目前的固定次數退避
+- [x] 10.6 新增 `throttle.cooldown` / `throttle.wait` / `throttle.gave_up` 事件型別與聚合（規格：節流事件寫入事件流）
+- [x] 10.7 測試：覆蓋節流閘與退避的全部 8 個 scenario，含冷卻跨 worker 生效與抖動
+
 ## 9. 收尾
 
 - [ ] 9.1 全套離線測試通過並記錄覆蓋率；live 測試至少完整跑過一次並記錄結果與費用

@@ -18,6 +18,10 @@ from enum import StrEnum
 from typing import Final
 
 
+#: How many times the CLI may retry internally before our gate takes over.
+SDK_INTERNAL_RETRIES: Final = 2
+
+
 class BackendCapability(StrEnum):
     """What a backend can enforce for us, as opposed to merely ask for."""
 
@@ -107,6 +111,10 @@ class BackendProfile:
             # stale key in the developer's shell would silently authenticate the
             # wrong way against a custom endpoint. Blank it for this subprocess.
             env["ANTHROPIC_API_KEY"] = ""
+        # The CLI retries 429s ten times on its own, reaching ~39s delays and
+        # burning minutes inside a single call where the harness can neither see
+        # nor coordinate it. Cap it low so the shared BackendGate owns the policy.
+        env.setdefault("CLAUDE_CODE_MAX_RETRIES", str(SDK_INTERNAL_RETRIES))
         token = self.credential()
         if token:
             env["ANTHROPIC_AUTH_TOKEN"] = token

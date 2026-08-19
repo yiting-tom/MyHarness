@@ -194,9 +194,8 @@ async def test_partial_finding_is_referenced_on_failure(bench):
 # --- transient handling ---------------------------------------------------
 
 
-async def test_rate_limit_is_retried_then_succeeds(bench, monkeypatch):
-    """Scenario: 速率限制被靜默重試"""
-    monkeypatch.setattr("myharness.lanes.worker.TRANSIENT_BACKOFF_S", (0.0, 0.0))
+async def test_rate_limit_is_retried_then_succeeds(bench):
+    """Scenario: 短暫限流在時間預算內恢復"""
     transport = ScriptedTransport(
         [api_retry(429), RuntimeError("gave up")],
         [result(structured=GOOD_HANDLE)],
@@ -206,13 +205,13 @@ async def test_rate_limit_is_retried_then_succeeds(bench, monkeypatch):
     assert transport.call_count == 2
 
 
-async def test_persistent_rate_limit_becomes_a_value(bench, monkeypatch):
-    """Scenario: 重試耗盡後成為失敗值"""
-    monkeypatch.setattr("myharness.lanes.worker.TRANSIENT_BACKOFF_S", (0.0, 0.0))
-    transport = ScriptedTransport(*[[api_retry(429), RuntimeError("429")] for _ in range(6)])
+async def test_persistent_rate_limit_becomes_a_value(bench, fast_gates):
+    """Scenario: 超過時間預算後成為失敗值"""
+    transport = ScriptedTransport(*[[api_retry(429), RuntimeError("429")] for _ in range(20)])
     handle = await run(bench, transport)
     assert handle.status is HandleStatus.BACKEND_UNAVAILABLE
     assert "429" in (handle.detail or "")
+    assert handle.metrics.get("throttle_waited_s", 0) > 0, "the wait must be reported"
 
 
 async def test_semantic_failure_is_not_retried(bench):
@@ -318,24 +317,25 @@ async def test_null_usage_fields_do_not_crash_the_run(bench):
     assert end.get("tokens") == {"in": 0, "out": 0}
 
 
-async def test_rate_limited_run_is_not_mistaken_for_a_bad_handle(bench, monkeypatch):
+async def test_rate_limited_run_is_not_mistaken_for_a_bad_handle(bench):
     """A 429 that ends without raising must not burn the schema retries.
 
     The CLI exhausts its own retries, then returns is_error=True with the error
     text as the assistant's reply. Treating that as malformed output and
     re-prompting triples the load on a backend already refusing us.
     """
-    monkeypatch.setattr("myharness.lanes.worker.TRANSIENT_BACKOFF_S", (0.0, 0.0))
     rate_limited = [
         api_retry(429),
         assistant("API Error: Request rejected (429) · Provider returned error"),
         result(is_error=True),
     ]
-    transport = ScriptedTransport(*[list(rate_limited) for _ in range(6)])
+    transport = ScriptedTransport(*[list(rate_limited) for _ in range(20)])
     handle = await run(bench, transport)
 
     assert handle.status is HandleStatus.BACKEND_UNAVAILABLE
-    assert transport.call_count <= 3, "transient retries only, no schema re-prompts"
+    assert not any("not a valid handle" in p for p, _ in transport.calls), (
+        "a rate limit must not burn schema re-prompts"
+    )
 
 
 async def test_errored_result_without_transient_signal_is_not_a_schema_violation(bench):
