@@ -92,10 +92,8 @@ cost                usd / dispatches / throttle_s
 
 ## 已知缺口
 
-**沒有對外的 MCP server。** orchestrator 目前只能從 Python 進入點驅動
-（`myharness.goldens`、`myharness.lanes.driver`），沒有 `analysis_start` /
-`analysis_poll` / `analysis_result`。`JobRunner.status()`、`QueueChannel`、
-`Delivery` 都是為那一層準備的。
+**Proxy 尚未實作。** `analysis_provide` 會落 blob 並通知 orchestrator，
+但不會用 LLM 判斷資料該給哪條 lane（DESIGN #4），回應以 `routed: false` 明講。
 
 **`artifact.read` 事件尚未發出**，所以資料流圖的讀取邊是空的
 （`read_edges_available=False`，不以授權冒充）。

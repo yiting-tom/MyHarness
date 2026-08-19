@@ -384,5 +384,6 @@ blob 與 note 分屬兩棵子樹，因為兩者的存取規則完全不同（見
   （`<job_id>/<kind>/<name>`）以便日後開放。
 - **非表格 blob**：`duckdb_query` 讀 CSV / Parquet / JSON。純文字與日誌目前只能
   `localize_blob`，沒有 `grep_blob`。等到真的有這種 job 再決定它的輸出上限長什麼樣。
-- **對外的 MCP server**：DESIGN #1/#9/#14 的那一層仍未建。這是目前唯一擋著
-  「能不能直接使用」的東西。
+- **Proxy（DESIGN #4）**：`analysis_provide` 會落 blob 並通知 orchestrator，
+  但不會用 LLM 判斷該路由到哪條 lane。回應以 `routed: false` 明講。
+  routing table 契約與其失敗語意都還沒設計。
