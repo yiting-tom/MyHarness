@@ -62,8 +62,8 @@
 - [x] 7.2 `README.md` 加上 Claude Code 的連接方式（`claude mcp add`）
 - [x] 7.3 `DESIGN.md` §9 移除「對外的 MCP server 未建」
 - [x] 7.4 端到端（離線、假 backend）：start → poll → answer → result → drill
-- [ ] 7.5 live：從真實 MCP client 跑一次小 job，記錄到 `spikes/RESULTS.md`
-      （`spikes/spike11_mcp_client.py`，執行中）
+- [x] 7.5 live：從真實 MCP client 跑一次小 job，記錄到 `spikes/RESULTS.md`
+      （`spikes/spike11_mcp_client.py`：5/5 通過，494s、$0.1008）
 
 ## 8. 過程中發現、不在原計畫的
 
@@ -73,3 +73,5 @@
       而問題會在答案排隊時逾時。測試證明 MCP server 併發處理
 - [x] 8.3 MCP 協定會**驗證 schema**，handler 根本不會被呼叫 ——
       所以 `required` 清單是有作用的，不是文件
+- [x] 8.4 orchestrator 的 kickoff 沒有列出 job 裡已有的資料 —— live 跑的時候
+      花了兩個問題問一個 harness 早就知道的 artifact id。改成從 store 列出

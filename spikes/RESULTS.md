@@ -571,3 +571,62 @@ Lane 用 `duckdb_query` 算出來的每一個數字，都與直接對 CSV 下 SQ
    其中 q1 問「lane 一直 timeout，blob 路徑對嗎？」—— 第一次 `duckdb_query`
    呼叫確實比較慢（要 ingest 138KB），orchestrator 把它讀成故障。
    這不是 bug，但值得記著：第一次查詢的延遲會被誤讀。
+
+---
+
+## Spike #11 — 真實 MCP client 驅動真實 server
+
+`spikes/spike11_mcp_client.py`。前面所有測試都在 process 內；這個 spike 問的是
+in-process 測試問不到的那件事：**客戶端把 `myharness-mcp` 當子程序 spawn、
+用 stdio 講話時，整條鏈會不會動？**——也就是 Claude Code 實際的用法。
+
+40 列 CSV、一個數得出來的問題，所以帳單是分錢等級、答案可以核對。
+
+```
+tools: [analysis_answer, analysis_drill, analysis_poll,
+        analysis_provide, analysis_result, analysis_start]
+
+start   → {job_id: job7ab30092db, state: running, revision: 0}
+provide → {artifact: .../blob/raw/txn.csv, bytes: 1472,
+           routed: false, announced: true}
+
+[  30.5s] running   rev=3   ingress
+[ 121.7s] running   rev=4   plan.update
+[ 146.7s] running   rev=5   ask.user  → 客戶端回答 → rev=7 ask.answer
+[ 179.8s] running   rev=8   dispatch.start d1 → ta1
+[ 299.5s] running   rev=10  dispatch.start d2 → syn1   $0.0523
+[ 453.0s] running   rev=11  dispatch.end   d2 ok: 7 distinct accounts
+[ 493.9s] finished  rev=13  job.finish
+
+result: 659 chars, 4 sections, 219 section tokens
+  摘要 34 / 方法 69 / 發現 26 / 限制 90
+drill '摘要': 28 chars, truncated=false
+```
+
+**5/5 檢查通過**：報告含算出來的帳戶數（7，`A{i%7}` 共 7 個，正確）、
+result payload 659 字元（遠在 4,000 以內）、原始列沒有回流、章節都有標價、
+drill 回得出內容。總計 494 秒、$0.1008。
+
+### 這個 spike 抓到的三件事
+
+1. **SDK 子程序的警告走 stderr，不會汙染 stdio 的 JSON-RPC。**
+   `⚠ claude.ai connectors are disabled` 與 `[claude-code:unrecognized_model]`
+   都在 stderr。如果它們走 stdout，MCP 協定會直接壞掉 —— 這是最容易踩到、
+   而且症狀最難懂的一種失敗。
+
+2. **`ClientSession` 的 `read_timeout_seconds` 預設是 `None`。**
+   所以 `analysis_poll(wait=30)` 不會撞到客戶端逾時。
+   這回答了 DESIGN §8 Q5（先前只驗證過 SDK in-process tool 阻塞 180s/600s，
+   那不是真的 MCP client session）。
+
+3. **Orchestrator 不知道 job 裡已經有什麼資料。**
+   第一次跑，它花了**兩個問題**問一個 harness 早就知道的 artifact id
+   （「Please provide the artifact ID for the transaction data」，
+   重新規劃後又問一次）。
+
+   `run_golden` 把 id 寫進 goal 字串所以看不出來；客戶端做不到 ——
+   它先 `analysis_start` 再 `analysis_provide`，orchestrator 讀到 goal 的當下，
+   裡面根本沒有 id 可以指。
+
+   修法：kickoff 直接從 store 列出這個 job 的 blob（id、大小、宣告的欄位），
+   不管事情發生的順序如何都正確。修完之後同樣的 job 只問了一個問題就開始派工。
