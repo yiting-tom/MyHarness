@@ -109,6 +109,9 @@ async def test_wrap_up_notice_reaches_the_orchestrator(bench):
 # --- Requirement: Peek 有 job 級的總預算 ----------------------------------
 
 
+SECTIONED_REPORT = "## 摘要\n夜間高頻是主因。\n\n## 方法\nduckdb 全表掃描。\n"
+
+
 async def _write_note(bench, name: str, text: str) -> str:
     meta = await bench.store.put_note(JOB, name, text, produced_by="lane:txn")
     return str(meta.id)
@@ -164,7 +167,7 @@ async def test_exhausted_peek_does_not_disable_the_job(bench):
     collected = payload(await bench.h["await_tasks"]({"task_ids": [dispatched["task_id"]]}))
     assert collected["handles"]
 
-    report = await _write_note(bench, "report", "# 報告\n完成。")
+    report = await _write_note(bench, "report", SECTIONED_REPORT)
     assert payload(await bench.h["finish"]({"report_artifact": report}))["status"] == "complete"
 
 
@@ -205,7 +208,7 @@ async def test_finish_requires_a_real_report(bench):
 
 
 async def test_finish_records_the_report(bench):
-    report = await _write_note(bench, "report", "# 報告\n結論如下。")
+    report = await _write_note(bench, "report", SECTIONED_REPORT)
     body = payload(await bench.h["finish"]({"report_artifact": report}))
     assert body["status"] == "complete"
     assert bench.runner.state.report_artifact == report
@@ -219,3 +222,71 @@ async def test_ask_user_returns_the_default_without_a_channel(bench):
     body = payload(await bench.h["ask_user"]({"question": "要納入 2023 嗎？", "default": "否"}))
     assert body["answer"] == "否" and body["defaulted"] is True
     assert body["questions_remaining"] == bench.runner.spec.question_quota - 1
+
+
+async def test_finish_rejects_a_finding_masquerading_as_a_report(bench):
+    """The golden job pointed finish at an analyst's raw finding.
+
+    The delivery is a summary plus a priced section menu; a note with no
+    sections cannot produce one, so it is not a report whatever it is called.
+    """
+    finding = await _write_note(bench, "lanes/txn/findings/1",
+                                "Attempted to access the blob. No data retrieved.")
+    body = payload(await bench.h["finish"]({"report_artifact": finding}))
+    assert body["error"] == "report_has_no_sections"
+    assert body["produced_by"]
+    assert "synthesis" in body["hint"]
+    assert not bench.tools.finished
+
+
+# --- inputs are the authorisation ----------------------------------------
+
+
+async def test_dispatch_accepts_plain_artifact_id_strings(bench):
+    await bench.declare("txn")
+    blob = await bench.store.put_blob(JOB, "raw/data", data=b"x", produced_by="user")
+    body = payload(await bench.h["dispatch"]({
+        "lane": "txn", "task": "分析", "inputs": [str(blob.id)]}))
+    assert body["status"] == "running"
+
+
+async def test_dispatch_unwraps_the_object_shape_a_model_reaches_for(bench):
+    """The golden job sent [{"blob_path": "..."}]; the intent is unambiguous."""
+    await bench.declare("txn")
+    blob = await bench.store.put_blob(JOB, "raw/data", data=b"x", produced_by="user")
+    body = payload(await bench.h["dispatch"]({
+        "lane": "txn", "task": "分析", "inputs": [{"blob_path": str(blob.id)}]}))
+    assert body["status"] == "running"
+
+    await bench.runner.settle()
+    record = bench.runner.state.tasks[body["task_id"]]
+    assert record.inputs == (str(blob.id),), "the grant must be the real id"
+
+
+async def test_dispatch_refuses_an_unusable_grant_instead_of_mangling_it(bench):
+    """str() on a dict produced a grant nothing could match, and the failure
+    surfaced two lanes later as an inscrutable not_granted."""
+    await bench.declare("txn")
+    body = payload(await bench.h["dispatch"]({
+        "lane": "txn", "task": "分析", "inputs": [{"nonsense": 1}, "not-an-id"]}))
+    assert body["error"] == "bad_inputs"
+    assert len(body["rejected"]) == 2
+    assert body["accepted"] == []
+    assert bench.fake.calls == [], "nothing may run on a broken grant"
+
+
+async def test_dispatch_tool_says_inputs_are_the_authorisation(bench):
+    """The grant model is invisible unless the tool description states it."""
+    from myharness.orchestrator.tools import OrchestratorTools
+
+    server = bench.tools.build_server()
+    descriptions = {
+        t.name: t.description for t in server["instance"]._tools
+    } if hasattr(server.get("instance", None), "_tools") else {}
+    # Fall back to the source of truth if the SDK shape differs.
+    import inspect
+
+    from myharness.orchestrator import tools as tools_module
+
+    source = inspect.getsource(tools_module)
+    assert "inputs` is the lane's ONLY authorisation" in source

@@ -46,6 +46,38 @@ def _err(code: str, message: str, **extra: Any) -> dict[str, Any]:
     return _ok({"error": code, "message": message, **extra})
 
 
+def _as_artifact_ids(raw: Any) -> tuple[list[str], list[Any]]:
+    """Coerce whatever the model offered into artifact ids, and say what failed.
+
+    The golden job passed ``[{"blob_path": "..."}]``; ``str()`` turned that into
+    a string no grant could ever match, the dispatch was accepted, and the
+    failure surfaced two lanes later as an inscrutable not_granted. Be liberal
+    about the shape — the intent is unambiguous — but never invent an id.
+    """
+    ids: list[str] = []
+    rejected: list[Any] = []
+    for entry in raw or []:
+        candidate = entry
+        if isinstance(entry, dict):
+            for key in ("id", "artifact", "artifact_id", "blob", "blob_path", "note", "path"):
+                if key in entry:
+                    candidate = entry[key]
+                    break
+            else:
+                rejected.append(entry)
+                continue
+        if not isinstance(candidate, str):
+            rejected.append(entry)
+            continue
+        try:
+            ArtifactId.parse(candidate.strip())
+        except ValueError:
+            rejected.append(entry)
+            continue
+        ids.append(candidate.strip())
+    return ids, rejected
+
+
 @dataclass
 class OrchestratorTools:
     """The six tools, bound to one job."""
@@ -105,7 +137,12 @@ class OrchestratorTools:
             "dispatch",
             "Give a lane a task. Returns immediately with a task id — collect it "
             "with await_tasks. Issue several dispatches before collecting so the "
-            "lanes run in parallel.",
+            "lanes run in parallel.\n\n"
+            "IMPORTANT: `inputs` is the lane's ONLY authorisation. It is a list of "
+            "plain artifact id STRINGS such as "
+            "[\"job/blob/raw/data\", \"job/note/lanes/x/findings/1\"]. "
+            "A lane can read nothing you do not list here — mentioning an "
+            "artifact in the task text grants nothing.",
             {"lane": str, "task": str, "inputs": list},
             annotations=mutating,
         )
@@ -114,7 +151,17 @@ class OrchestratorTools:
             task = str(args.get("task", "")).strip()
             if not lane or not task:
                 return _err("bad_request", "lane and task are required")
-            inputs = [str(i) for i in (args.get("inputs") or [])]
+
+            inputs, rejected = _as_artifact_ids(args.get("inputs"))
+            if rejected:
+                # Refuse now: an unusable grant becomes a baffling permission
+                # error inside a worker several steps later.
+                return _err(
+                    "bad_inputs",
+                    "inputs 必須是 artifact id 字串，例如 "
+                    "['job/blob/raw/data']。以下項目無法解析：",
+                    rejected=[str(r)[:120] for r in rejected], accepted=inputs,
+                )
             result = await self.runner.dispatch(lane, task, inputs)
             payload = result.to_dict()
             if notice := self.runner.wrap_up_notice():
@@ -231,10 +278,23 @@ class OrchestratorTools:
             except ValueError as exc:
                 return _err("bad_artifact_id", str(exc))
             try:
-                await self.runner.store.stat(aid, grants=GrantSet.unrestricted(self.job_id))
+                meta = await self.runner.store.stat(
+                    aid, grants=GrantSet.unrestricted(self.job_id)
+                )
             except ArtifactError as exc:
                 return _err("no_such_report", exc.message,
                             hint="先派一條 synthesis lane 寫出報告，再呼叫 finish")
+            if not meta.sections:
+                # The delivery is a summary plus a priced section menu; a report
+                # with no sections cannot produce one. The golden job pointed
+                # finish at an analyst's raw finding and this is what caught it.
+                return _err(
+                    "report_has_no_sections",
+                    f"{aid} 沒有 ## 分節，無法產生章節目錄。這看起來是一份 "
+                    "finding 而不是報告。",
+                    produced_by=meta.produced_by,
+                    hint="派一條 synthesis lane 讀取相關 finding 並寫出分節報告",
+                )
 
             self.runner.state.report_artifact = str(aid)
             self.runner.state.phase = JobPhase.COMPLETE
