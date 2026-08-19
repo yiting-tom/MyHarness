@@ -29,6 +29,55 @@ from myharness.lanes.types import LaneInstance
 
 SERVER_NAME = "lane"
 
+# The SDK's shorthand schema ({"a": str}) marks every property required and
+# gives a bare `list` no item type. Both matter here: a required `into` would
+# make the model supply a name on every read-only query, and untyped items are
+# how {"blob_path": ...} got through in the fourth golden run. A full JSON
+# Schema is passed through untouched, so these say exactly what they mean.
+_QUERY_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "artifacts": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Artifact ids of the blobs to query, e.g. "
+                           "['job/blob/raw/txns']. Not file paths.",
+        },
+        "sql": {
+            "type": "string",
+            "description": "One SELECT statement. Use CTEs for multiple steps.",
+        },
+        "into": {
+            "type": "string",
+            "description": "Optional. A short name; the full result is written "
+                           "to a new blob under this lane instead of being "
+                           "returned. Use it for anything large.",
+        },
+    },
+    "required": ["artifacts", "sql"],
+}
+
+_INSPECT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "artifact": {"type": "string", "description": "Artifact id of a data blob."},
+    },
+    "required": ["artifact"],
+}
+
+_READ_NOTE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "artifact": {"type": "string", "description": "Artifact id of the note."},
+        "section": {
+            "type": "string",
+            "description": "Optional. A single '##' section to read instead of "
+                           "the whole note.",
+        },
+    },
+    "required": ["artifact"],
+}
+
 #: Used when a lane type declares no tools of its own.
 DEFAULT_TOOLS: tuple[str, ...] = (
     "read_note", "write_finding", "update_state",
@@ -111,7 +160,7 @@ class WorkerToolbox:
         @tool(
             "read_note",
             "Read an analysis note you are allowed to see. Blobs are not readable this way.",
-            {"artifact": str, "section": str},
+            _READ_NOTE_SCHEMA,
             annotations=read_only,
         )
         async def read_note(args):
@@ -217,7 +266,7 @@ class WorkerToolbox:
             "inspect_blob",
             "See a data blob's columns, types, row count and first few rows. "
             "Do this before writing SQL -- guessing column names wastes a turn.",
-            {"artifact": str},
+            _INSPECT_SCHEMA,
             annotations=serial,
         )
         async def inspect_blob(args):
@@ -237,7 +286,7 @@ class WorkerToolbox:
             "artifact is the only way to reach data. Results are truncated to "
             "fit; for a full result set pass `into` and it becomes a new blob "
             "you can query later instead of flooding your context.",
-            {"artifacts": list, "sql": str, "into": str},
+            _QUERY_SCHEMA,
             annotations=serial,
         )
         async def duckdb_query(args):

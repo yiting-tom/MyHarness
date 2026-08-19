@@ -369,3 +369,48 @@ class TestLocalizeAgainstADeletingBackend:
         out = await call(toolbox, "duckdb_query", artifacts=[str(blob.id)],
                          sql="SELECT sum(x) AS s FROM a_csv")
         assert "1" in out and not out.startswith("ERROR"), out
+
+
+class TestToolSchemas:
+    """The SDK's shorthand marks every property required and types no items.
+
+    Both defaults are wrong here, and neither fails loudly: a required `into`
+    just makes the model invent a name on every read-only query, and untyped
+    array items are how {"blob_path": ...} reached dispatch in the fourth
+    golden run. Pinned because the shorthand is the tempting thing to write.
+    """
+
+    def test_into_is_optional(self):
+        from myharness.lanes.tools import _QUERY_SCHEMA
+
+        assert "into" in _QUERY_SCHEMA["properties"]
+        assert "into" not in _QUERY_SCHEMA["required"]
+
+    def test_artifacts_and_sql_are_required(self):
+        from myharness.lanes.tools import _QUERY_SCHEMA
+
+        assert set(_QUERY_SCHEMA["required"]) == {"artifacts", "sql"}
+
+    def test_artifacts_items_are_typed_as_strings(self):
+        from myharness.lanes.tools import _QUERY_SCHEMA
+
+        assert _QUERY_SCHEMA["properties"]["artifacts"]["items"] == {"type": "string"}
+
+    def test_read_note_section_is_optional(self):
+        """It always was in the code; the schema said otherwise."""
+        from myharness.lanes.tools import _READ_NOTE_SCHEMA
+
+        assert _READ_NOTE_SCHEMA["required"] == ["artifact"]
+
+    def test_the_sdk_passes_a_full_schema_through_untouched(self):
+        """If it ever stops doing that, these schemas silently stop applying."""
+        from claude_agent_sdk import create_sdk_mcp_server, tool
+
+        from myharness.lanes.tools import _QUERY_SCHEMA
+
+        @tool("probe", "d", _QUERY_SCHEMA)
+        async def probe(args):  # pragma: no cover - never called
+            return {"content": []}
+
+        assert probe.input_schema is _QUERY_SCHEMA
+        create_sdk_mcp_server(name="probe", version="1", tools=[probe])
