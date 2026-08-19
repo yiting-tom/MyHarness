@@ -58,8 +58,18 @@
 
 ## 7. 文件與端到端
 
-- [ ] 7.1 `myharness/mcp/README.md`：六個工具、上限、跨 process 性質、未做的 proxy
-- [ ] 7.2 `README.md` 加上 Claude Code 的連接方式（`claude mcp add`）
-- [ ] 7.3 `DESIGN.md` §9 移除「對外的 MCP server 未建」
-- [ ] 7.4 端到端（離線、假 backend）：start → poll → answer → result → drill
+- [x] 7.1 `myharness/mcp/README.md`：六個工具、上限、跨 process 性質、未做的 proxy
+- [x] 7.2 `README.md` 加上 Claude Code 的連接方式（`claude mcp add`）
+- [x] 7.3 `DESIGN.md` §9 移除「對外的 MCP server 未建」
+- [x] 7.4 端到端（離線、假 backend）：start → poll → answer → result → drill
 - [ ] 7.5 live：從真實 MCP client 跑一次小 job，記錄到 `spikes/RESULTS.md`
+      （`spikes/spike11_mcp_client.py`，執行中）
+
+## 8. 過程中發現、不在原計畫的
+
+- [x] 8.1 `analysis_provide` 宣稱「已通知 orchestrator」但**沒有** —— 寫事件不等於
+      通知，orchestrator 不讀事件流。加 notice queue，loop 優先於 nudge 取用
+- [x] 8.2 long-poll 期間其他工具呼叫不能被擋住 —— 否則 client 沒辦法在等待時回答問題，
+      而問題會在答案排隊時逾時。測試證明 MCP server 併發處理
+- [x] 8.3 MCP 協定會**驗證 schema**，handler 根本不會被呼叫 ——
+      所以 `required` 清單是有作用的，不是文件

@@ -193,3 +193,36 @@ def test_the_shipped_analyst_can_actually_query_data():
     """The whole point of the previous change; easy to lose in a tool list."""
     tools = default_lanes(Path("charters")).get_type("tabular-analyst").tools
     assert "duckdb_query" in tools and "inspect_blob" in tools
+
+
+async def test_a_long_poll_does_not_block_other_calls(tmp_path: Path):
+    """If it did, a client could not answer a question while waiting for one.
+
+    The long-poll is the whole interaction model here -- a client is expected to
+    sit in a 30-second wait most of the time. A server that serialises requests
+    would make analysis_answer unreachable exactly when it is needed, and the
+    job would time the question out while the answer sat in a queue.
+    """
+    async with connected(tmp_path) as session:
+        started = payload_of(await session.call_tool("analysis_start", {"task": "t"}))
+        job_id = started["job_id"]
+
+        blocked = asyncio.create_task(
+            session.call_tool("analysis_poll", {"job_id": job_id, "wait": 20.0})
+        )
+        await asyncio.sleep(0.2)
+        assert not blocked.done(), "the poll returned instead of waiting"
+
+        # A different call must get through while that one is parked.
+        other = payload_of(
+            await asyncio.wait_for(
+                session.call_tool("analysis_provide",
+                                  {"job_id": job_id, "payload": "a\n1\n"}),
+                timeout=5.0,
+            )
+        )
+        assert other["ok"], other
+
+        # And the parked poll wakes on the change that call produced.
+        woken = payload_of(await asyncio.wait_for(blocked, timeout=5.0))
+        assert woken["ok"]

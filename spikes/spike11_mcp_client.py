@@ -85,7 +85,12 @@ async def main() -> int:
                     print(f"    answering {q['id']}: {q['text'][:80]}")
                     await session.call_tool("analysis_answer", {
                         "job_id": job_id, "question_id": q["id"],
-                        "text": "使用提供的 txn.csv，不需要其他資料。",
+                        # A real client has the id from analysis_provide, so
+                        # give it. The first run answered without one and the
+                        # orchestrator asked twice.
+                        "text": f"資料是 {provided['artifact']}，40 列交易，"
+                                "欄位 txn_id/ts/account/amount/channel。"
+                                "不需要其他資料。",
                     })
                 if progress["state"] != "running":
                     break

@@ -86,11 +86,17 @@ RESUME_NOTICE = """\
 請從這裡繼續。
 """
 
+#: Enough for the orchestrator to plan with; the list is context it pays for.
+MAX_LISTED_BLOBS = 20
+
 KICKOFF = """\
 你負責統籌一項資料分析工作。
 
 # 目標
 {goal}
+
+# 已在這個 job 裡的資料
+{available_data}
 
 # 可用的 lane 型別
 {lane_types}
@@ -193,7 +199,11 @@ class OrchestratorLoop:
         if (await read_plan(self.runner.store, spec.job_id))[0] is None:
             await write_plan(self.runner.store, spec.job_id, initial_plan(spec.goal))
 
-        prompt = KICKOFF.format(goal=spec.goal, lane_types=self.lanes.describe_types())
+        prompt = KICKOFF.format(
+            goal=spec.goal,
+            available_data=await self._available_data(),
+            lane_types=self.lanes.describe_types(),
+        )
         reason = "finished"
 
         while True:
@@ -352,6 +362,34 @@ class OrchestratorLoop:
         # out of things to say. Stopping on silence let a job end mid-plan and
         # report success. Idle turns and the turn cap are what bound this.
         return CONTINUE_NUDGE
+
+    async def _available_data(self) -> str:
+        """The blobs already in the job, by id.
+
+        Without this the orchestrator has to be told the ids in the goal text,
+        which works when a script writes the goal and fails through the MCP
+        surface, where the client starts the job and hands over data
+        separately. The first live run spent a question asking for an id the
+        harness already knew.
+        """
+        try:
+            blobs = await self.runner.store.list(self.runner.spec.job_id, kind="blob")
+        except Exception:  # noqa: BLE001 - a missing index is not fatal here
+            return "（無法列出）"
+        if not blobs:
+            return "（尚無。使用者可能稍後提供 —— 屆時你會收到通知。）"
+        lines = []
+        for meta in list(blobs)[:MAX_LISTED_BLOBS]:
+            schema = meta.schema or {}
+            columns = schema.get("columns")
+            detail = f"，欄位 {', '.join(map(str, columns))}" if columns else ""
+            lines.append(f"- `{meta.id}`（{meta.bytes:,} bytes{detail}）")
+        if len(blobs) > MAX_LISTED_BLOBS:
+            lines.append(f"- …另有 {len(blobs) - MAX_LISTED_BLOBS} 份")
+        lines.append(
+            "把要用的 id 放進 dispatch 的 inputs —— 那是 lane 取得授權的唯一方式。"
+        )
+        return "\n".join(lines)
 
     async def _salvage(self) -> None:
         """Deliver something when the orchestrator did not finish itself.

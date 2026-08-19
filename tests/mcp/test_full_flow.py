@@ -182,3 +182,71 @@ async def test_the_client_never_receives_the_report_body_unasked(tmp_path: Path)
         )
         assert "未檢視 2023" not in seen, "a section body arrived without being asked for"
         assert len(seen) < 4_000, f"{len(seen)} chars reached the client unasked"
+
+
+class TestTheOrchestratorKnowsWhatDataExists:
+    """The first live MCP run spent a question asking for an artifact id the
+    harness already knew.
+
+    A script writing the goal can embed the id in prose -- run_golden does. A
+    client cannot: it starts the job, then hands data over separately, so by
+    the time the orchestrator reads the goal there is nothing in it to name.
+    Listing the job's blobs in the kickoff makes the ordering irrelevant.
+    """
+
+    async def _loop_for(self, tmp_path: Path, blobs: list[tuple[str, bytes, dict]]):
+        from myharness.artifacts.local import LocalArtifactStore
+        from myharness.events.log import LocalEventLog
+        from myharness.jobs.runner import JobRunner
+        from myharness.jobs.spec import JobSpec
+        from myharness.orchestrator.loop import OrchestratorLoop
+
+        store = LocalArtifactStore(tmp_path / "s")
+        await store.init_job("j")
+        for name, data, schema in blobs:
+            await store.put_blob("j", name, data=data, produced_by="client",
+                                 schema=schema or None)
+        runner = JobRunner(
+            JobSpec(job_id="j", goal="分析"), store=store,
+            event_log=LocalEventLog(tmp_path / "s"),
+        )
+        return OrchestratorLoop(runner=runner, lanes=LaneRegistry(), backend="anthropic")
+
+    async def test_blobs_are_listed_by_id(self, tmp_path: Path):
+        loop = await self._loop_for(
+            tmp_path, [("raw/txn.csv", b"a\n1\n", {"columns": ["a"]})]
+        )
+        listed = await loop._available_data()
+        assert "j/blob/raw/txn.csv" in listed
+        assert "欄位 a" in listed
+
+    async def test_the_grant_rule_is_restated_where_the_ids_are(self, tmp_path: Path):
+        """An id the orchestrator does not put in `inputs` is an id the lane
+        cannot read -- the fourth golden run lost two lanes to exactly that."""
+        loop = await self._loop_for(tmp_path, [("raw/a.csv", b"x\n", {})])
+        assert "inputs" in await loop._available_data()
+
+    async def test_an_empty_job_says_data_may_arrive_later(self, tmp_path: Path):
+        loop = await self._loop_for(tmp_path, [])
+        listed = await loop._available_data()
+        assert "尚無" in listed and "稍後" in listed
+
+    async def test_the_listing_is_bounded(self, tmp_path: Path):
+        from myharness.orchestrator.loop import MAX_LISTED_BLOBS
+
+        loop = await self._loop_for(
+            tmp_path, [(f"raw/f{i}.csv", b"x\n", {}) for i in range(50)]
+        )
+        listed = await loop._available_data()
+        assert listed.count("blob/raw/") == MAX_LISTED_BLOBS
+        assert "另有 30 份" in listed
+
+    async def test_it_reaches_the_kickoff_prompt(self, tmp_path: Path):
+        from myharness.orchestrator.loop import KICKOFF
+
+        loop = await self._loop_for(tmp_path, [("raw/txn.csv", b"a\n1\n", {})])
+        prompt = KICKOFF.format(
+            goal="分析", available_data=await loop._available_data(),
+            lane_types="(none)",
+        )
+        assert "j/blob/raw/txn.csv" in prompt
