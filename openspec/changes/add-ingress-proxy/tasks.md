@@ -13,23 +13,25 @@
 
 ## 2. 樣本
 
-- [ ] 2.1 `myharness/proxy/sample.py`：行數 + 字元數兩道閘（design D4）
+- [x] 2.1 `myharness/proxy/sample.py`：行數 + 字元數兩道閘（design D4）
 - [ ] 2.2 樣本經由 `store.localize` 取得，不自己開檔（規格：樣本經由既有的儲存介面取得）
-- [ ] 2.3 二進位內容不要當文字倒出來
-- [ ] 2.4 兩道閘各自生效的測試：很多短行、單一超長行
-- [ ] 2.5 CJK 寬度與 token 估計沿用既有函式，不重寫
+      —— `read_sample` 收 Path，呼叫端負責走 store；在 §4 接線時完成
+- [x] 2.3 二進位內容不要當文字倒出來
+- [x] 2.4 兩道閘各自生效的測試：很多短行、單一超長行
+- [x] 2.5 CJK 寬度與 token 估計沿用既有函式，不重寫
 
 ## 3. 分類器
 
-- [ ] 3.1 `myharness/proxy/classify.py`：單次、無狀態、`ModelTier.CHEAP`（design D7）
-- [ ] 3.2 prompt 只由 routing table + metadata + 樣本組成
+- [x] 3.1 `myharness/proxy/classify.py`：單次、無狀態、`ModelTier.CHEAP`（design D7）
+- [x] 3.2 prompt 只由 routing table + metadata + 樣本組成
       （規格：分類器只看得到 routing table 與有界樣本）
-- [ ] 3.3 **測試斷言 prompt 不含 plan 文字與 goal 文字**（design D3）
-- [ ] 3.4 結構化輸出 `{lane, confidence, reason}`；後端不支援時走降級路徑
-- [ ] 3.5 回傳的 lane 不在 routing table 或未開放 → 視同未路由
+- [x] 3.3 **測試斷言 prompt 不含 plan 文字與 goal 文字**（design D3）
+- [x] 3.4 輸出 `{lane, confidence, reason}`，以寬容的 JSON 解析承接
+      （fence、夾在散文裡都收）—— 分類是單次呼叫，不值得為它加 schema 強制
+- [x] 3.5 回傳的 lane 不在 routing table 或未開放 → 視同未路由
       （規格：分類回傳不存在的 lane）
-- [ ] 3.6 短逾時（design D6）；逾時 → 未路由（規格：分類逾時）
-- [ ] 3.7 三種未路由原因可分辨：no_table / failed / no_match
+- [x] 3.6 短逾時（design D6）；逾時 → 未路由（規格：分類逾時）
+- [x] 3.7 三種未路由原因可分辨：no_table / failed / no_match
       （規格：未路由的三種原因可分辨）
 
 ## 4. 接進 ingress
