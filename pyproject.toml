@@ -7,10 +7,13 @@ name = "myharness"
 version = "0.1.0"
 description = "Multi-agent data-analysis harness on claude-agent-sdk, exposed as an MCP server"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "claude-agent-sdk>=0.2.139",
+    "jsonschema>=4.23",
+]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pytest-asyncio>=0.24"]
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "pytest-cov>=6", "psutil>=6"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["myharness"]
@@ -18,5 +21,8 @@ packages = ["myharness"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = "-q --strict-markers"
+addopts = "-q --strict-markers -m 'not live'"
+markers = [
+    "live: hits a real model API; costs money and needs a key in .env. Run with -m live.",
+]
 filterwarnings = ["error::DeprecationWarning:myharness.*"]

@@ -78,7 +78,12 @@
 
 ### 4.1 Lane handle（subagent → orchestrator）
 
-由 `output_format` JSON Schema 在 API 層強制，並由 dispatch 實作驗證長度。
+**兩道機制疊加**（`myharness/lanes/handle.py`）：`HANDLE_SCHEMA` 由 API 層強制**形狀**
+（後端不支援時退回應用層驗證 + 重新提示）；`clamp_handle()` 永遠強制**長度**
+（逐欄位上限 + 整體序列化上限 2000 字元）。
+
+JSON Schema 約束不了長度 —— 模型可以回一個符合 schema 但 headline 三千字的物件，
+或把報告塞進 metrics 的鍵名。**少任何一道都只是「很可能」。**
 
 ```json
 {
@@ -107,16 +112,19 @@ Orchestrator 用宣告式資料遙控 proxy，兩者零 context 共享。
 ### 4.3 LaneType（開發者宣告，framework 的擴充點）
 
 ```python
-LANE_TYPES = {
-  "tabular-analyst": LaneType(
-      charter=Path("charters/tabular.md"),
-      tools=[duckdb_query, profile_csv, plot],
-      model="sonnet", token_cap=80_000, max_turns=25,
-  ),
-  "doc-extractor": LaneType(charter=..., tools=[pdf_extract, ocr], model="haiku", token_cap=40_000),
-  "synthesizer":   LaneType(charter=..., tools=[read_artifact],    model="opus"),
-}
+LaneType(
+    name="tabular-analyst",
+    charter_path=Path("charters/tabular-analyst.md"),   # 檔案，可 diff、吃 prompt cache
+    tools=("read_note", "write_finding", "update_state", "localize_blob"),
+    model_tier="strong",        # 能力層級，由 backend 解析成實際模型
+    backend="openrouter",
+    token_budget=80_000, max_turns=25, state_max_tokens=8_000,
+)
 ```
+
+已實作於 `myharness/lanes/types.py`。`model_tier` 而非硬編模型名稱，是為了讓同一個
+lane type 能在不同 backend 上跑（見 §5b）。charter 的雜湊會寫進事件流，
+使「這次跑的是哪一版 charter」事後可查。
 
 Instance 由 orchestrator 在 `plan_update` 時建立；同型別多 instance 各持有獨立 state。
 
@@ -251,8 +259,14 @@ BackendProfile(
 | `prompt_caching` | charter/state 前綴不再免費 → ephemeral worker 成本模型重算 |
 | `task_budget` | 改用 harness 端本地 token 計數硬斷 |
 
-**proxy lane 可用 `google/gemini-2.5-flash`** —— 單次、無狀態、低難度分類，
+**proxy lane 可用便宜模型** —— 單次、無狀態、低難度分類，
 而且 routing 決策仍能用結構化輸出強制。
+
+⚠️ **OpenRouter 的 `:free` 變體不適合當主力**（spike #5）：
+`nemotron-3-ultra-550b-a55b:free` 不宣告結構化輸出，且 12 分鐘跑不完三個短請求；
+`nemotron-3-super-120b-a12b:free` 雖宣告支援，但會撞到
+`free-models-per-day-high-balance` 的每日配額而回 429。付費變體
+（`nemotron-3-super-120b-a12b`，$0.08/M in、$0.40/M out）無此限制。
 
 ⚠️ **`task_budget` 超限時會拋例外，不會回部分結果**（spike #3c 實測）。
 `run_lane_worker` 必須在串流過程中累積訊息，例外時轉成 `budget_exceeded` handle —— 

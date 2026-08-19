@@ -222,3 +222,68 @@ SDK **拋出例外**（`Claude Code returned an error result: success`，即 `is
 **對決策 #12 的實作要求**：`run_lane_worker` 必須在串流過程中就累積訊息，
 在例外發生時把已收到的內容轉成 `{status: "budget_exceeded", partial: ..., headline: ...}` handle。
 不能等 `ResultMessage` —— 它不會來。
+
+---
+
+## Spike #2 — 巢狀 `query()` 的穩定性與資源回收
+
+`dispatch` 會在一個 SDK in-process `@tool` handler 裡啟動另一個 `query()`。
+每個 `query()` 會 spawn 一個 claude CLI 子行程 —— 若不回收，一個 40 次 dispatch 的 job
+會留下 40 個殭屍行程。
+
+`spike04_nested_query.py`（model=haiku，Anthropic 直連）：
+
+| Phase | 內容 | Δ子行程 | Δfd | 結果 |
+|---|---|---|---|---|
+| A | 20 次序列 `query()` | +0 | +0 | ✅ 回收正常，20/20 成功 |
+| B | 3 次在 `@tool` handler 內的巢狀 `query()` | +0 | +0 | ✅ 回收正常，巢狀語意正確 |
+
+Phase B 的 parent agent 確實拿到了 child 的輸出（`SUB[t0]` / `SUB[t1]` / `SUB[t2]`），
+證明 `dispatch` 的實作形狀可行。**決策 #6 的實作前提成立。**
+
+---
+
+## Spike #5 — Nemotron on OpenRouter
+
+### Model metadata（`/api/v1/models`）
+
+| 模型 | ctx | tools | structured_outputs |
+|---|---|---|---|
+| `nvidia/nemotron-3-ultra-550b-a55b`（付費） | 512k | ✅ | ✅ |
+| `nvidia/nemotron-3-ultra-550b-a55b:free` | 1M | ✅ | **❌** |
+| `nvidia/nemotron-3-super-120b-a12b:free` | 262k | ✅ | **✅** |
+| `nvidia/nemotron-3-nano-30b-a3b:free` | 256k | ✅ | ❌ |
+
+### ⚠️ `ultra:free` 實務上不可用
+
+`spike03_openrouter.py nvidia/nemotron-3-ultra-550b-a55b:free` 執行 **超過 12 分鐘
+仍未完成三個短請求**，最後中止。free tier 的排隊延遲對一個要 fan-out
+多個 worker 的 harness 是致命的。
+
+**結論**：專案採用 `nvidia/nemotron-3-super-120b-a12b:free` 作為 OpenRouter 的
+預設模型 —— 同樣免費、262k context、且**宣告支援結構化輸出**，
+決策 #6 的「強制」路徑因此在免費層仍然成立。
+
+### ⚠️ `:free` 每日配額（阻擋 live 測試）
+
+`nemotron-3-super-120b-a12b:free` 三個測試中兩個回 429：
+
+```
+Rate limit exceeded: free-models-per-day-high-balance
+```
+
+SDK 內建重試 10 次後仍失敗（每次耗時 ~170s）。金鑰本身**不是** free tier
+（`is_free_tier: false`，週額度 $50 剩 $49.94）—— 這是 OpenRouter 對 `:free`
+變體的每日請求上限，與帳戶餘額無關。
+
+### 付費變體價格
+
+| 模型 | in | out | cache read | ctx | struct |
+|---|---|---|---|---|---|
+| `nvidia/nemotron-3-super-120b-a12b` | $0.08/M | $0.40/M | — | 1M | ✅ |
+| `nvidia/nemotron-3-nano-30b-a3b` | $0.05/M | $0.20/M | $0.03/M | 262k | ✅ |
+| `nvidia/nemotron-3.5-lightning` | $0.08/M | $0.20/M | $0.04/M | 1M | ✅ |
+| `nvidia/nemotron-3-ultra-550b-a55b` | $0.60/M | $3.60/M | $0.20/M | 512k | ✅ |
+
+整套 live 測試（6 個、預估 ~150k in / ~30k out）在 super-120b 付費版上約
+**$0.02**。
