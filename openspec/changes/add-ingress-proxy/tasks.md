@@ -46,11 +46,13 @@
 
 ## 5. 記帳
 
-- [ ] 5.1 `proxy.route` 的 usd/tokens 落在 `(proxy)` bucket
+- [x] 5.1 `proxy.route` 的 usd/tokens 落在 `(proxy)` bucket
       （`events/query.py` 已如此實作，補測試）
-- [ ] 5.2 `unprocessed_payload` caveat 在有路由時不再誤報
+- [x] 5.2 `unprocessed_payload` caveat 在有路由時不再誤報
       （`derive_caveats` 已讀 `proxy.route`，補測試）
-- [ ] 5.3 資料流圖把 `proxy.route` 呈現出來
+- [x] 5.3 資料流圖把 `proxy.route` 呈現出來：新的 `SUGGESTED` 邊，
+      外加 `suggestion_ignored` 異常（WARNING）—— 有那條邊的理由就是要能問
+      「orchestrator 有沒有理它」
 
 ## 6. 文件與端到端
 

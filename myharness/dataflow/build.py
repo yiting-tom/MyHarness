@@ -15,6 +15,7 @@ from myharness.events.types import (
     DISPATCH_END,
     DISPATCH_START,
     INGRESS,
+    PROXY_ROUTE,
     JOB_FINISH,
     Event,
 )
@@ -73,6 +74,14 @@ def build_dataflow(
         if event.t == INGRESS:
             if payload := event.get("payload"):
                 _touch(flow, str(payload))
+
+        elif event.t == PROXY_ROUTE:
+            payload, lane = event.get("payload"), event.get("lane")
+            if payload and lane:
+                _touch(flow, str(payload))
+                flow.edges.append(
+                    Edge(str(payload), _lane_node(flow, str(lane)), EdgeKind.SUGGESTED)
+                )
 
         elif event.t == DISPATCH_START:
             _start(flow, event)

@@ -28,6 +28,7 @@ class AnomalyKind(StrEnum):
     OVERWRITTEN_OUTPUT = "overwritten_output"
     UNUSED_INPUT = "unused_input"
     ORPHAN_OUTPUT = "orphan_output"
+    SUGGESTION_IGNORED = "suggestion_ignored"
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +50,7 @@ def detect(flow: DataFlow) -> list[Anomaly]:
         *_overwritten_outputs(flow),
         *_unused_inputs(flow),
         *_orphan_outputs(flow),
+        *_ignored_suggestions(flow),
     ]
     found.sort(key=lambda a: (a.severity is not Severity.CRITICAL, str(a.kind)))
     return found
@@ -152,3 +154,46 @@ def counts(anomalies: Sequence[Anomaly]) -> dict[str, int]:
     for anomaly in anomalies:
         tally[str(anomaly.kind)] = tally.get(str(anomaly.kind), 0) + 1
     return tally
+
+
+def _ignored_suggestions(flow: DataFlow) -> list[Anomaly]:
+    """The proxy said which lane wanted this, and that lane never got it.
+
+    Not a failure on its own -- the orchestrator is entitled to overrule the
+    classifier, and that is the whole reason routing is a suggestion. But it is
+    also what a dropped payload looks like, and the two are indistinguishable
+    from the log alone, so it is worth surfacing rather than assuming the
+    generous reading.
+    """
+    out = []
+    for edge in flow.edges:
+        if edge.kind is not EdgeKind.SUGGESTED:
+            continue
+        artifact, lane_node = edge.src, edge.dst
+        lane = lane_node.removeprefix("lane:")
+        granted_to_lane = any(
+            d.lane == lane and artifact in d.granted for d in flow.dispatches.values()
+        )
+        if granted_to_lane:
+            continue
+        granted_elsewhere = [
+            d.lane for d in flow.dispatches.values() if artifact in d.granted
+        ]
+        detail = (
+            f"分流器判定 {artifact} 屬於 lane {lane}，但 {lane} 從未取得它"
+        )
+        if granted_elsewhere:
+            detail += f"（改為授權給 {', '.join(sorted(set(granted_elsewhere)))}）"
+        else:
+            detail += "，也沒有任何 lane 取得它"
+        out.append(
+            Anomaly(
+                kind=AnomalyKind.SUGGESTION_IGNORED,
+                severity=Severity.WARNING,
+                detail=detail,
+                context={"artifact": artifact, "suggested_lane": lane,
+                         "granted_to": sorted(set(granted_elsewhere))},
+            )
+        )
+    return out
+

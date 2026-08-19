@@ -40,6 +40,11 @@ class EdgeKind(StrEnum):
     READ = "read"
     #: The dispatch ran on this lane.
     RAN_ON = "ran_on"
+    #: The proxy classified this artifact as belonging to this lane. Neither an
+    #: authorisation nor an action -- a suggestion the orchestrator may ignore
+    #: (design.md D1, D2). Kept distinct so "suggested but never granted" is
+    #: answerable.
+    SUGGESTED = "suggested"
 
 
 @dataclass(frozen=True, slots=True)
