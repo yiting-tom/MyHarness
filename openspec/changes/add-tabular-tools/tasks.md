@@ -73,7 +73,8 @@
 
 ## 7. 端到端
 
-- [ ] 7.1 離線測試：一份真實 CSV 走完 inspect → query → into → 再 query
-- [ ] 7.2 golden job 的 fixture 資料換成需要實際計算才答得出來的問題
-- [ ] 7.3 golden 斷言新增：交付內容含實際數字，且該數字與直接查詢的結果相符
+- [x] 7.1 離線測試：一份真實 CSV 走完 inspect → query → into → 再 query
+- [x] 7.2 golden job 的**問題**換成需要實際計算才答得出來的（資料不動：
+      2,940 列本來就有結構，換掉會作廢第五次真實跑的事件 fixture）
+- [x] 7.3 golden 斷言新增：交付內容含實際數字，且該數字與直接查詢的結果相符
 - [ ] 7.4 live 跑一次 golden job，記錄結果與成本到 `spikes/RESULTS.md`

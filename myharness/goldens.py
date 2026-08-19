@@ -31,9 +31,54 @@ from myharness.orchestrator.loop import LoopOutcome, OrchestratorLoop
 
 GOLDEN_CSV = Path("goldens/txn-2024.csv")
 GOAL = (
-    "分析 2024 年的交易資料，找出異常樣態並說明其特徵。"
+    "分析 2024 年的交易資料，找出異常樣態並說明其特徵。\n"
+    "報告中必須明確給出這兩個數字：\n"
+    "(1) 資料中不重複帳戶的總數；\n"
+    "(2) 平均交易金額最低的 channel 是哪一個。\n"
     "資料已上傳為 blob，欄位為 txn_id / ts / account / amount / channel。"
 )
+
+
+@dataclass(frozen=True, slots=True)
+class GroundTruth:
+    """Facts about the fixture that can only be had by computing them.
+
+    The fifth run delivered a report saying it could not read the data and
+    passed every discipline assertion, because discipline was all they checked.
+    A number the model cannot guess is the cheapest possible check that the
+    harness actually analysed something -- 765 distinct accounts is not a
+    plausible hallucination, and it is wrong for any other reading of the file.
+    """
+
+    rows: int
+    accounts: int
+    cheapest_channel: str
+
+    def missing_from(self, report: str) -> list[str]:
+        absent = []
+        if str(self.accounts) not in report and f"{self.accounts:,}" not in report:
+            absent.append(f"distinct accounts ({self.accounts})")
+        if self.cheapest_channel not in report:
+            absent.append(f"cheapest channel ({self.cheapest_channel})")
+        return absent
+
+
+def ground_truth(csv_path: Path = GOLDEN_CSV) -> GroundTruth:
+    """Computed straight from the file, with none of the harness in the way."""
+    import duckdb
+
+    conn = duckdb.connect(":memory:")
+    try:
+        escaped = str(csv_path).replace("'", "''")
+        conn.execute(f"CREATE TABLE t AS SELECT * FROM read_csv_auto('{escaped}')")
+        (rows,), = conn.execute("SELECT count(*) FROM t").fetchall()
+        (accounts,), = conn.execute("SELECT count(DISTINCT account) FROM t").fetchall()
+        (channel,), = conn.execute(
+            "SELECT channel FROM t GROUP BY 1 ORDER BY avg(amount) LIMIT 1"
+        ).fetchall()
+        return GroundTruth(rows, accounts, channel)
+    finally:
+        conn.close()
 
 ANALYST_TOOLS = (
     "read_note", "write_finding", "update_state",
@@ -76,6 +121,7 @@ class GoldenResult:
     blob_id: str
     flow: DataFlow
     anomalies: list[Anomaly]
+    report_text: str
 
     @property
     def critical(self) -> list[Anomaly]:
@@ -135,8 +181,19 @@ async def run_golden(
         report_artifact=outcome.report_artifact,
     )
     flow = build_dataflow(stream, await store.list(job_id), job_id=job_id)
+    report_text = ""
+    if outcome.report_artifact:
+        from myharness.artifacts.ids import ArtifactId
+
+        try:
+            report_text = await store.read_note(
+                ArtifactId.parse(outcome.report_artifact),
+                grants=GrantSet.unrestricted(job_id), max_tokens=100_000,
+            )
+        except Exception:  # noqa: BLE001 - a missing report is the assertion's job
+            report_text = ""
     return GoldenResult(outcome, delivery, summarize(stream), str(blob.id),
-                        flow, detect(flow))
+                        flow, detect(flow), report_text)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -153,6 +210,13 @@ def main(argv: list[str] | None = None) -> int:
         print("\n--- 資料流異常 ---")
         for anomaly in result.anomalies:
             print(f"  [{anomaly.severity.upper()}] {anomaly.detail}")
+    truth = ground_truth()
+    missing = truth.missing_from(result.report_text)
+    print("\n--- 分析是否真的發生 ---")
+    print(f"  ground truth: {truth.rows:,} rows, {truth.accounts} accounts, "
+          f"cheapest channel {truth.cheapest_channel}")
+    print("  報告缺少：" + (", ".join(missing) if missing else "無"))
+
     print("\n--- delivery ---")
     print(json.dumps(result.delivery.to_dict(), ensure_ascii=False, indent=2)[:2500])
     return 0 if result.delivery.report_artifact else 1

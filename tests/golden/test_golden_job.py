@@ -135,3 +135,33 @@ def test_the_report_traces_back_to_the_raw_data(golden: GoldenResult):
 
 def test_no_critical_data_flow_anomalies(golden: GoldenResult):
     assert not golden.critical, golden.report_line()
+
+
+# --- did an analysis actually happen? (added after the fifth run) ------------
+
+
+def test_the_report_contains_a_number_only_computation_could_produce(
+    golden: GoldenResult,
+):
+    """Every assertion above passed on the fifth run, which delivered a report
+    saying it could not read the data. Discipline was all they checked.
+
+    765 distinct accounts is not a number a model guesses, and it is wrong for
+    any other reading of the file -- so its presence means a query ran, and its
+    absence means the harness is back where it was.
+    """
+    from myharness.goldens import ground_truth
+
+    truth = ground_truth(GOLDEN_CSV)
+    missing = truth.missing_from(golden.report_text)
+    assert not missing, (
+        f"report is missing {missing}; the analysis did not happen\n"
+        f"{golden.report_line()}\n---\n{golden.report_text[:1500]}"
+    )
+
+
+def test_the_report_does_not_plead_lack_of_tooling(golden: GoldenResult):
+    """The exact sentence the fifth run shipped."""
+    excuses = ["未能讀取", "無法讀取", "權限限制", "沒有工具", "無法存取資料"]
+    found = [e for e in excuses if e in golden.report_text]
+    assert not found, f"{found} in the report:\n{golden.report_text[:1500]}"
