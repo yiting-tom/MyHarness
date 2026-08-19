@@ -13,19 +13,27 @@ tool just wastes a turn.
 from __future__ import annotations
 
 import json
+from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from typing import Any
 
 from claude_agent_sdk import ToolAnnotations, create_sdk_mcp_server, tool
 
 from myharness.artifacts.errors import ArtifactError
-from myharness.artifacts.ids import ArtifactId
+from myharness.artifacts.ids import ArtifactId, coerce_artifact_ids
 from myharness.artifacts.store import ArtifactStore
 from myharness.artifacts.tokens import estimate_tokens
 from myharness.artifacts.types import GrantSet
+from myharness.lanes.tabular.query import IntoResult, QueryFailure, QueryRunner
 from myharness.lanes.types import LaneInstance
 
 SERVER_NAME = "lane"
+
+#: Used when a lane type declares no tools of its own.
+DEFAULT_TOOLS: tuple[str, ...] = (
+    "read_note", "write_finding", "update_state",
+    "localize_blob", "inspect_blob", "duckdb_query",
+)
 
 
 def _ok(text: str) -> dict[str, Any]:
@@ -54,9 +62,36 @@ class WorkerToolbox:
 
     handlers: dict[str, Any] = field(default_factory=dict)
     findings: list[str] = field(default_factory=list)
+    derived: list[str] = field(default_factory=list)
     state_revision: int = 0
     state_rejected: bool = False
     reads: int = 0
+    queries: int = 0
+
+    #: Holds every localisation open for as long as the worker runs. A blob
+    #: materialised by an object-store backend is deleted when its context
+    #: manager exits, so a path handed out from inside a ``with`` block is dead
+    #: on arrival (design.md D8). Closed by ``aclose``.
+    _open: AsyncExitStack = field(default_factory=AsyncExitStack)
+
+    async def aclose(self) -> None:
+        """Release every localised blob. Safe to call more than once."""
+        await self._open.aclose()
+
+    async def __aenter__(self) -> WorkerToolbox:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        await self.aclose()
+
+    def _query_runner(self) -> QueryRunner:
+        return QueryRunner(
+            self.store,
+            job_id=self.job_id,
+            grants=self.grants,
+            produced_by=f"lane:{self.lane.id}",
+            derived_namespace=self.lane.namespace,
+        )
 
     @property
     def last_finding(self) -> str | None:
@@ -67,6 +102,11 @@ class WorkerToolbox:
 
         read_only = ToolAnnotations(readOnlyHint=True)
         mutating = ToolAnnotations(readOnlyHint=False)
+        # readOnlyHint is the SDK's only switch for same-turn tool-call
+        # concurrency (spike #1). The data tools opt out of it -- not because
+        # they write, but because each call materialises a whole blob in
+        # memory, and several at once multiplies that by the cap.
+        serial = ToolAnnotations(readOnlyHint=False)
 
         @tool(
             "read_note",
@@ -158,21 +198,82 @@ class WorkerToolbox:
                 return _err({"code": "bad_artifact_id", "message": str(exc)})
             try:
                 meta = await self.store.stat(aid, grants=self.grants)
-                async with self.store.localize(aid, grants=self.grants) as path:
-                    return _ok(json.dumps(
-                        {"path": str(path), "bytes": meta.bytes, "schema": meta.schema},
-                        ensure_ascii=False,
-                    ))
+                # Enter the localisation on the toolbox's stack, not on a block
+                # that ends at this return: an object-store backend deletes its
+                # scratch copy on exit and the worker would get a dead path.
+                path = await self._open.enter_async_context(
+                    self.store.localize(aid, grants=self.grants)
+                )
+                return _ok(json.dumps(
+                    {"path": str(path), "bytes": meta.bytes, "schema": meta.schema},
+                    ensure_ascii=False,
+                ))
             except ArtifactError as exc:
                 return _err(exc.to_dict())
             except ValueError as exc:
                 return _err({"code": "not_a_blob", "message": str(exc)})
+
+        @tool(
+            "inspect_blob",
+            "See a data blob's columns, types, row count and first few rows. "
+            "Do this before writing SQL -- guessing column names wastes a turn.",
+            {"artifact": str},
+            annotations=serial,
+        )
+        async def inspect_blob(args):
+            result = await self._query_runner().inspect(
+                str(args.get("artifact", "")).strip()
+            )
+            if isinstance(result, QueryFailure):
+                return _ok(result.text())
+            self.reads += 1
+            return _ok(result.text())
+
+        @tool(
+            "duckdb_query",
+            "Run one SQL SELECT over data blobs you are allowed to read. "
+            "List the blobs in `artifacts`; each becomes a table whose name is "
+            "reported back to you. SQL must not contain file paths -- naming an "
+            "artifact is the only way to reach data. Results are truncated to "
+            "fit; for a full result set pass `into` and it becomes a new blob "
+            "you can query later instead of flooding your context.",
+            {"artifacts": list, "sql": str, "into": str},
+            annotations=serial,
+        )
+        async def duckdb_query(args):
+            raw = args.get("artifacts")
+            if isinstance(raw, str):
+                raw = [raw]
+            ids, rejected = coerce_artifact_ids(raw)
+            if rejected:
+                # Refusing now beats a baffling not_granted later: the fourth
+                # golden run lost two lanes to a mangled input list.
+                return _err({
+                    "code": "bad_artifacts",
+                    "message": "artifacts must be artifact id strings, e.g. "
+                               "['job/blob/raw/data']. These could not be read:",
+                    "rejected": [str(r)[:120] for r in rejected],
+                    "accepted": ids,
+                })
+            result = await self._query_runner().query(
+                ids,
+                str(args.get("sql", "")),
+                into=str(args.get("into") or "").strip(),
+            )
+            if isinstance(result, QueryFailure):
+                return _ok(result.text())
+            self.queries += 1
+            if isinstance(result, IntoResult):
+                self.derived.append(str(result.artifact.id))
+            return _ok(result.text())
 
         available = {
             "read_note": read_note,
             "write_finding": write_finding,
             "update_state": update_state,
             "localize_blob": localize_blob,
+            "inspect_blob": inspect_blob,
+            "duckdb_query": duckdb_query,
         }
         declared = [name for name in self.lane.type.tools if name in available]
         if not declared:
@@ -185,7 +286,5 @@ class WorkerToolbox:
         )
 
     def tool_names(self) -> list[str]:
-        declared = [t for t in self.lane.type.tools] or [
-            "read_note", "write_finding", "update_state", "localize_blob"
-        ]
+        declared = [t for t in self.lane.type.tools] or list(DEFAULT_TOOLS)
         return [f"mcp__{SERVER_NAME}__{name}" for name in declared]

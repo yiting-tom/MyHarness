@@ -277,16 +277,35 @@ async def run_lane_worker(
     transport: WorkerTransport | None = None,
 ) -> LaneHandle:
     """Run one lane task. Always returns a handle; never raises for a failure."""
+    grants = GrantSet.for_lane(request.job_id, request.lane.namespace, request.inputs)
+    toolbox = WorkerToolbox(
+        store=store, job_id=request.job_id, lane=request.lane, grants=grants,
+        read_budget=request.lane.type.input_token_budget,
+    )
+    # Blobs the worker localised stay readable until the run is over, however it
+    # ends (design.md D8). Tying their lifetime to the run rather than to a
+    # single tool call is the whole point.
+    async with toolbox:
+        return await _run_with_toolbox(
+            request, toolbox=toolbox, grants=grants,
+            store=store, event_log=event_log, transport=transport,
+        )
+
+
+async def _run_with_toolbox(
+    request: WorkerRequest,
+    *,
+    toolbox: WorkerToolbox,
+    grants: GrantSet,
+    store: ArtifactStore,
+    event_log: EventLog,
+    transport: WorkerTransport | None,
+) -> LaneHandle:
     transport = transport or SdkTransport()
     lane, lane_type = request.lane, request.lane.type
     profile = lane_type.backend_profile()
     charter = lane_type.charter()
 
-    grants = GrantSet.for_lane(request.job_id, lane.namespace, request.inputs)
-    toolbox = WorkerToolbox(
-        store=store, job_id=request.job_id, lane=lane, grants=grants,
-        read_budget=lane_type.input_token_budget,
-    )
     state, toolbox.state_revision = await _load_state(store, request, grants)
 
     enforce = profile.supports(BackendCapability.STRUCTURED_OUTPUT)

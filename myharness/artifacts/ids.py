@@ -91,3 +91,46 @@ class ArtifactId:
 def lane_namespace(lane_id: str) -> str:
     """The namespace every artifact owned by ``lane_id`` lives under."""
     return f"lanes/{_check_segment(lane_id, what='lane_id')}"
+
+
+#: Keys a model has actually used, or plausibly would, when it wraps an id in
+#: an object instead of passing the string.
+_ID_KEYS: Final = ("id", "artifact", "artifact_id", "blob", "blob_path", "note", "path")
+
+
+def coerce_artifact_ids(raw: object) -> tuple[list[str], list[object]]:
+    """Coerce whatever a model offered into artifact ids, and say what failed.
+
+    The fourth golden run passed ``[{"blob_path": "..."}]``; ``str()`` turned it
+    into a string no grant could ever match, the dispatch was accepted, and the
+    failure surfaced two lanes later as an inscrutable ``not_granted``. Be
+    liberal about the shape -- the intent is unambiguous -- but never invent an
+    id, and always hand back what could not be read so the refusal can name it.
+
+    Lives here rather than beside one caller because both the orchestrator's
+    ``dispatch`` and the lane's query tool have to make the same judgement, and
+    two copies of this lesson would drift.
+    """
+    ids: list[str] = []
+    rejected: list[object] = []
+    for entry in raw or ():  # type: ignore[union-attr]
+        candidate: object = entry
+        if isinstance(entry, dict):
+            for key in _ID_KEYS:
+                if key in entry:
+                    candidate = entry[key]
+                    break
+            else:
+                rejected.append(entry)
+                continue
+        if not isinstance(candidate, str):
+            rejected.append(entry)
+            continue
+        try:
+            ArtifactId.parse(candidate.strip())
+        except ValueError:
+            rejected.append(entry)
+            continue
+        ids.append(candidate.strip())
+    return ids, rejected
+

@@ -15,7 +15,7 @@ from typing import Any
 from claude_agent_sdk import ToolAnnotations, create_sdk_mcp_server, tool
 
 from myharness.artifacts.errors import ArtifactError
-from myharness.artifacts.ids import ArtifactId
+from myharness.artifacts.ids import ArtifactId, coerce_artifact_ids
 from myharness.artifacts.tokens import estimate_tokens
 from myharness.artifacts.types import GrantSet
 from myharness.events.types import PEEK, PLAN_UPDATE
@@ -44,38 +44,6 @@ def _ok(payload: Any) -> dict[str, Any]:
 
 def _err(code: str, message: str, **extra: Any) -> dict[str, Any]:
     return _ok({"error": code, "message": message, **extra})
-
-
-def _as_artifact_ids(raw: Any) -> tuple[list[str], list[Any]]:
-    """Coerce whatever the model offered into artifact ids, and say what failed.
-
-    The golden job passed ``[{"blob_path": "..."}]``; ``str()`` turned that into
-    a string no grant could ever match, the dispatch was accepted, and the
-    failure surfaced two lanes later as an inscrutable not_granted. Be liberal
-    about the shape — the intent is unambiguous — but never invent an id.
-    """
-    ids: list[str] = []
-    rejected: list[Any] = []
-    for entry in raw or []:
-        candidate = entry
-        if isinstance(entry, dict):
-            for key in ("id", "artifact", "artifact_id", "blob", "blob_path", "note", "path"):
-                if key in entry:
-                    candidate = entry[key]
-                    break
-            else:
-                rejected.append(entry)
-                continue
-        if not isinstance(candidate, str):
-            rejected.append(entry)
-            continue
-        try:
-            ArtifactId.parse(candidate.strip())
-        except ValueError:
-            rejected.append(entry)
-            continue
-        ids.append(candidate.strip())
-    return ids, rejected
 
 
 @dataclass
@@ -152,7 +120,7 @@ class OrchestratorTools:
             if not lane or not task:
                 return _err("bad_request", "lane and task are required")
 
-            inputs, rejected = _as_artifact_ids(args.get("inputs"))
+            inputs, rejected = coerce_artifact_ids(args.get("inputs"))
             if rejected:
                 # Refuse now: an unusable grant becomes a baffling permission
                 # error inside a worker several steps later.

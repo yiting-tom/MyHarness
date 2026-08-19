@@ -36,26 +36,27 @@
 
 ## 4. Lane 工具
 
-- [ ] 4.1 `inspect_blob(artifact)`：欄位、型別、列數、樣本列、綁定表名
+- [x] 4.1 `inspect_blob(artifact)`：欄位、型別、列數、樣本列、綁定表名
       （規格：Worker 能在寫查詢前取得資料結構）
-- [ ] 4.2 `duckdb_query(artifacts, sql, into?)`：授權檢查在 id 上，回應必帶表名
+- [x] 4.2 `duckdb_query(artifacts, sql, into?)`：授權檢查在 id 上，回應必帶表名
       （規格：Lane worker 能對被授權的表格資料執行查詢）
-- [ ] 4.3 `into`：結果寫成 lane namespace 底下的新 blob，回應不含資料列
+- [x] 4.3 `into`：結果寫成 lane namespace 底下的新 blob，回應不含資料列
       （規格：大量結果以新 artifact 交付而非進入 context）
-- [ ] 4.4 產出的 artifact 可被同一條 lane 再查詢的測試（授權來自 own namespace，
+- [x] 4.4 產出的 artifact 可被同一條 lane 再查詢的測試（授權來自 own namespace，
       不是新的授權來源）
-- [ ] 4.5 失敗一律回 `_err` 文字，並附當次可用表名
+- [x] 4.5 失敗一律回 `_err` 文字，並附當次可用表名
       （規格：查詢失敗以可據以行動的訊息回覆）
-- [ ] 4.6 未授權 artifact 在讀取任何內容前就被拒的測試
-- [ ] 4.7 兩個工具的 `ToolAnnotations`：`inspect_blob` 唯讀；`duckdb_query`
-      在有 `into` 時會寫入，故標為非唯讀（會影響同 turn 併發 —— spike #1）
+- [x] 4.6 未授權 artifact 在讀取任何內容前就被拒的測試
+- [x] 4.7 兩個工具都標為非唯讀 —— **理由不是寫入而是記憶體**：每次呼叫都會把
+      整份 blob ingest 進記憶體，同 turn 併發等於乘上併發數（spike #1）。
+      另加 process 層的 ingest semaphore，因為多條 lane 跑在同一個 event loop
 
 ## 5. 修 `localize_blob` 的生命週期
 
-- [ ] 5.1 `WorkerToolbox` 持有 `AsyncExitStack`，localize 綁在 worker 執行上
+- [x] 5.1 `WorkerToolbox` 持有 `AsyncExitStack`，localize 綁在 worker 執行上
       （design D8，規格：本地化路徑在 worker 執行期間保持有效）
-- [ ] 5.2 worker 結束時關閉 exit stack，包含執行以例外結束的情況
-- [ ] 5.3 以一個「離開區塊即刪檔」的假後端寫測試，證明舊寫法會失敗、新寫法不會
+- [x] 5.2 worker 結束時關閉 exit stack，包含執行以例外結束的情況
+- [x] 5.3 以一個「離開區塊即刪檔」的假後端寫測試，證明舊寫法會失敗、新寫法不會
 
 ## 6. 接線與文件
 
