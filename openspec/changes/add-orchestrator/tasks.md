@@ -1,24 +1,24 @@
 ## 1. Job runner 骨架
 
-- [ ] 1.1 定義 `JobSpec`（目標、硬上限：`max_dispatches` / `max_budget_usd` / `max_wall_clock_s`、peek 預算、提問配額）與 `JobPhase` 列舉
-- [ ] 1.2 定義 `JobState`：可序列化的 plain data（階段、任務登記、預算餘額、無進展計數、寬限餘額）
-- [ ] 1.3 實作 `JobRunner` 生命週期：建立、執行、收工、取消未收割任務（design D 風險緩解）
-- [ ] 1.4 實作 `status()`，回傳大小有界的狀態（規格：Job 狀態可被外部查詢）
+- [x] 1.1 定義 `JobSpec`（目標、硬上限：`max_dispatches` / `max_budget_usd` / `max_wall_clock_s`、peek 預算、提問配額）與 `JobPhase` 列舉
+- [x] 1.2 定義 `JobState`：可序列化的 plain data（階段、任務登記、預算餘額、無進展計數、寬限餘額）
+- [x] 1.3 實作 `JobRunner` 生命週期：建立、執行、收工、取消未收割任務（design D 風險緩解）
+- [x] 1.4 實作 `status()`，回傳大小有界的狀態（規格：Job 狀態可被外部查詢）
 
 ## 2. 非阻塞派工與收割
 
-- [ ] 2.1 實作 `TaskRegistry`：`asyncio.create_task` 起背景 lane 執行，登記識別與狀態
-- [ ] 2.2 實作 `dispatch()` 立即返回任務識別（規格：派工立即返回）
-- [ ] 2.3 實作 `await_tasks(ids, mode="all"|"any", timeout)`，逾時回傳已完成者與未完成識別（規格：收割等到全部完成／可只等任一／逾時回報未完成者）
-- [ ] 2.4 實作跨 lane 並行的 semaphore，並確認背景任務執行區間確實重疊（規格：背景任務真正並行）
-- [ ] 2.5 收工時等待或取消仍在執行的任務，並記錄之
+- [x] 2.1 實作 `TaskRegistry`：`asyncio.create_task` 起背景 lane 執行，登記識別與狀態
+- [x] 2.2 實作 `dispatch()` 立即返回任務識別（規格：派工立即返回）
+- [x] 2.3 實作 `await_tasks(ids, mode="all"|"any", timeout)`，逾時回傳已完成者與未完成識別（規格：收割等到全部完成／可只等任一／逾時回報未完成者）
+- [x] 2.4 實作跨 lane 並行的 semaphore，並確認背景任務執行區間確實重疊（規格：背景任務真正並行）
+- [x] 2.5 收工時等待或取消仍在執行的任務，並記錄之
 
 ## 3. 三道防迴圈
 
-- [ ] 3.1 實作派工內容的正規化與 hash，`dispatch` 重複時回傳前次 handle 而不執行（規格：重複派工不執行）
-- [ ] 3.2 實作 job 硬上限檢查（次數／金額／時間），觸頂時注入收工要求（規格：觸頂時要求收工）
-- [ ] 3.3 實作寬限額度與用盡後的程式碼降級交付（規格：拒絕收工後才中止；design D4）
-- [ ] 3.4 實作無進展偵測與其重置（規格：無進展偵測的兩個 scenario）
+- [x] 3.1 實作派工內容的正規化與 hash，`dispatch` 重複時回傳前次 handle 而不執行（規格：重複派工不執行）
+- [x] 3.2 實作 job 硬上限檢查（次數／金額／時間），觸頂時注入收工要求（規格：觸頂時要求收工）
+- [x] 3.3 實作寬限額度與用盡後的程式碼降級交付（規格：拒絕收工後才中止；design D4）
+- [x] 3.4 實作無進展偵測與其重置（規格：無進展偵測的兩個 scenario）
 
 ## 4. Orchestrator 的工具面
 
@@ -31,10 +31,10 @@
 
 ## 5. 使用者提問通道
 
-- [ ] 5.1 定義 `UserChannel` 抽象與 `Question` / `Answer` 型別
-- [ ] 5.2 實作 `DefaultingChannel`（永遠套用預設值）與 `ScriptedChannel`（測試用）
-- [ ] 5.3 實作 `ask_user` 的逾時、預設值與 job 級配額（規格：向使用者提問是抽象通道的三個 scenario）
-- [ ] 5.4 未確認的假設進入 caveats
+- [x] 5.1 定義 `UserChannel` 抽象與 `Question` / `Answer` 型別
+- [x] 5.2 實作 `DefaultingChannel`（永遠套用預設值）與 `ScriptedChannel`（測試用）
+- [x] 5.3 實作 `ask_user` 的逾時、預設值與 job 級配額（規格：向使用者提問是抽象通道的三個 scenario）
+- [x] 5.4 未確認的假設進入 caveats
 
 ## 6. 計畫與交接重啟
 

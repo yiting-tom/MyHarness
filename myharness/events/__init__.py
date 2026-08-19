@@ -10,7 +10,9 @@ from myharness.events.query import (
     derive_caveats,
     duplicate_dispatches,
     failures,
+    finish_reason,
     of_type,
+    peek_tokens_spent,
     summarize,
     throttle_seconds,
     throttled_backends,
@@ -22,6 +24,6 @@ from myharness.events.types import Event, MalformedEvent
 __all__ = [
     "Caveat", "Event", "EventLog", "JobSummary", "LocalEventLog", "MalformedEvent",
     "cache_hit_ratio", "context_peak", "cost_by_lane", "derive_caveats", "duplicate_dispatches",
-    "failures", "of_type", "summarize", "throttle_seconds", "throttled_backends",
+    "failures", "finish_reason", "of_type", "peek_tokens_spent", "summarize", "throttle_seconds", "throttled_backends",
     "tokens_by_lane", "total_cost_usd",
 ]

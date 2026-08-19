@@ -23,6 +23,8 @@ from myharness.events.types import (
     JOB_FINISH,
     PROXY_ROUTE,
     STATUS_DUPLICATE,
+    LIMIT_REACHED,
+    PEEK,
     STATUS_OK,
     THROTTLE_COOLDOWN,
     THROTTLE_GAVE_UP,
@@ -108,6 +110,25 @@ def throttled_backends(events: Iterable[Event]) -> dict[str, float]:
     return {k: round(v, 3) for k, v in per.items()}
 
 
+def peek_tokens_spent(events: Iterable[Event]) -> int:
+    """How much of the peek budget a job consumed.
+
+    Peek is the largest variable in the orchestrator's context estimate, so its
+    usage has to be measurable rather than assumed (design.md D2).
+    """
+    return sum(int(e.get("tokens") or 0) for e in of_type(events, PEEK))
+
+
+def finish_reason(events: Sequence[Event]) -> str:
+    """Why the job stopped: a limit, a plain finish, or still running."""
+    limits = of_type(events, LIMIT_REACHED)
+    if not finished(events):
+        return "running"
+    if limits:
+        return f"limit:{limits[-1].get('limit')}"
+    return "completed"
+
+
 def failures(events: Iterable[Event]) -> Sequence[Event]:
     """Dispatches that did not end successfully."""
     return tuple(
@@ -160,6 +181,15 @@ def derive_caveats(events: Sequence[Event]) -> Sequence[Caveat]:
                     },
                 )
             )
+
+    for e in of_type(events, LIMIT_REACHED):
+        caveats.append(
+            Caveat(
+                kind="limit_reached",
+                detail=f"job 觸及 {e.get('limit')} 上限（{e.get('value')}），提前收工",
+                context={"limit": e.get("limit"), "value": e.get("value")},
+            )
+        )
 
     for e in of_type(events, THROTTLE_GAVE_UP):
         caveats.append(
@@ -221,6 +251,8 @@ class JobSummary:
     cost_by_lane: dict[str, float]
     throttle_seconds: float
     cache_hit_ratio: float
+    peek_tokens: int
+    finish_reason: str
     caveats: Sequence[Caveat]
 
 
@@ -236,5 +268,7 @@ def summarize(events: Sequence[Event]) -> JobSummary:
         cost_by_lane=cost_by_lane(events),
         throttle_seconds=throttle_seconds(events),
         cache_hit_ratio=cache_hit_ratio(events),
+        peek_tokens=peek_tokens_spent(events),
+        finish_reason=finish_reason(events),
         caveats=derive_caveats(events),
     )

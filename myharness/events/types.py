@@ -29,11 +29,16 @@ ASK_ANSWER: Final = "ask.answer"
 THROTTLE_COOLDOWN: Final = "throttle.cooldown"
 THROTTLE_WAIT: Final = "throttle.wait"
 THROTTLE_GAVE_UP: Final = "throttle.gave_up"
+PEEK: Final = "peek"
+LIMIT_REACHED: Final = "limit.reached"
+NO_PROGRESS: Final = "no_progress"
+HANDOFF_RESTART: Final = "handoff.restart"
 
 KNOWN_TYPES: Final = frozenset({
     JOB_START, JOB_FINISH, PLAN_UPDATE, INGRESS, PROXY_ROUTE,
     DISPATCH_START, DISPATCH_END, ARTIFACT_READ, CTX, ASK_USER, ASK_ANSWER,
     THROTTLE_COOLDOWN, THROTTLE_WAIT, THROTTLE_GAVE_UP,
+    PEEK, LIMIT_REACHED, NO_PROGRESS, HANDOFF_RESTART,
 })
 
 # --- dispatch outcomes ---------------------------------------------------
