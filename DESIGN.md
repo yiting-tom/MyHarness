@@ -356,6 +356,7 @@ blob 與 note 分屬兩棵子樹，因為兩者的存取規則完全不同（見
 | `est_tokens` 估算 | ASCII/4 + 非 ASCII×1.5 | 單一 4 chars/token 會低估中文 4–6 倍，而低估正是會炸掉 worker 的方向 |
 | Handle 欄位上限 | headline 200 字元、整體序列化 2000 | live 實測 handle 為 215–216 字元；被要求寫 3000 字報告時仍在界內 |
 | 工具裁切 | 每個 LaneType 明確宣告，其餘 `disallowed_tools` | 省 ≈16,468 tokens/worker（196k 的 8.4%），spike #7 |
+| 兩個資料工具的定義成本 | ≈150 tokens/worker turn | 把裁切省下的 16,468 還回去 0.9%；相對 60k lane 預算 0.25% |
 | Transient 重試 | 時間預算 300s、退避 4s→60s 加 full jitter、per-backend 共享閘 | 次數上限會在限流恢復前就放棄；spike #6 |
 | SDK 內建重試 | `CLAUDE_CODE_MAX_RETRIES=2` | 預設 10 次會在單一呼叫內耗掉數分鐘，harness 看不到也協調不了 |
 | 降級路徑重試 | 2 次後回失敗 handle | 離線驗證 |
