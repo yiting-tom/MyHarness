@@ -8,3 +8,6 @@ spikes/__pycache__/
 *.egg-info/
 dist/
 build/
+.coverage
+.codegraph/
+jobs-scratch/

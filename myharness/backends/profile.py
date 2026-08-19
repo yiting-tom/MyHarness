@@ -124,15 +124,17 @@ ANTHROPIC_DIRECT: Final = BackendProfile(
     capabilities=frozenset(BackendCapability),
 )
 
-#: nemotron-3-super-120b-a12b:free is the free tier that still declares
-#: structured outputs; the ultra:free variant does not, and in practice could not
-#: finish three short requests in twelve minutes (spikes/RESULTS.md §Spike #5).
+#: The paid super-120b variant, not ``:free``. The free tiers are unusable here:
+#: ``ultra:free`` does not declare structured outputs and could not finish three
+#: short requests in twelve minutes, and ``super-120b:free`` hits OpenRouter's
+#: per-day free-model quota with a 429 (spikes/RESULTS.md §Spike #5). At
+#: $0.08/M in and $0.40/M out the paid variant costs cents.
 OPENROUTER: Final = BackendProfile(
     name="openrouter",
     models={
-        ModelTier.STRONG: "nvidia/nemotron-3-super-120b-a12b:free",
-        ModelTier.MID: "nvidia/nemotron-3-super-120b-a12b:free",
-        ModelTier.CHEAP: "nvidia/nemotron-3-super-120b-a12b:free",
+        ModelTier.STRONG: "nvidia/nemotron-3-super-120b-a12b",
+        ModelTier.MID: "nvidia/nemotron-3-super-120b-a12b",
+        ModelTier.CHEAP: "nvidia/nemotron-3-nano-30b-a3b",
     },
     capabilities=frozenset(BackendCapability),
     base_url="https://openrouter.ai/api",
