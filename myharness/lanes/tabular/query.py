@@ -268,7 +268,8 @@ class QueryRunner:
                 schema_cols, schema_rows = run_guarded(
                     conn, f"DESCRIBE {table}", timeout_s=self._timeout_s, fetch=500
                 )
-                (count,), = conn.execute(f"SELECT count(*) FROM {table}").fetchall()
+                with interruptible(conn, self._timeout_s):
+                    (count,), = conn.execute(f"SELECT count(*) FROM {table}").fetchall()
                 sample_cols, sample_rows = run_guarded(
                     conn, f"SELECT * FROM {table} LIMIT {INSPECT_SAMPLE_ROWS}",
                     timeout_s=self._timeout_s, fetch=INSPECT_SAMPLE_ROWS,
