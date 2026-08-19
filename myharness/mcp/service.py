@@ -192,16 +192,35 @@ class AnalysisService:
         await log.append(
             job_id, INGRESS, payload=str(meta.id), bytes=meta.bytes, routed=False,
         )
+        # An event in the log is not an announcement -- nothing in the
+        # orchestrator reads the log. Without this the payload is stored
+        # somewhere nobody will look, and the client is told otherwise.
+        announced = False
+        if handle is not None and handle.running:
+            handle.runner.notify(
+                f"【系統】使用者提供了新資料：{meta.id}（{meta.bytes:,} bytes"
+                + (f"，schema {schema}" if schema else "")
+                + "）。尚未路由到任何 lane —— 由你決定要不要用、給誰用。"
+                " 記得在 dispatch 的 inputs 帶上這個 id，否則 lane 讀不到。"
+            )
+            handle.notify()
+            announced = True
         return {
             "ok": True,
             "artifact": str(meta.id),
             "bytes": meta.bytes,
-            # Saying so beats staying silent: a client that assumes the data
-            # reached the right lane will not understand the report it gets.
+            # Both stated: a client that assumes its data reached a lane -- or
+            # reached anyone -- will not understand the report it gets.
             "routed": False,
-            "note": "stored and announced to the orchestrator, but not routed "
-                    "to a lane -- no proxy exists yet, so the orchestrator "
-                    "decides what to do with it.",
+            "announced": announced,
+            "note": (
+                "stored as a blob and announced to the orchestrator, which "
+                "decides whether to use it. Not routed to a lane -- no proxy "
+                "exists yet."
+                if announced else
+                "stored as a blob, but this analysis is not running here, so "
+                "nothing was announced. Only the stored artifact remains."
+            ),
         }
 
     # ---- answer ----------------------------------------------------------

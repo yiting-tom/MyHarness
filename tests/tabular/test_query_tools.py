@@ -149,12 +149,14 @@ class TestAuthorisation:
     async def test_sql_cannot_reach_a_file_by_path(self, bench, tmp_path: Path):
         toolbox, ids, _ = bench
         planted = tmp_path / "planted.csv"
-        planted.write_text("secret\n42\n", encoding="utf-8")
+        # A distinctive sentinel: refusals echo the path, and pytest's own tmp
+        # directories are numbered, so a bare "42" made this test flaky.
+        planted.write_text("secret\nSENTINEL_LEAKED_VALUE\n", encoding="utf-8")
         out = await call(
             toolbox, "duckdb_query", artifacts=[str(ids["txns"].id)],
             sql=f"SELECT * FROM read_csv_auto('{planted}')",
         )
-        assert out.startswith("ERROR") and "42" not in out
+        assert out.startswith("ERROR") and "SENTINEL_LEAKED_VALUE" not in out
 
     async def test_sql_cannot_reach_the_job_index(self, bench, tmp_path: Path):
         toolbox, ids, _ = bench

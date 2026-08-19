@@ -209,7 +209,46 @@ class TestProvide:
         job_id = (await service.start("t"))["job_id"]
         out = await service.provide(job_id, "x,y\n1,2\n")
         assert out["routed"] is False
-        assert "not routed" in out["note"]
+        assert "Not routed" in out["note"] or "not routed" in out["note"]
+
+    async def test_the_orchestrator_is_actually_told(self, service):
+        """An INGRESS event is not an announcement -- nothing in the
+        orchestrator reads the event log. Without a notice the payload sits
+        somewhere nobody will look while the client is told it arrived."""
+        job_id = (await service.start("t"))["job_id"]
+        out = await service.provide(job_id, "x,y\n1,2\n", name="extra.csv")
+        assert out["announced"] is True
+        notices = service.manager.get(job_id).runner.take_notices()
+        assert len(notices) == 1
+        assert "raw/extra.csv" in notices[0]
+        assert "inputs" in notices[0], "the notice must say how to grant it"
+
+    async def test_the_notice_reaches_the_next_prompt(self, service):
+        """Queued is not delivered: the loop has to prefer news over nudges."""
+        from myharness.orchestrator.loop import OrchestratorLoop
+
+        job_id = (await service.start("t"))["job_id"]
+        runner = service.manager.get(job_id).runner
+        await service.provide(job_id, "x", name="extra.csv")
+        loop = OrchestratorLoop(runner=runner, lanes=LaneRegistry(), backend="anthropic")
+        assert "raw/extra.csv" in (loop._next_prompt() or "")
+
+    async def test_a_notice_is_delivered_once(self, service):
+        job_id = (await service.start("t"))["job_id"]
+        runner = service.manager.get(job_id).runner
+        await service.provide(job_id, "x")
+        assert runner.take_notices()
+        assert runner.take_notices() == []
+
+    async def test_providing_to_a_job_running_elsewhere_says_nothing_was_told(
+        self, service, tmp_path: Path
+    ):
+        job_id = (await service.start("t"))["job_id"]
+        loop_of(job_id).released.set()
+        await service.manager.get(job_id).task
+        out = await service.provide(job_id, "x")
+        assert out["ok"] and out["announced"] is False
+        assert "nothing was announced" in out["note"]
 
     async def test_an_empty_payload_is_refused(self, service):
         job_id = (await service.start("t"))["job_id"]

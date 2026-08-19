@@ -332,6 +332,11 @@ class OrchestratorLoop:
         """What to say next, if anything, without a human in the loop."""
         if self.runner.must_abort:
             return None
+        # News first. A nudge can be repeated next turn; an announcement that
+        # data has arrived cannot, and losing it means the client's payload is
+        # stored where nobody will look for it.
+        if notices := self.runner.take_notices():
+            return "\n".join(notices)
         if idle:
             return IDLE_NUDGE
         if notice := self.runner.wrap_up_notice():
