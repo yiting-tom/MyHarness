@@ -171,3 +171,11 @@ async def test_report_without_sections_still_summarises(bench):
     delivery = await _build(bench, report)
     assert delivery.sections == ()
     assert "沒有分節" in delivery.executive_summary
+
+
+async def test_delivery_records_who_wrote_the_report(bench):
+    """The orchestrator plans and a lane writes; a salvaged report must say so."""
+    report = await _write_report(bench)
+    delivery = await _build(bench, report)
+    assert delivery.metadata["produced_by"] == "lane:syn"
+    assert delivery.metadata["report_tokens"] > 0

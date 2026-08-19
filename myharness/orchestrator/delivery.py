@@ -144,7 +144,12 @@ async def build_delivery(
 
     return Delivery(
         executive_summary=summary or "（報告沒有摘要章節）",
-        key_findings=findings, confidence=confidence, sections=sections, **base,
+        key_findings=findings, confidence=confidence, sections=sections,
+        # Who wrote the report is part of the guarantee: the orchestrator plans,
+        # a lane writes. A harness-salvaged report is legitimate but must say so.
+        metadata={"produced_by": meta.produced_by,
+                  "report_tokens": meta.est_tokens or 0},
+        **base,
     )
 
 

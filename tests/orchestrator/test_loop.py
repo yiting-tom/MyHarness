@@ -46,6 +46,15 @@ async def _finish_via_tools(bench, report_name: str = "report") -> None:
 # --- normal completion ----------------------------------------------------
 
 
+async def test_the_job_runs_until_finish_is_called(bench):
+    """It stops when finish is called, not when it runs out of things to say."""
+    session = ScriptedSession(turns=[tool_turn() for _ in range(5)], usage_series=[1_000])
+    factory = ScriptedSessionFactory([session])
+    outcome = await make_loop(bench, factory).run()
+    assert outcome.turns > 1, "acting turns must not end the loop"
+    assert any("請繼續" in text for text in session.sent)
+
+
 async def test_a_finished_job_stops_after_one_session(bench):
     async def turn(_):
         await _finish_via_tools(bench)
@@ -204,6 +213,127 @@ async def test_finish_event_carries_the_reason(bench):
     session = ScriptedSession(turns=[[result_msg()]], usage_series=[1_000])
     await make_loop(bench, ScriptedSessionFactory([session])).run()
     (event,) = await bench.kinds(JOB_FINISH)
-    assert event.get("reason") == "finished"
-    assert event.get("salvaged") is True, "the loop ended normally but nobody called finish"
+    # A session that called nothing is idle, not finished. Reporting "finished"
+    # was the bug the golden job found twice.
+    assert event.get("reason") == "idle"
+    assert event.get("salvaged") is True
     assert event.get("report")
+
+
+# --- the loop must see what a turn actually did ---------------------------
+
+
+def tool_turn(name: str = "plan_update"):
+    from claude_agent_sdk import AssistantMessage, ToolUseBlock
+
+    return [
+        AssistantMessage(
+            content=[ToolUseBlock(id="t1", name=f"mcp__harness__{name}", input={})],
+            model="m",
+        ),
+        result_msg(),
+    ]
+
+
+def error_turn(*, transient: bool = False):
+    from claude_agent_sdk import ResultMessage, SystemMessage
+
+    messages = []
+    if transient:
+        messages.append(SystemMessage(subtype="api_retry",
+                                      data={"error_status": 429, "error": "rate_limit"}))
+    messages.append(ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1,
+                                  is_error=True, num_turns=1, session_id="s"))
+    return messages
+
+
+async def test_a_silent_turn_is_nudged_before_giving_up(bench):
+    """Text alone changes nothing — it acts only through tools."""
+    from myharness.orchestrator.loop import MAX_IDLE_TURNS
+
+    session = ScriptedSession(turns=[[result_msg()] for _ in range(6)],
+                              usage_series=[1_000])
+    outcome = await make_loop(bench, ScriptedSessionFactory([session])).run()
+
+    assert outcome.reason == "idle"
+    assert any("沒有呼叫任何工具" in text for text in session.sent), "nudge it first"
+    assert len(session.sent) == MAX_IDLE_TURNS + 1
+
+
+async def test_acting_resets_the_idle_counter(bench):
+    """One tool call buys the orchestrator more turns before the idle cap bites."""
+    silent = [result_msg()]
+    session = ScriptedSession(
+        turns=[silent, silent, tool_turn(), silent, silent, silent, silent],
+        usage_series=[1_000],
+    )
+    outcome = await make_loop(bench, ScriptedSessionFactory([session])).run()
+    assert outcome.reason == "idle"
+    assert outcome.turns == 6, "2 idle + 1 acting (resets) + 3 idle"
+
+
+async def test_an_errored_turn_stops_rather_than_looping(bench):
+    """A failed turn produced nothing to react to; retrying blindly repeats it."""
+    session = ScriptedSession(turns=[error_turn()] * 4, usage_series=[1_000])
+    outcome = await make_loop(bench, ScriptedSessionFactory([session])).run()
+    assert outcome.reason == "session_error"
+    assert len(session.sent) == 1
+
+
+async def test_a_persistent_rate_limit_is_named_as_such(bench, monkeypatch):
+    """"The backend refused us" and "the model went quiet" call for opposite fixes.
+
+    One 429 is retried; a backend that keeps refusing past the gate's time
+    budget is reported as unavailable rather than as an idle orchestrator.
+    """
+    import random
+
+    from myharness.backends import gate as gate_module
+    from tests.lanes.conftest import FakeClock
+
+    clock = FakeClock()
+    monkeypatch.setattr(
+        gate_module, "gates",
+        gate_module.GateRegistry(retry_budget_s=30.0, clock=clock,
+                                 sleep=clock.sleep, rng=random.Random(0)),
+    )
+    monkeypatch.setattr("myharness.orchestrator.loop.gates", gate_module.gates)
+
+    session = ScriptedSession(turns=[error_turn(transient=True)] * 30,
+                              usage_series=[1_000])
+    outcome = await make_loop(bench, ScriptedSessionFactory([session])).run()
+    assert outcome.reason == "backend_unavailable"
+    assert outcome.salvaged
+
+
+async def test_a_rate_limit_after_real_work_does_not_abandon_the_job(bench, monkeypatch):
+    """A 429 can land at the end of a turn that already planned and dispatched.
+
+    The third golden run lost exactly that: one turn did real work, hit a rate
+    limit on the way out, and the whole job stopped.
+    """
+    import random
+
+    from myharness.backends import gate as gate_module
+    from .conftest import FakeLane  # noqa: F401
+
+    from tests.lanes.conftest import FakeClock  # virtual time, so no real sleeping
+
+    clock = FakeClock()
+    monkeypatch.setattr(
+        gate_module, "gates",
+        gate_module.GateRegistry(retry_budget_s=60.0, clock=clock,
+                                 sleep=clock.sleep, rng=random.Random(0)),
+    )
+    monkeypatch.setattr("myharness.orchestrator.loop.gates", gate_module.gates)
+
+    worked_then_failed = tool_turn() + error_turn(transient=True)
+    session = ScriptedSession(
+        turns=[worked_then_failed, tool_turn(), *[[result_msg()]] * 4],
+        usage_series=[1_000],
+    )
+    outcome = await make_loop(bench, ScriptedSessionFactory([session])).run()
+
+    assert outcome.turns > 1, "the job must survive a transient error"
+    assert outcome.reason != "backend_unavailable"
+    assert any("請繼續" in text for text in session.sent)

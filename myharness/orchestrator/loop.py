@@ -23,11 +23,21 @@ from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
     ResultMessage,
+    SystemMessage,
     TextBlock,
+    ToolUseBlock,
 )
 
+from myharness.backends.gate import ThrottleReport, gates
 from myharness.backends.profile import BackendProfile, registry as backends
-from myharness.events.types import CTX, HANDOFF_RESTART, JOB_FINISH, JOB_START
+from myharness.lanes.worker import TRANSIENT_STATUSES
+from myharness.events.types import (
+    CTX,
+    HANDOFF_RESTART,
+    JOB_FINISH,
+    JOB_START,
+    THROTTLE_WAIT,
+)
 from myharness.jobs.runner import JobRunner
 from myharness.jobs.spec import JobPhase
 from myharness.lanes.types import LaneRegistry
@@ -37,6 +47,21 @@ from myharness.orchestrator.tools import OrchestratorTools
 
 #: Hard stop on conversation turns, independent of the job's own ceilings.
 MAX_TURNS_PER_SESSION = 40
+
+#: How many turns in a row the orchestrator may produce no tool call before the
+#: loop stops waiting for it to act.
+MAX_IDLE_TURNS = 2
+
+CONTINUE_NUDGE = """\
+【系統】請繼續。若分析已足夠，派一條 synthesis lane 寫報告，再呼叫 finish 收工。
+"""
+
+IDLE_NUDGE = """\
+【系統】你上一輪沒有呼叫任何工具。你只能透過工具行動 —— 純文字回覆不會有任何效果。
+
+如果還沒規劃，先呼叫 plan_update。如果已經派工，用 await_tasks 收割。
+如果認為工作已完成，派一條 synthesis lane 寫報告後呼叫 finish。
+"""
 
 HANDOFF_REQUEST = """\
 【系統】你的 context 已達 {pct:.0%}，即將交接給一個全新的 orchestrator。
@@ -80,6 +105,20 @@ KICKOFF = """\
 """
 
 
+@dataclass(frozen=True, slots=True)
+class TurnResult:
+    """What one conversation turn actually did."""
+
+    tool_calls: int = 0
+    errored: bool = False
+    transient: bool = False
+    text: str = ""
+
+    @property
+    def acted(self) -> bool:
+        return self.tool_calls > 0
+
+
 @dataclass
 class LoopOutcome:
     """What a job run ended as."""
@@ -115,6 +154,9 @@ class OrchestratorLoop:
     tools: OrchestratorTools | None = None
     context_peak: int = 0
     turns: int = 0
+    _stop_reason: str = ""
+    _transient_attempt: int = 0
+    _throttle: ThrottleReport = field(default_factory=ThrottleReport)
 
     def __post_init__(self) -> None:
         if self.tools is None:
@@ -167,6 +209,13 @@ class OrchestratorLoop:
                 status=self.runner.status(),
             )
 
+        reason = self._stop_reason or reason
+        if self._throttle.waits:
+            await self.runner.events.append(
+                spec.job_id, THROTTLE_WAIT, backend=self.profile.name,
+                lane="orchestrator", seconds=round(self._throttle.waited_s, 3),
+                waits=self._throttle.waits,
+            )
         await self.runner.settle()
         assert self.tools is not None
         salvaged = not self.tools.finished
@@ -193,10 +242,10 @@ class OrchestratorLoop:
 
         async with self.sessions.open(self._options(), limit=spec.context_window) as session:
             prompt: str | None = first_prompt
+            idle_turns = 0
             while prompt is not None:
                 self.turns += 1
-                async for message in session.send(prompt):
-                    _ = message  # tool calls are handled by the SDK, not here
+                turn = await self._consume(session, prompt)
 
                 usage = await session.context_usage()
                 self.context_peak = max(self.context_peak, usage.used)
@@ -207,7 +256,31 @@ class OrchestratorLoop:
 
                 if self.tools.finished:
                     return False
+                if turn.errored:
+                    if not turn.transient:
+                        # A genuine failure: nothing to react to and nothing a
+                        # retry would change.
+                        self._stop_reason = "session_error"
+                        return False
+                    # A rate limit can land at the end of a turn that already
+                    # did real work. Abandoning the job here would throw that
+                    # away, so wait out the backend's shared cooldown instead.
+                    gate = gates.for_backend(self.profile.name)
+                    if not await gate.back_off(self._transient_attempt, self._throttle):
+                        self._stop_reason = "backend_unavailable"
+                        return False
+                    self._transient_attempt += 1
+                    prompt = CONTINUE_NUDGE
+                    continue
+                self._transient_attempt = 0
                 if self.turns >= MAX_TURNS_PER_SESSION:
+                    self._stop_reason = "max_turns"
+                    return False
+
+                idle_turns = 0 if turn.acted else idle_turns + 1
+                if idle_turns > MAX_IDLE_TURNS:
+                    # It only acts through tools; text alone changes nothing.
+                    self._stop_reason = "idle"
                     return False
 
                 if usage.used >= threshold:
@@ -220,13 +293,47 @@ class OrchestratorLoop:
                         pass
                     return True
 
-                prompt = self._next_prompt()
+                prompt = self._next_prompt(idle=not turn.acted)
         return False
 
-    def _next_prompt(self) -> str | None:
+    async def _consume(self, session, prompt: str) -> TurnResult:
+        """Read a turn's messages instead of discarding them.
+
+        Discarding them made the loop blind: a turn that failed, or one that
+        replied in prose without calling anything, looked exactly like a turn
+        that had finished its work — so the job ended having done nothing and
+        reported success.
+        """
+        tool_calls = 0
+        errored = False
+        transient = False
+        texts: list[str] = []
+
+        async for message in session.send(prompt):
+            if isinstance(message, AssistantMessage):
+                for block in message.content:
+                    if isinstance(block, ToolUseBlock):
+                        tool_calls += 1
+                    elif isinstance(block, TextBlock):
+                        texts.append(block.text)
+            elif isinstance(message, SystemMessage):
+                if message.subtype == "api_retry":
+                    transient = True
+            elif isinstance(message, ResultMessage):
+                errored = bool(message.is_error)
+                status = getattr(message, "api_error_status", None)
+                if isinstance(status, int) and status in TRANSIENT_STATUSES:
+                    transient = True
+
+        return TurnResult(tool_calls=tool_calls, errored=errored,
+                          transient=transient, text="\n".join(texts)[:500])
+
+    def _next_prompt(self, *, idle: bool = False) -> str | None:
         """What to say next, if anything, without a human in the loop."""
         if self.runner.must_abort:
             return None
+        if idle:
+            return IDLE_NUDGE
         if notice := self.runner.wrap_up_notice():
             return notice
         if self.runner.no_progress:
@@ -236,7 +343,10 @@ class OrchestratorLoop:
             )
         if self.runner.state.running() or self.runner.state.uncollected():
             return "【系統】仍有未收割的任務。請用 await_tasks 收割後再決定下一步。"
-        return None
+        # The job runs until finish is called, not until the orchestrator runs
+        # out of things to say. Stopping on silence let a job end mid-plan and
+        # report success. Idle turns and the turn cap are what bound this.
+        return CONTINUE_NUDGE
 
     async def _salvage(self) -> None:
         """Deliver something when the orchestrator did not finish itself.
