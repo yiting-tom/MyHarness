@@ -102,11 +102,21 @@ class FakeClock:
 
 
 @pytest.fixture(autouse=True)
-def fast_gates(monkeypatch):
-    """Give every test a fresh, instant, deterministic backend gate."""
+def fast_gates(request, monkeypatch):
+    """Give every offline test a fresh, instant, deterministic backend gate.
+
+    Live tests must keep the real clock. Handing them a virtual one makes the
+    throttle gate's waits imaginary, so it retries a rate-limited provider with
+    no delay at all -- the exact behaviour the gate exists to prevent.
+    """
     import random as _random
 
     from myharness.backends import gate as gate_module
+
+    if request.node.get_closest_marker("live"):
+        gate_module.gates.reset()
+        yield gate_module.gates
+        return
 
     clock = FakeClock()
     fresh = gate_module.GateRegistry(
@@ -115,7 +125,7 @@ def fast_gates(monkeypatch):
     monkeypatch.setattr(gate_module, "gates", fresh)
     monkeypatch.setattr("myharness.lanes.worker.gates", fresh)
     fresh.clock = clock
-    return fresh
+    yield fresh
 
 
 # --- bench ----------------------------------------------------------------

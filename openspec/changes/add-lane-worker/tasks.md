@@ -63,11 +63,11 @@
 ## 8. Live 測試（驗證本 change 的存在理由）
 
 - [x] 8.1 建立最小的純程式碼 driver：註冊一個 lane type、建立 instance、餵一個真實任務、印出 handle
-- [ ] 8.2 **Live**：被明確要求寫 3000 字報告時，回傳的 handle 仍符合 schema 且不超過大小上界（規格：被要求寫長文時仍只回傳 handle）
-- [ ] 8.3 **Live**：`task_budget` 設到不足以完成任務，驗證得到 `budget_exceeded` handle 而非例外，且含部分結果引用（規格：超出預算回傳部分結果）
-- [ ] 8.4 **Live**：`max_turns` 設到不足，驗證得到 `max_turns` handle 而非例外
-- [ ] 8.5 **Live**：同一 lane 連續兩次任務，驗證第二次能看到第一次寫入 state 的結論、且看不到第一次未寫入 state 的細節
-- [ ] 8.6 **Live**：以 OpenRouter 的非 Anthropic 模型執行一次，驗證 handle 契約仍成立
+- [x] 8.2 **Live**：被明確要求寫 3000 字報告時，回傳的 handle 仍符合 schema 且不超過大小上界（規格：被要求寫長文時仍只回傳 handle）
+- [x] 8.3 **Live**：`task_budget` 設到不足以完成任務，驗證得到 `budget_exceeded` handle 而非例外，且含部分結果引用（規格：超出預算回傳部分結果）
+- [x] 8.4 **Live**：`max_turns` 設到不足，驗證得到 `max_turns` handle 而非例外
+- [x] 8.5 **Live**：同一 lane 連續兩次任務，驗證第二次能看到第一次寫入 state 的結論、且看不到第一次未寫入 state 的細節
+- [x] 8.6 **Live**：以 OpenRouter 的非 Anthropic 模型執行一次，驗證 handle 契約仍成立
 - [ ] 8.7 量測並記錄：裁切前後的固定 prefix token 數、prompt cache 命中率、單次執行成本，寫入 `spikes/RESULTS.md`
 
 ## 10. 後端節流（live 測試發現：付費模型仍持續 429）
