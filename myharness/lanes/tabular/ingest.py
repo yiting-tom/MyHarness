@@ -63,8 +63,14 @@ def choose_reader(path: Path, meta: ArtifactMeta) -> str | IngestRefusal:
     )
 
 
-def check_size(meta: ArtifactMeta, *, limit: int = MAX_INGEST_BYTES) -> IngestRefusal | None:
-    """Decided from the index alone -- a refused blob is never opened."""
+def check_size(meta: ArtifactMeta, *, limit: int | None = None) -> IngestRefusal | None:
+    """Decided from the index alone -- a refused blob is never opened.
+
+    ``limit`` is resolved here rather than as a default argument so the module
+    constant stays authoritative: a default is bound once at import and cannot
+    be changed afterwards, which makes the constant a decoration.
+    """
+    limit = MAX_INGEST_BYTES if limit is None else limit
     if meta.bytes <= limit:
         return None
     return IngestRefusal(

@@ -36,7 +36,13 @@ from myharness.lanes.tabular.render import (
     Rendered,
     render_rows,
 )
-from myharness.lanes.tabular.sandbox import Ingest, SandboxError, run_guarded, sandboxed
+from myharness.lanes.tabular.sandbox import (
+    Ingest,
+    SandboxError,
+    interruptible,
+    run_guarded,
+    sandboxed,
+)
 
 #: A query that has not answered in this long is not going to (design.md D5).
 DEFAULT_TIMEOUT_S = 30.0
@@ -299,28 +305,32 @@ class QueryRunner:
             return QueryFailure("bad_into_name", str(exc), bindings)
 
         target = scratch / "result.csv"
-        try:
-            cursor = conn.execute(sql)
-        except duckdb.Error as exc:
-            return self._sql_failure(exc, bindings)
-        columns = tuple(d[0] for d in (cursor.description or ()))
-
         written = 0
         limited = False
-        with target.open("w", newline="", encoding="utf-8") as handle:
-            writer = csv.writer(handle)
-            writer.writerow(columns)
-            while True:
-                batch = cursor.fetchmany(_INTO_BATCH)
-                if not batch:
-                    break
-                if written + len(batch) > MAX_INTO_ROWS:
-                    batch = batch[: MAX_INTO_ROWS - written]
-                    limited = True
-                writer.writerows(batch)
-                written += len(batch)
-                if limited:
-                    break
+        try:
+            # The guard has to span the fetch loop, not just the execute: this
+            # path is almost entirely fetching, and DuckDB streams.
+            with interruptible(conn, self._timeout_s):
+                cursor = conn.execute(sql)
+                columns = tuple(d[0] for d in (cursor.description or ()))
+                with target.open("w", newline="", encoding="utf-8") as handle:
+                    writer = csv.writer(handle)
+                    writer.writerow(columns)
+                    while True:
+                        batch = cursor.fetchmany(_INTO_BATCH)
+                        if not batch:
+                            break
+                        if written + len(batch) > MAX_INTO_ROWS:
+                            batch = batch[: MAX_INTO_ROWS - written]
+                            limited = True
+                        writer.writerows(batch)
+                        written += len(batch)
+                        if limited:
+                            break
+        except duckdb.Error as exc:
+            # No artifact: a half-written CSV published as a result is worse
+            # than no result, because nothing downstream can tell.
+            return self._sql_failure(exc, bindings)
         return _PendingInto(target, name, written, columns, limited)
 
     def _sql_failure(self, exc: duckdb.Error, bindings: str) -> QueryFailure:

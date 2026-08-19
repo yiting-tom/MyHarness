@@ -76,6 +76,26 @@ def sandboxed(ingests: Sequence[Ingest]) -> Iterator[duckdb.DuckDBPyConnection]:
         conn.close()
 
 
+@contextmanager
+def interruptible(conn: duckdb.DuckDBPyConnection, timeout_s: float) -> Iterator[None]:
+    """Cut anything inside this block off after ``timeout_s``.
+
+    Covers the whole block, not just ``execute``: DuckDB streams, so a query
+    that returns instantly can still spend minutes inside ``fetchmany``. The
+    ``into`` path is entirely fetching, and an earlier version of it wrapped
+    only the execute -- which is to say it had no timeout at all.
+    """
+    timer = threading.Timer(timeout_s, conn.interrupt)
+    timer.start()
+    try:
+        yield
+    finally:
+        timer.cancel()
+        # cancel() only signals; join so no timer can fire into the next query
+        # on this connection.
+        timer.join()
+
+
 def run_guarded(
     conn: duckdb.DuckDBPyConnection, sql: str, *, timeout_s: float, fetch: int
 ) -> tuple[list[str], list[tuple[Any, ...]]]:
@@ -86,22 +106,18 @@ def run_guarded(
     timer thread (design.md D5). ``fetch`` is honoured here rather than by
     appending a LIMIT: rewriting the worker's SQL would change its meaning.
     """
-    timer = threading.Timer(timeout_s, conn.interrupt)
-    timer.start()
-    try:
+    with interruptible(conn, timeout_s):
         cursor = conn.execute(sql)
         columns = [d[0] for d in (cursor.description or ())]
         rows = cursor.fetchmany(fetch)
         return columns, [tuple(r) for r in rows]
-    finally:
-        timer.cancel()
-        # cancel() only signals; join so no timer can fire into the next query
-        # on this connection.
-        timer.join()
 
 
 def _first_line(exc: BaseException) -> str:
     return str(exc).splitlines()[0] if str(exc) else type(exc).__name__
 
 
-__all__ = ["Ingest", "SANDBOX_PRAGMAS", "SandboxError", "run_guarded", "sandboxed"]
+__all__ = [
+    "Ingest", "SANDBOX_PRAGMAS", "SandboxError",
+    "interruptible", "run_guarded", "sandboxed",
+]

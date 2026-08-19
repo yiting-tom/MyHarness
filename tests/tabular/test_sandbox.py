@@ -199,3 +199,26 @@ class TestRunGuarded:
         run_guarded(conn, "SELECT 1", timeout_s=30.0, fetch=1)
         assert threading.active_count() == before
         assert conn.execute("SELECT 2").fetchall() == [(2,)]
+
+
+class TestInterruptible:
+    def test_guards_the_whole_block_not_just_execute(self, conn):
+        """DuckDB streams: execute can return instantly and fetching run for
+        minutes. The `into` path is almost entirely fetching, and wrapping only
+        the execute left it with no timeout at all."""
+        from myharness.lanes.tabular.sandbox import interruptible
+
+        with pytest.raises(duckdb.Error):
+            with interruptible(conn, 0.5):
+                cursor = conn.execute(
+                    "SELECT a.range, b.range FROM range(1000000) a, range(100000) b"
+                )
+                while cursor.fetchmany(1000):
+                    pass
+
+    def test_a_fast_block_is_not_disturbed(self, conn):
+        from myharness.lanes.tabular.sandbox import interruptible
+
+        with interruptible(conn, 30.0):
+            assert conn.execute("SELECT 1").fetchall() == [(1,)]
+        assert conn.execute("SELECT 2").fetchall() == [(2,)]
