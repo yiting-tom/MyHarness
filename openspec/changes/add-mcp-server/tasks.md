@@ -31,30 +31,30 @@
 
 ## 4. 六個對外工具
 
-- [ ] 4.1 `analysis_start(task, ...)` → `{job_id, status}`
-- [ ] 4.2 `analysis_poll(job_id, wait)` → 進度摘要 + 待答問題（long-poll）
-- [ ] 4.3 `analysis_provide(job_id, payload, name)` → `{artifact, routed: false}`
+- [x] 4.1 `analysis_start(task, ...)` → `{job_id, status}`
+- [x] 4.2 `analysis_poll(job_id, wait)` → 進度摘要 + 待答問題（long-poll）
+- [x] 4.3 `analysis_provide(job_id, payload, name)` → `{artifact, routed: false}`
       （規格：客戶端能補充資料且該資料不進入任何 context）
-- [ ] 4.4 `analysis_answer(job_id, question_id, text)` → `{ok}`；未知 id 要拒絕
-- [ ] 4.5 `analysis_result(job_id)` → 摘要 + 價目表 + caveats + 成本
-- [ ] 4.6 `analysis_drill(job_id, section_id)` → 單節全文
-- [ ] 4.7 全部失敗回文字結果不拋例外（design D5；規格：工具失敗以可據以行動的訊息回覆）
-- [ ] 4.8 「不在執行中」與「查無此 job」分開回報（規格：不在執行中與不存在是兩件事）
+- [x] 4.4 `analysis_answer(job_id, question_id, text)` → `{ok}`；未知 id 要拒絕
+- [x] 4.5 `analysis_result(job_id)` → 摘要 + 價目表 + caveats + 成本
+- [x] 4.6 `analysis_drill(job_id, section_id)` → 單節全文
+- [x] 4.7 全部失敗回文字結果不拋例外（design D5；規格：工具失敗以可據以行動的訊息回覆）
+- [x] 4.8 「不在執行中」與「查無此 job」分開回報（規格：不在執行中與不存在是兩件事）
 
 ## 5. Stdio server
 
-- [ ] 5.1 `myharness/mcp/server.py`：`mcp.server.Server` + `stdio_server()`
+- [x] 5.1 `myharness/mcp/server.py`：`mcp.server.Server` + `stdio_server()`
       （design D7 —— 與 `create_sdk_mcp_server` 不是同一個東西）
-- [ ] 5.2 工具 schema 明確宣告 `required`，不用簡寫（前一個 change 的教訓）
-- [ ] 5.3 `myharness-mcp` 進入點與 `--root` / `--backend` 參數
-- [ ] 5.4 以真實 MCP client session 走一次 list_tools / call_tool 的測試
+- [x] 5.2 工具 schema 明確宣告 `required`，不用簡寫（前一個 change 的教訓）
+- [x] 5.3 `myharness-mcp` 進入點與 `--root` / `--backend` 參數
+- [x] 5.4 以真實 MCP client session 走一次 list_tools / call_tool 的測試
 
 ## 6. 跨 process 的結果
 
-- [ ] 6.1 `analysis_result` / `analysis_drill` 只讀事件流與 store
+- [x] 6.1 `analysis_result` / `analysis_drill` 只讀事件流與 store
       （規格：結果查詢不依賴分析仍在執行）
-- [ ] 6.2 測試：對一個「不在 manager 裡」的 job_id 仍能取得結果
-- [ ] 6.3 測試：對同一個 job_id 的 poll 回「不在執行中」而非「查無此 job」
+- [x] 6.2 測試：對一個「不在 manager 裡」的 job_id 仍能取得結果
+- [x] 6.3 測試：對同一個 job_id 的 poll 回「不在執行中」而非「查無此 job」
 
 ## 7. 文件與端到端
 
