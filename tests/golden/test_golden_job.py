@@ -99,3 +99,39 @@ def test_the_raw_blob_never_became_a_note(golden: GoldenResult):
     """The invariant, checked against a real run rather than a fixture."""
     assert golden.blob_id.split("/")[1] == "blob"
     assert not golden.delivery.report_artifact.startswith(golden.blob_id)
+
+
+# --- data-flow health (added after the fifth run shipped a hollow report) ---
+
+
+def test_no_output_was_produced_without_a_grant(golden: GoldenResult):
+    """The fifth run passed every other assertion here and still delivered a
+    report from a dispatch that had been granted nothing."""
+    from myharness.dataflow import AnomalyKind
+
+    offenders = [a for a in golden.anomalies
+                 if a.kind is AnomalyKind.UNGRANTED_PRODUCTION]
+    assert not offenders, "\n".join(a.detail for a in offenders)
+
+
+def test_the_report_was_not_overwritten(golden: GoldenResult):
+    """Two dispatches writing the same report means the delivery may not be the
+    one that had the findings."""
+    from myharness.dataflow import AnomalyKind
+
+    clobbered = [a for a in golden.anomalies
+                 if a.kind is AnomalyKind.OVERWRITTEN_OUTPUT
+                 and a.context.get("artifact") == golden.delivery.report_artifact]
+    assert not clobbered, "\n".join(a.detail for a in clobbered)
+
+
+def test_the_report_traces_back_to_the_raw_data(golden: GoldenResult):
+    """A report with no provenance was not based on the job's input."""
+    chain = golden.flow.provenance(golden.delivery.report_artifact)
+    assert chain, "the report has no producing dispatch"
+    granted = {a for d in chain for a in d.granted}
+    assert golden.blob_id in granted, "nothing in the chain ever saw the raw data"
+
+
+def test_no_critical_data_flow_anomalies(golden: GoldenResult):
+    assert not golden.critical, golden.report_line()

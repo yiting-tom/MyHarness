@@ -196,8 +196,18 @@ analysis_drill(job_id, section_id)   → 章節全文
 新增欄位或新增整個事件型別因此永遠是純加法，讀取端對未知型別寬容。
 
 成本報表、TUI、OpenTelemetry、回歸測試全部是這份 log 的投影。
-已實作於 `myharness/events/`：`summarize()` 一次給出 context 峰值、重複 dispatch 數、
-總成本與 caveats；`derive_caveats()` 從事件流推導報告的「未做到什麼」。
+
+**已實作的投影**：
+- `myharness/events/`：`summarize()` 一次給出 context 峰值、重複 dispatch 數、
+  總成本與 caveats；`derive_caveats()` 推導報告的「未做到什麼」。
+- `myharness/dataflow/`：把事件排成資料流 —— 節點（原始資料／分析／報告／lane）
+  與邊（**授權**／**產出**／**讀取**，三者分開），並偵測四種資料流異常。
+- `myharness/monitor/`：`myharness inspect <job>` 事後展開，
+  `myharness monitor <job>` 即時跟蹤。唯讀，對執行中的 job 零影響。
+
+資料流投影的價值有實例：golden job 第五次在所有紀律指標上都是綠的，
+但最終報告來自一次**沒有任何授權**的派工，並覆蓋掉了真正拿到 finding 的版本。
+逐行讀事件流看不出來；排成流向是第一眼就看到的東西。該偵測現已成為 golden job 的斷言。
 
 ## 5. Context 預算（中型 job，<50 dispatch）
 

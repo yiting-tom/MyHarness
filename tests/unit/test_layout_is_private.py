@@ -22,12 +22,37 @@ LAYOUT_LITERALS = frozenset(
 )
 
 
-def _string_constants(path: Path) -> list[tuple[int, str]]:
+#: Ways a path actually gets composed. A bare string that merely happens to
+#: read "jobs" -- an argparse subcommand, say -- is not a layout violation, and
+#: flagging it would train people to ignore this test.
+_PATH_CALLS = frozenset({"Path", "PurePath", "joinpath", "join", "with_name",
+                         "with_suffix", "glob", "rglob", "open"})
+
+
+def _path_literals(path: Path) -> list[tuple[int, str]]:
+    """String literals used to build a path, with their line numbers."""
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     found: list[tuple[int, str]] = []
-    for node in ast.walk(tree):
+
+    def note(node: ast.AST) -> None:
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             found.append((node.lineno, node.value))
+        elif isinstance(node, ast.JoinedStr):
+            for part in node.values:
+                if isinstance(part, ast.Constant) and isinstance(part.value, str):
+                    found.append((node.lineno, part.value.strip("/")))
+
+    for node in ast.walk(tree):
+        # root / "jobs" / job_id
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+            note(node.left)
+            note(node.right)
+        # Path("jobs"), x.joinpath("jobs"), os.path.join(..., "jobs")
+        elif isinstance(node, ast.Call):
+            name = getattr(node.func, "attr", None) or getattr(node.func, "id", None)
+            if name in _PATH_CALLS:
+                for arg in node.args:
+                    note(arg)
     return found
 
 
@@ -43,7 +68,7 @@ def test_no_module_outside_layout_composes_artifact_paths():
     violations: list[str] = []
     for module in _modules_under_test():
         docstring_lines = _docstring_lines(module)
-        for lineno, value in _string_constants(module):
+        for lineno, value in _path_literals(module):
             if lineno in docstring_lines:
                 continue
             if value in LAYOUT_LITERALS:
@@ -72,3 +97,17 @@ def _docstring_lines(path: Path) -> set[int]:
 def test_layout_module_exists_and_is_the_only_exception():
     assert LAYOUT_MODULE.exists()
     assert LAYOUT_MODULE not in _modules_under_test()
+
+
+def test_the_check_still_catches_a_real_composition(tmp_path: Path):
+    """Narrowing the check to path context must not have defanged it."""
+    probe = tmp_path / "probe.py"
+    probe.write_text('from pathlib import Path\nBAD = Path("x") / "jobs" / "y"\n',
+                     encoding="utf-8")
+    assert any(v in LAYOUT_LITERALS for _, v in _path_literals(probe))
+
+
+def test_the_check_ignores_a_coincidental_word(tmp_path: Path):
+    probe = tmp_path / "probe.py"
+    probe.write_text('parser.add_parser("jobs", help="list jobs")\n', encoding="utf-8")
+    assert not any(v in LAYOUT_LITERALS for _, v in _path_literals(probe))

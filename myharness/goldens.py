@@ -25,6 +25,7 @@ from myharness.events.query import summarize
 from myharness.jobs.runner import JobRunner
 from myharness.jobs.spec import JobSpec
 from myharness.lanes.types import LaneRegistry, LaneType
+from myharness.dataflow import Anomaly, DataFlow, build_dataflow, critical, detect
 from myharness.orchestrator.delivery import Delivery, build_delivery
 from myharness.orchestrator.loop import LoopOutcome, OrchestratorLoop
 
@@ -70,10 +71,20 @@ class GoldenResult:
     delivery: Delivery
     summary: Any
     blob_id: str
+    flow: DataFlow
+    anomalies: list[Anomaly]
+
+    @property
+    def critical(self) -> list[Anomaly]:
+        return critical(self.anomalies)
 
     def report_line(self) -> str:
         s, o = self.summary, self.outcome
-        return (
+        anomaly_note = (
+            "\nanomalies=" + ", ".join(f"{a.kind}({a.severity})" for a in self.anomalies)
+            if self.anomalies else "\nanomalies=none"
+        )
+        return anomaly_note.lstrip("\n") + "\n" + (
             f"phase={o.phase} salvaged={o.salvaged} turns={o.turns} "
             f"handoffs={o.handoffs}\n"
             f"context_peak={o.context_peak:,} dispatches={s.dispatches} "
@@ -120,7 +131,9 @@ async def run_golden(
         store=store, events=stream, job_id=job_id, status=str(outcome.phase),
         report_artifact=outcome.report_artifact,
     )
-    return GoldenResult(outcome, delivery, summarize(stream), str(blob.id))
+    flow = build_dataflow(stream, await store.list(job_id), job_id=job_id)
+    return GoldenResult(outcome, delivery, summarize(stream), str(blob.id),
+                        flow, detect(flow))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -133,6 +146,10 @@ def main(argv: list[str] | None = None) -> int:
     result = asyncio.run(run_golden(args.root, job_id=args.job_id, backend=args.backend))
     print("\n--- golden job ---")
     print(result.report_line())
+    if result.anomalies:
+        print("\n--- 資料流異常 ---")
+        for anomaly in result.anomalies:
+            print(f"  [{anomaly.severity.upper()}] {anomaly.detail}")
     print("\n--- delivery ---")
     print(json.dumps(result.delivery.to_dict(), ensure_ascii=False, indent=2)[:2500])
     return 0 if result.delivery.report_artifact else 1
