@@ -45,10 +45,10 @@
 
 ## 7. Synthesis 與交付
 
-- [ ] 7.1 新增 synthesis lane type 與其 charter
-- [ ] 7.2 實作報告產出：orchestrator 授權 synthesis lane 讀取相關 artifact 並派工（規格：Orchestrator 規劃而不彙整的兩個 scenario）
-- [ ] 7.3 實作交付組裝：executive summary + key findings + 章節價目表（含 `est_tokens`）+ 自動蒐集的 caveats + 成本
-- [ ] 7.4 確認硬上限觸頂時仍有交付（規格：善終後仍有交付）
+- [x] 7.1 新增 synthesis lane type 與其 charter
+- [x] 7.2 實作報告產出：orchestrator 授權 synthesis lane 讀取相關 artifact 並派工（規格：Orchestrator 規劃而不彙整的兩個 scenario）
+- [x] 7.3 實作交付組裝：executive summary + key findings + 章節價目表（含 `est_tokens`）+ 自動蒐集的 caveats + 成本
+- [x] 7.4 確認硬上限觸頂時仍有交付（規格：善終後仍有交付）
 
 ## 8. 事件與可觀測性
 
@@ -60,11 +60,11 @@
 ## 9. 離線測試
 
 - [x] 9.1 建立腳本化的 orchestrator transport，使整層可在無網路下端到端執行
-- [ ] 9.2 覆蓋 `job-runner` 的全部 17 個 scenario
-- [ ] 9.3 覆蓋 `orchestrator` 的全部 14 個 scenario
-- [ ] 9.4 覆蓋 `event-log` delta 的 3 個 scenario
-- [ ] 9.5 專門測試：反覆窺看時 orchestrator 的 context 成長受預算限制而收斂
-- [ ] 9.6 專門測試：硬上限觸頂 → 寬限 → 程式碼降級交付的完整路徑
+- [x] 9.2 覆蓋 `job-runner` 的全部 17 個 scenario
+- [x] 9.3 覆蓋 `orchestrator` 的全部 14 個 scenario
+- [x] 9.4 覆蓋 `event-log` delta 的 3 個 scenario
+- [x] 9.5 專門測試：反覆窺看時 orchestrator 的 context 成長受預算限制而收斂
+- [x] 9.6 專門測試：硬上限觸頂 → 寬限 → 程式碼降級交付的完整路徑
 
 ## 10. Golden job（live）
 
