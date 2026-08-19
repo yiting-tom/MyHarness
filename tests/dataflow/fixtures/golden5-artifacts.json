@@ -1,0 +1,106 @@
+[
+ {
+  "id": "golden/blob/raw/txn-2024",
+  "kind": "blob",
+  "bytes": 138773,
+  "est_tokens": null,
+  "produced_by": "user",
+  "revision": 1
+ },
+ {
+  "id": "golden/blob/traces/d1",
+  "kind": "blob",
+  "bytes": 3346,
+  "est_tokens": null,
+  "produced_by": "lane:ta1",
+  "revision": 1
+ },
+ {
+  "id": "golden/blob/traces/d2",
+  "kind": "blob",
+  "bytes": 2125,
+  "est_tokens": null,
+  "produced_by": "lane:ta1",
+  "revision": 1
+ },
+ {
+  "id": "golden/blob/traces/d3",
+  "kind": "blob",
+  "bytes": 2351,
+  "est_tokens": null,
+  "produced_by": "lane:ta1",
+  "revision": 1
+ },
+ {
+  "id": "golden/blob/traces/d4",
+  "kind": "blob",
+  "bytes": 6468,
+  "est_tokens": null,
+  "produced_by": "lane:syn1",
+  "revision": 1
+ },
+ {
+  "id": "golden/blob/traces/d5",
+  "kind": "blob",
+  "bytes": 1878,
+  "est_tokens": null,
+  "produced_by": "lane:syn1",
+  "revision": 1
+ },
+ {
+  "id": "golden/note/lanes/syn1/findings/report",
+  "kind": "note",
+  "bytes": 996,
+  "est_tokens": 453,
+  "produced_by": "lane:syn1",
+  "revision": 2
+ },
+ {
+  "id": "golden/note/lanes/ta1/findings/transaction_analysis_2024",
+  "kind": "note",
+  "bytes": 1351,
+  "est_tokens": 338,
+  "produced_by": "lane:ta1",
+  "revision": 1
+ },
+ {
+  "id": "golden/note/lanes/ta1/findings/transaction_outlier_analysis_preliminary",
+  "kind": "note",
+  "bytes": 630,
+  "est_tokens": 158,
+  "produced_by": "lane:ta1",
+  "revision": 1
+ },
+ {
+  "id": "golden/note/lanes/ta1/findings/txn-2024-statistics-attempt",
+  "kind": "note",
+  "bytes": 579,
+  "est_tokens": 145,
+  "produced_by": "lane:ta1",
+  "revision": 1
+ },
+ {
+  "id": "golden/note/lanes/ta1/findings/txn_analysis_2024_unable",
+  "kind": "note",
+  "bytes": 728,
+  "est_tokens": 182,
+  "produced_by": "lane:ta1",
+  "revision": 1
+ },
+ {
+  "id": "golden/note/lanes/ta1/state",
+  "kind": "note",
+  "bytes": 273,
+  "est_tokens": 75,
+  "produced_by": "lane:ta1",
+  "revision": 3
+ },
+ {
+  "id": "golden/note/plan",
+  "kind": "note",
+  "bytes": 241,
+  "est_tokens": 61,
+  "produced_by": "orchestrator",
+  "revision": 3
+ }
+]
