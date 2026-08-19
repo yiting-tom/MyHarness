@@ -16,23 +16,23 @@
 
 ## 2. 綁定與 ingest
 
-- [ ] 2.1 `bind_name()`：artifact 名稱末段消毒為合法表名，碰撞加尾碼（design D2）
-- [ ] 2.2 表名綁定的測試：CJK 名稱、含連字號、大小寫、兩個不同 artifact 同末段
-- [ ] 2.3 `ingest()`：依副檔名/schema 選 `read_csv_auto` / `read_parquet` /
+- [x] 2.1 `bind_name()`：artifact 名稱末段消毒為合法表名，碰撞加尾碼（design D2）
+- [x] 2.2 表名綁定的測試：CJK 名稱、含連字號、大小寫、兩個不同 artifact 同末段
+- [x] 2.3 `ingest()`：依副檔名/schema 選 `read_csv_auto` / `read_parquet` /
       `read_json_auto`，無法辨識時以明確訊息拒絕
-- [ ] 2.4 byte 上限檢查在 ingest 之前、由 index 決定，不開檔
+- [x] 2.4 byte 上限檢查在 ingest 之前、由 index 決定，不開檔
       （規格：資料量與執行時間有上限且拒絕時說明原因）
-- [ ] 2.5 上限訊息說明「這是沙箱的形狀不是效能調校」（design D3）
+- [x] 2.5 上限訊息說明「這是沙箱的形狀不是效能調校」（design D3）
 
 ## 3. 結果整形
 
-- [ ] 3.1 `myharness/lanes/tabular/render.py`：結果表以 CJK 寬度對齊
+- [x] 3.1 `myharness/lanes/tabular/render.py`：結果表以 CJK 寬度對齊
       （沿用 `monitor/render.py` 的寬度函式，不重寫）
-- [ ] 3.2 列數閘：取 limit+1 列判斷截斷，不為報總數跑完全表（design D4）
-- [ ] 3.3 字元閘：即使列數在限內仍 clamp，並明示裁切
+- [x] 3.2 列數閘：取 limit+1 列判斷截斷，不為報總數跑完全表（design D4）
+- [x] 3.3 字元閘：即使列數在限內仍 clamp，並明示裁切
       （規格：查詢結果受列數與字元數兩道上限約束）
-- [ ] 3.4 兩道閘各自獨立生效的測試：多列短內容、單列超長欄位
-- [ ] 3.5 NULL、極長字串、二進位欄位的表述
+- [x] 3.4 兩道閘各自獨立生效的測試：多列短內容、單列超長欄位
+- [x] 3.5 NULL、極長字串、二進位欄位的表述
 
 ## 4. Lane 工具
 
