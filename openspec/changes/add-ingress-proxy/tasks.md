@@ -14,8 +14,7 @@
 ## 2. 樣本
 
 - [x] 2.1 `myharness/proxy/sample.py`：行數 + 字元數兩道閘（design D4）
-- [ ] 2.2 樣本經由 `store.localize` 取得，不自己開檔（規格：樣本經由既有的儲存介面取得）
-      —— `read_sample` 收 Path，呼叫端負責走 store；在 §4 接線時完成
+- [x] 2.2 樣本經由 `store.localize` 取得，不自己開檔（規格：樣本經由既有的儲存介面取得）
 - [x] 2.3 二進位內容不要當文字倒出來
 - [x] 2.4 兩道閘各自生效的測試：很多短行、單一超長行
 - [x] 2.5 CJK 寬度與 token 估計沿用既有函式，不重寫
@@ -36,13 +35,13 @@
 
 ## 4. 接進 ingress
 
-- [ ] 4.1 `analysis_provide` 落 blob 後呼叫分類器，行內、短逾時
-- [ ] 4.2 發 `proxy.route` 事件，含 payload / lane / reason / tokens / usd
-- [ ] 4.3 給 orchestrator 的通知帶上路由結果與理由
-- [ ] 4.4 回應的 `routed` 為布林並附 `routed_to` 與未路由原因
-- [ ] 4.5 分類失敗時 blob 仍然存在的測試（規格：分類失敗不影響資料落地）
-- [ ] 4.6 分類器不派工的測試（規格：分類不會產生執行）
-- [ ] 4.7 分類器不授權的測試：被判定的 lane 未經 `inputs` 仍讀不到
+- [x] 4.1 `analysis_provide` 落 blob 後呼叫分類器，行內、短逾時
+- [x] 4.2 發 `proxy.route` 事件，含 payload / lane / reason / tokens / usd
+- [x] 4.3 給 orchestrator 的通知帶上路由結果與理由
+- [x] 4.4 回應的 `routed` 為布林並附 `routed_to` 與未路由原因
+- [x] 4.5 分類失敗時 blob 仍然存在的測試（規格：分類失敗不影響資料落地）
+- [x] 4.6 分類器不派工的測試（規格：分類不會產生執行）
+- [x] 4.7 分類器不授權的測試：被判定的 lane 未經 `inputs` 仍讀不到
       （規格：分類不會產生授權）
 
 ## 5. 記帳

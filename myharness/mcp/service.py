@@ -19,15 +19,20 @@ from typing import Any
 from myharness.artifacts.ids import ArtifactId
 from myharness.artifacts.local import LocalArtifactStore
 from myharness.artifacts.store import ArtifactStore
+from myharness.artifacts.types import GrantSet
 from myharness.events.log import EventLog, LocalEventLog
 from myharness.events.query import summarize
-from myharness.events.types import INGRESS
+from myharness.backends.profile import registry as backends
+from myharness.events.types import INGRESS, PROXY_ROUTE
 from myharness.jobs.channel import QueueChannel
 from myharness.jobs.runner import JobRunner
 from myharness.jobs.spec import JobSpec
 from myharness.lanes.types import LaneRegistry
 from myharness.local_layout import find_jobs
 from myharness.mcp.manager import JobHandle, JobManager, NotifyingEventLog, RunState
+from myharness.orchestrator.routing import read_routing
+from myharness.proxy.classify import Routing, Unrouted, classify
+from myharness.proxy.sample import describe_meta, read_sample
 from myharness.mcp.payload import (
     MAX_SECTION_TOKENS,
     bound_section,
@@ -68,6 +73,7 @@ class AnalysisService:
         store: ArtifactStore | None = None,
         event_log: EventLog | None = None,
         loop_factory: Callable[..., Any] | None = None,
+        proxy_transport: Any = None,
     ) -> None:
         self._root = Path(root)
         self._lanes = lanes
@@ -76,6 +82,9 @@ class AnalysisService:
         self._store = store or LocalArtifactStore(self._root)
         self._events = event_log or LocalEventLog(self._root)
         self._loop_factory = loop_factory or OrchestratorLoop
+        # Injected the same way the lane worker takes one, so the classifier
+        # can be driven offline.
+        self._proxy_transport = proxy_transport
 
     @property
     def manager(self) -> JobManager:
@@ -190,38 +199,59 @@ class AnalysisService:
         handle = self._manager.get(job_id)
         log = handle.runner.events if handle else self._events
         await log.append(
-            job_id, INGRESS, payload=str(meta.id), bytes=meta.bytes, routed=False,
+            job_id, INGRESS, payload=str(meta.id), bytes=meta.bytes,
         )
+
+        routing = await self._route(job_id, meta)
+        await log.append(
+            job_id, PROXY_ROUTE, payload=str(meta.id), **routing.to_event()
+        )
+
         # An event in the log is not an announcement -- nothing in the
         # orchestrator reads the log. Without this the payload is stored
         # somewhere nobody will look, and the client is told otherwise.
         announced = False
         if handle is not None and handle.running:
-            handle.runner.notify(
-                f"【系統】使用者提供了新資料：{meta.id}（{meta.bytes:,} bytes"
-                + (f"，schema {schema}" if schema else "")
-                + "）。尚未路由到任何 lane —— 由你決定要不要用、給誰用。"
-                " 記得在 dispatch 的 inputs 帶上這個 id，否則 lane 讀不到。"
-            )
+            handle.runner.notify(_ingress_notice(meta, routing))
             handle.notify()
             announced = True
         return {
             "ok": True,
             "artifact": str(meta.id),
             "bytes": meta.bytes,
-            # Both stated: a client that assumes its data reached a lane -- or
-            # reached anyone -- will not understand the report it gets.
-            "routed": False,
+            # All three stated separately: a client that assumes its data
+            # reached a lane -- or reached anyone -- will not understand the
+            # report it gets.
+            "routed": routing.routed,
+            "routed_to": routing.lane,
+            "routing_reason": routing.reason,
+            "unrouted_because": str(routing.unrouted) if routing.unrouted else None,
             "announced": announced,
-            "note": (
-                "stored as a blob and announced to the orchestrator, which "
-                "decides whether to use it. Not routed to a lane -- no proxy "
-                "exists yet."
-                if announced else
-                "stored as a blob, but this analysis is not running here, so "
-                "nothing was announced. Only the stored artifact remains."
-            ),
+            "note": _provide_note(routing, announced=announced),
         }
+
+    async def _route(self, job_id: str, meta: Any) -> Routing:
+        """Classify one payload. Never raises -- the blob is already stored."""
+        try:
+            table = await read_routing(self._store, job_id)
+            if not table.open_entries:
+                return Routing(None, unrouted=Unrouted.NO_TABLE,
+                               reason="orchestrator 尚未宣告任何開放的 lane")
+            # Through the store, not by opening the file: a second read path
+            # would sit outside the grant model entirely.
+            async with self._store.localize(
+                meta.id, grants=GrantSet.unrestricted(job_id)
+            ) as path:
+                sample = read_sample(path)
+            return await classify(
+                table, describe_meta(meta), sample,
+                profile=backends.get(self._backend),
+                transport=self._proxy_transport,
+            )
+        except Exception as exc:  # noqa: BLE001 - ingress must not depend on this
+            return Routing(None, unrouted=Unrouted.FAILED,
+                           reason=f"{type(exc).__name__}: "
+                                  f"{str(exc).splitlines()[0][:120]}")
 
     # ---- answer ----------------------------------------------------------
 
@@ -291,6 +321,45 @@ class AnalysisService:
         bounded, truncated = bound_section(text, max_tokens=max_tokens)
         return {"ok": True, "section_id": section_id, "text": bounded,
                 "truncated": truncated}
+
+
+_UNROUTED_NOTE = {
+    Unrouted.NO_TABLE: "沒有 routing table，所以沒有分流",
+    Unrouted.NO_MATCH: "分流器判斷不出歸屬",
+    Unrouted.FAILED: "分流器失敗",
+}
+
+
+def _ingress_notice(meta: Any, routing: Routing) -> str:
+    """What the orchestrator is told. It still decides everything."""
+    head = f"【系統】使用者提供了新資料：{meta.id}（{meta.bytes:,} bytes）。"
+    if routing.routed:
+        body = (
+            f"分流器判斷它屬於 lane `{routing.lane}`"
+            f"（信心 {routing.confidence}）：{routing.reason}"
+        )
+    else:
+        why = _UNROUTED_NOTE.get(routing.unrouted, "未分流")
+        body = f"未分流（{why}）"
+        if routing.reason:
+            body += f"：{routing.reason}"
+    return (
+        f"{head}{body}。這只是建議 —— 由你決定要不要用、給誰用。"
+        " 記得在 dispatch 的 inputs 帶上這個 id，否則 lane 讀不到。"
+    )
+
+
+def _provide_note(routing: Routing, *, announced: bool) -> str:
+    if not announced:
+        return ("stored as a blob, but this analysis is not running here, so "
+                "nothing was announced. Only the stored artifact remains.")
+    if routing.routed:
+        return (f"stored and announced. The proxy suggests lane "
+                f"'{routing.lane}'; the orchestrator decides whether to use it "
+                "and must still pass the artifact id in dispatch inputs.")
+    return (f"stored and announced, but not routed "
+            f"({_UNROUTED_NOTE.get(routing.unrouted, 'unrouted')}). "
+            "The orchestrator decides what to do with it.")
 
 
 def _report_artifact(events: Any) -> str | None:
