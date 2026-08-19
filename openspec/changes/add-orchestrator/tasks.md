@@ -68,15 +68,15 @@
 
 ## 10. Golden job（live）
 
-- [ ] 10.1 建立 golden job fixture：固定輸入、2–3 條 lane、可重跑
-- [ ] 10.2 **Live**：完整跑一次，產出報告並記錄事件流
-- [ ] 10.3 **Live**：斷言 context 峰值低於上界、無重複 dispatch、成本低於上界、必有交付
-- [ ] 10.4 **Live**：驗證最終報告由 synthesis lane 產出，orchestrator 未讀入完整分析
-- [ ] 10.5 量測並記錄：orchestrator 的實際 context 用量分佈（對照 `DESIGN.md` §5 的估算表）
+- [x] 10.1 建立 golden job fixture：固定輸入、2–3 條 lane、可重跑
+- [x] 10.2 **Live**：完整跑一次，產出報告並記錄事件流
+- [x] 10.3 **Live**：斷言 context 峰值低於上界、無重複 dispatch、成本低於上界、必有交付
+- [x] 10.4 **Live**：驗證最終報告由 synthesis lane 產出，orchestrator 未讀入完整分析
+- [x] 10.5 量測並記錄：orchestrator 的實際 context 用量分佈（對照 `DESIGN.md` §5 的估算表）
 
 ## 11. 收尾
 
-- [ ] 11.1 全套離線測試通過並記錄覆蓋率；golden job 至少完整跑過一次並記錄費用
-- [ ] 11.2 撰寫 `myharness/orchestrator/README.md`
-- [ ] 11.3 以 golden job 的實測數值更新 `DESIGN.md` §5 預算表與 §9 開放項目
-- [ ] 11.4 `openspec validate add-orchestrator --strict` 通過
+- [x] 11.1 全套離線測試通過並記錄覆蓋率；golden job 至少完整跑過一次並記錄費用
+- [x] 11.2 撰寫 `myharness/orchestrator/README.md`
+- [x] 11.3 以 golden job 的實測數值更新 `DESIGN.md` §5 預算表與 §9 開放項目
+- [x] 11.4 `openspec validate add-orchestrator --strict` 通過

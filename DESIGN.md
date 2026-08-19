@@ -201,17 +201,23 @@ analysis_drill(job_id, section_id)   → 章節全文
 
 ## 5. Context 預算（中型 job，<50 dispatch）
 
-| 項目 | 估計 |
-|---|---|
-| System prompt + 6 工具定義 + LaneType 清單 | ~4k |
-| 使用者任務 | ~1k |
-| plan / routing table 往返（15 × 400） | ~6k |
-| handle（40 × 150） | ~6k |
-| peek（**硬預算上限**） | ≤30k |
-| Orchestrator 推理與 thinking | ~30–60k |
-| **合計** | **~77–107k** ／ 196k |
+| 項目 | 原估計 | golden job 實測（5 dispatch） |
+|---|---|---|
+| System prompt + 6 工具定義 + LaneType 清單 | ~4k | 含在下方峰值內 |
+| 使用者任務 | ~1k | — |
+| plan 往返 | ~6k | plan 本身 64 tokens |
+| handle 累積 | ~6k（40 × 150） | 5 × ~150 |
+| peek（**硬預算上限**） | ≤30k | **0**（orchestrator 未使用） |
+| Orchestrator 推理與 thinking | ~30–60k | 含在下方峰值內 |
+| **合計** | **~77–107k** | **9,720（14 turns）** |
 
-最大變數是 peek 與 thinking；peek 已由預算變成常數。60% (≈118k) 觸發 rolling restart。
+**實測遠低於估算，但兩者規模不同**：golden job 只有 5 次 dispatch，估算是針對 40 次。
+以每次 dispatch 約 2k 的增量外推，40 次約落在 **40–50k**，仍在估算區間下緣。
+真正的差異在於 orchestrator 幾乎不用 peek —— 它信任 handle 的 headline 就足以決策，
+這正是 handle 契約想要的效果。
+
+最大變數是 peek 與 thinking；peek 已由預算變成常數。60% (≈118k) 觸發 rolling restart，
+golden job 從未接近（峰值 5%）。
 
 ## 5b. 後端可插拔（LiteLLM）
 

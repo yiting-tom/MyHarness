@@ -364,3 +364,49 @@ charter 前綴會被快取**這個前提上。現在 `dispatch.end` 的 `tokens`
 ### 單次執行的 handle 大小
 
 live 實測 215–216 字元，上限 2000。即使被要求寫 3000 字報告，handle 仍在上界內。
+
+---
+
+## Spike #9 — Golden job（orchestrator 端到端）
+
+五次跑才通。每一次擋住的都是不同的東西，而且**其中兩個是離線測試在原理上抓不到的**：
+
+| 次 | 表面現象 | 根因 |
+|---|---|---|
+| 1 | 14 次 dispatch 全 401，燒完整個預算 | fixture 的 lane backend 用了預設值而非 job 的 backend；且無進展偵測當時只是勸告 |
+| 2 | 0 次 dispatch，1 turn 就回報 `finished` | **loop 把每則訊息都丟掉**（`_ = message`），看不見 turn 做了什麼 |
+| 3 | 1 次 dispatch 後停止 | 已完成工作的 turn 尾端撞限流，被當成致命錯誤 |
+| 4 | 端到端走完，報告寫「我什麼都讀不到」 | `inputs` 傳物件被 `str()` 毀損成無效 grant，且被靜靜接受 |
+| 5 | **通過** | — |
+
+第 2 與第 4 是離線測試抓不到的：腳本化 session 本來就不呼叫工具（盲點被寫進測試前提），而離線測試都傳格式正確的字串。
+
+### 第五次的量測
+
+```
+phase=complete  salvaged=False  turns=14  handoffs=0
+context_peak=9,720 / 196,000    dispatches=5  duplicates=0  failures=0
+cost=$0.4440  cache_hit=0.735   throttle=534.9s  peek=0
+caveats=['limit_reached', 'unanswered_question', 'unanswered_question']
+```
+
+九項紀律斷言全過：交付存在、context 峰值 9,720 < 120k、peek 在預算內、零重複
+dispatch、成本 $0.444 < $1.00、交付 1,442 字元 < 4,000、報告由 `lane:syn1` 產出、
+caveats 與事件流一致、原始 blob 未變成 note。
+
+### ⚠️ 暴露的能力缺口：沒有任何工具能處理 blob
+
+Lane 成功 localize 到那份 138KB 的 CSV（拿到了本地路徑與 schema），然後**無事可做** ——
+它只有 `read_note` / `write_finding` / `update_state` / `localize_blob` 四個儲存工具。
+
+`charters/tabular-analyst.md` 寫著「大型資料一律用 `localize_blob` 取得路徑後以工具處理」，
+但那個「工具」從來沒被建出來。Lane 誠實地把這件事寫進 finding，synthesizer 誠實地
+寫進報告的「限制」—— 整條鏈的行為都是對的，缺的是能力本身。
+
+**這不影響 golden job 的效力**：design.md D7 明確說它斷言的是紀律而非分析品質，
+而紀律全數通過。但在 `duckdb_query` 之類的工具出現前，這個 harness 還不能真的分析資料。
+
+### 成本
+
+`limit_reached` 是 `max_wall_clock_s`（1,863s，上限 1,800s）—— 其中 **534.9s
+花在限流等待**，佔 29%。付費的 nemotron-3-super 仍會被上游限流。
