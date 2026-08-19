@@ -103,6 +103,10 @@ class BackendProfile:
         env: dict[str, str] = {"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
         if self.base_url:
             env["ANTHROPIC_BASE_URL"] = self.base_url
+            # An inherited ANTHROPIC_API_KEY outranks ANTHROPIC_AUTH_TOKEN, so a
+            # stale key in the developer's shell would silently authenticate the
+            # wrong way against a custom endpoint. Blank it for this subprocess.
+            env["ANTHROPIC_API_KEY"] = ""
         token = self.credential()
         if token:
             env["ANTHROPIC_AUTH_TOKEN"] = token
@@ -136,7 +140,16 @@ OPENROUTER: Final = BackendProfile(
         ModelTier.MID: "nvidia/nemotron-3-super-120b-a12b",
         ModelTier.CHEAP: "nvidia/nemotron-3-nano-30b-a3b",
     },
-    capabilities=frozenset(BackendCapability),
+    # No TASK_BUDGET: an under-provisioned task_budget comes back as a bare
+    # HTTP 400 with zero output tokens rather than a graceful "ran out with
+    # partial results" (spikes/RESULTS.md §Spike #6). Declaring it would mean
+    # never getting the partial work the caller most needs, so this backend
+    # uses the harness's local token ceiling instead. Exactly the kind of wrong
+    # declaration design.md D7 expected live tests to surface.
+    capabilities=frozenset({
+        BackendCapability.STRUCTURED_OUTPUT,
+        BackendCapability.PROMPT_CACHING,
+    }),
     base_url="https://openrouter.ai/api",
     auth_token_env="OPENROUTER_KEY",
 )

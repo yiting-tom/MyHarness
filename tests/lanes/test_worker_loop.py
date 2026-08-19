@@ -297,3 +297,49 @@ async def test_degraded_run_writes_an_end_event_too(bench):
     assert end.get("status") == HandleStatus.BUDGET_EXCEEDED
     (ctx,) = await bench.events_for(CTX)
     assert ctx.get("who") == "lane:txn-2024"
+
+
+async def test_null_usage_fields_do_not_crash_the_run(bench):
+    """A provider may report usage keys with null values rather than omitting them.
+
+    `.get(key, 0)` returns None in that case, and int(None) took down a real
+    live run before this test existed.
+    """
+    nulls = {"input_tokens": None, "output_tokens": None,
+             "cache_read_input_tokens": None, "cache_creation_input_tokens": None}
+    transport = ScriptedTransport([
+        assistant("x", usage=nulls),
+        result(structured=GOOD_HANDLE, usage=nulls),
+    ])
+    handle = await run(bench, transport)
+    assert handle.ok
+
+    (end,) = await bench.events_for(DISPATCH_END)
+    assert end.get("tokens") == {"in": 0, "out": 0}
+
+
+async def test_rate_limited_run_is_not_mistaken_for_a_bad_handle(bench, monkeypatch):
+    """A 429 that ends without raising must not burn the schema retries.
+
+    The CLI exhausts its own retries, then returns is_error=True with the error
+    text as the assistant's reply. Treating that as malformed output and
+    re-prompting triples the load on a backend already refusing us.
+    """
+    monkeypatch.setattr("myharness.lanes.worker.TRANSIENT_BACKOFF_S", (0.0, 0.0))
+    rate_limited = [
+        api_retry(429),
+        assistant("API Error: Request rejected (429) · Provider returned error"),
+        result(is_error=True),
+    ]
+    transport = ScriptedTransport(*[list(rate_limited) for _ in range(6)])
+    handle = await run(bench, transport)
+
+    assert handle.status is HandleStatus.BACKEND_UNAVAILABLE
+    assert transport.call_count <= 3, "transient retries only, no schema re-prompts"
+
+
+async def test_errored_result_without_transient_signal_is_not_a_schema_violation(bench):
+    transport = ScriptedTransport([assistant("something went wrong"), result(is_error=True)])
+    handle = await run(bench, transport)
+    assert handle.status is not HandleStatus.SCHEMA_VIOLATION
+    assert not handle.ok

@@ -287,3 +287,38 @@ SDK 內建重試 10 次後仍失敗（每次耗時 ~170s）。金鑰本身**不�
 
 整套 live 測試（6 個、預估 ~150k in / ~30k out）在 super-120b 付費版上約
 **$0.02**。
+
+---
+
+## Spike #6 — 失敗在真實後端上長什麼樣（推翻了一個設計假設）
+
+Live 測試把「預算耗盡」與「回合用盡」都歸類成 `tool_failure`。
+`spike06_failure_shapes.py` 直接印出訊息序列，結果推翻了 design.md D1 的部分前提。
+
+| 設定 | 結果 |
+|---|---|
+| `task_budget={"total": 600}`（不足） | `ResultMessage` **會來**：`subtype="success"`、`is_error=true`、`terminal_reason="api_error"`、`api_error_status=400`、`output_tokens=0`、`num_turns=1`，然後 SDK 拋例外 |
+| `task_budget={"total": 40000}`（充足） | 正常完成，`is_error=false` |
+| 不帶 `task_budget` | 正常完成 |
+| `max_turns=1` | **沒有** max_turns 錯誤 —— 模型一回合就答完了 |
+
+### 三個推論
+
+**1. `ResultMessage` 會抵達（與 spike #3c 的觀察相反）。** D1 說「等 `ResultMessage`
+會什麼都拿不到」在 Anthropic 直連上成立，但在 OpenRouter 上它會來 —— 只是帶著
+`is_error=true`。所以 `_classify` 不能用「有沒有收到 `ResultMessage`」當主要依據，
+改用 `terminal_reason` 與 `api_error_status` 這兩個事實欄位。
+
+**2. OpenRouter 的 `task_budget` 不是優雅的預算，是 400。** 預算不足時整個請求被拒絕，
+`output_tokens=0` —— **拿不到任何部分結果**，而部分結果正是超預算時最需要的東西。
+因此 `OPENROUTER` profile **不再宣告 `TASK_BUDGET`**，改用 harness 端的本地 token 計數。
+這正是 design.md D7 預期的情況：capability 宣告錯了，由 live 測試暴露。
+
+**3. `thinking_tokens` 系統訊息一次會來數百則。** 原本每則都寫進 transcript，
+造成 transcript 嚴重膨脹。改為只累計次數。
+
+### 附帶：`ANTHROPIC_API_KEY` 會蓋掉 `ANTHROPIC_AUTH_TOKEN`
+
+開發機環境裡若殘留一把（可能已失效的）`ANTHROPIC_API_KEY`，它的優先權高於
+`ANTHROPIC_AUTH_TOKEN`，會讓自訂 endpoint 的驗證走錯路。
+`BackendProfile.to_sdk_env()` 在設定 `base_url` 時一併把它清空。

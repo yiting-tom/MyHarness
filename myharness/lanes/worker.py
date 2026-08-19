@@ -55,6 +55,13 @@ TRANSIENT_BACKOFF_S = (2.0, 8.0)
 TRANSIENT_STATUSES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
 
 
+def _as_int(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
 @dataclass(frozen=True, slots=True)
 class WorkerRequest:
     job_id: str
@@ -77,6 +84,9 @@ class Accumulated:
     usd: float = 0.0
     retry_statuses: list[int] = field(default_factory=list)
     max_turns_hit: bool = False
+    api_error_status: int | None = None
+    terminal_reason: str | None = None
+    thinking_events: int = 0
 
     @property
     def text(self) -> str:
@@ -84,13 +94,17 @@ class Accumulated:
 
     @property
     def tokens_in(self) -> int:
-        return int(self.usage.get("input_tokens", 0)) + int(
-            self.usage.get("cache_read_input_tokens", 0)
-        ) + int(self.usage.get("cache_creation_input_tokens", 0))
+        # Usage dicts carry the keys with null values when a provider does not
+        # report them, so `.get(k, 0)` yields None rather than the default.
+        return sum(
+            _as_int(self.usage.get(key))
+            for key in ("input_tokens", "cache_read_input_tokens",
+                        "cache_creation_input_tokens")
+        )
 
     @property
     def tokens_out(self) -> int:
-        return int(self.usage.get("output_tokens", 0))
+        return _as_int(self.usage.get("output_tokens"))
 
     @property
     def saw_transient(self) -> bool:
@@ -117,6 +131,10 @@ def _consume(message: Any, acc: Accumulated) -> None:
         if getattr(message, "usage", None):
             acc.usage = dict(message.usage)
     elif isinstance(message, SystemMessage):
+        if message.subtype == "thinking_tokens":
+            # Hundreds of these arrive per run; a count is the whole signal.
+            acc.thinking_events += 1
+            return
         acc.transcript.append({"role": "system", "subtype": message.subtype})
         if message.subtype == "api_retry":
             status = (message.data or {}).get("error_status")
@@ -127,7 +145,9 @@ def _consume(message: Any, acc: Accumulated) -> None:
         acc.usage = dict(message.usage or acc.usage)
         acc.usd = float(message.total_cost_usd or 0.0)
         acc.structured = getattr(message, "structured_output", None)
-        if (message.subtype or "").endswith("max_turns"):
+        acc.api_error_status = getattr(message, "api_error_status", None)
+        acc.terminal_reason = getattr(message, "terminal_reason", None)
+        if (message.subtype or "").endswith("max_turns") or acc.terminal_reason == "max_turns":
             acc.max_turns_hit = True
         acc.transcript.append({
             "role": "result", "subtype": message.subtype,
@@ -214,6 +234,15 @@ async def _run_once(
 
 class _LocalBudgetExceeded(Exception):
     """Raised by our own token counter, not by the backend."""
+
+
+class _ResultReportedError(Exception):
+    """The run ended cleanly but the result said it failed."""
+
+    def __init__(self, acc: "Accumulated") -> None:
+        super().__init__(
+            (acc.text or "run reported is_error")[:200]
+        )
 
 
 async def run_lane_worker(
@@ -333,6 +362,18 @@ async def _attempt_all(
                     suggest="縮小任務範圍，或提高 max_turns",
                 )
 
+            # A run can end without raising and still have failed: the CLI
+            # reports is_error=True after exhausting its own retries. Parsing a
+            # handle out of "API Error: Request rejected (429)" and re-prompting
+            # would triple the load on a backend that is already refusing us.
+            if acc.result is not None and acc.result.is_error:
+                if acc.saw_transient or acc.api_error_status in TRANSIENT_STATUSES:
+                    break
+                return acc, _failure_from(
+                    acc, _classify(acc, _ResultReportedError(acc), profile),
+                    toolbox, _ResultReportedError(acc),
+                )
+
             outcome = _outcome_from(acc, enforce)
             if outcome.ok:
                 return acc, outcome.handle
@@ -346,7 +387,8 @@ async def _attempt_all(
         else:  # pragma: no cover - loop always breaks or returns
             break
 
-        if not (acc.saw_transient or acc.result is None):
+        run_failed = acc.result is None or acc.result.is_error
+        if not (acc.saw_transient and run_failed):
             break
         if transient_attempt < MAX_TRANSIENT_RETRIES and acc.saw_transient:
             await anyio.sleep(TRANSIENT_BACKOFF_S[min(transient_attempt, len(TRANSIENT_BACKOFF_S) - 1)])
@@ -354,7 +396,7 @@ async def _attempt_all(
             continue
         break
 
-    if acc.saw_transient and acc.result is None:
+    if acc.saw_transient and (acc.result is None or acc.result.is_error):
         return acc, failure_handle(
             HandleStatus.BACKEND_UNAVAILABLE,
             headline="後端持續不可用（速率限制或伺服器錯誤）",
@@ -378,11 +420,18 @@ def _classify(acc: Accumulated, exc: BaseException, profile: BackendProfile) -> 
     """
     if isinstance(exc, _LocalBudgetExceeded):
         return HandleStatus.BUDGET_EXCEEDED
-    if acc.saw_transient and acc.result is None:
+    if acc.max_turns_hit:
+        return HandleStatus.MAX_TURNS
+    if acc.api_error_status in TRANSIENT_STATUSES or (
+        acc.saw_transient and acc.result is None
+    ):
         return HandleStatus.BACKEND_UNAVAILABLE
-    if profile.supports(BackendCapability.TASK_BUDGET) and acc.result is None:
-        # Budget exhaustion kills the stream before any ResultMessage arrives.
-        return HandleStatus.BUDGET_EXCEEDED
+    if profile.supports(BackendCapability.TASK_BUDGET):
+        # With an API-side budget in play, the request being rejected outright
+        # (400, no output) or the stream dying before any result both mean the
+        # budget could not cover the task (spikes/RESULTS.md §Spike #6).
+        if acc.result is None or acc.api_error_status == 400:
+            return HandleStatus.BUDGET_EXCEEDED
     return HandleStatus.TOOL_FAILURE
 
 
