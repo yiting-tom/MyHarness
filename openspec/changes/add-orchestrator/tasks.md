@@ -39,9 +39,9 @@
 ## 6. 計畫與交接重啟
 
 - [x] 6.1 實作計畫的讀寫（存為 note artifact，沿用既有預檢與版本；design D5）
-- [ ] 6.2 實作從既有計畫啟動全新 orchestrator（規格：計畫足以接手）
-- [ ] 6.3 實作 context 用量追蹤與門檻偵測
-- [ ] 6.4 實作交接請求與重啟，並保留未收割的任務（規格：Context 逼近上限時交接重啟的三個 scenario）
+- [x] 6.2 實作從既有計畫啟動全新 orchestrator（規格：計畫足以接手）
+- [x] 6.3 實作 context 用量追蹤與門檻偵測
+- [x] 6.4 實作交接請求與重啟，並保留未收割的任務（規格：Context 逼近上限時交接重啟的三個 scenario）
 
 ## 7. Synthesis 與交付
 
@@ -55,11 +55,11 @@
 - [x] 8.1 新增事件型別：`plan.update`、`peek`、`limit.reached`、`no_progress`、`handoff.restart`
 - [x] 8.2 實作 peek 預算用量的聚合（規格：窺看預算的使用可被追蹤）
 - [x] 8.3 實作收工原因的判定（規格：收工原因可從事件流判定）
-- [ ] 8.4 將交接重啟寫入事件流，含當時用量（規格：交接重啟被記錄）
+- [x] 8.4 將交接重啟寫入事件流，含當時用量（規格：交接重啟被記錄）
 
 ## 9. 離線測試
 
-- [ ] 9.1 建立腳本化的 orchestrator transport，使整層可在無網路下端到端執行
+- [x] 9.1 建立腳本化的 orchestrator transport，使整層可在無網路下端到端執行
 - [ ] 9.2 覆蓋 `job-runner` 的全部 17 個 scenario
 - [ ] 9.3 覆蓋 `orchestrator` 的全部 14 個 scenario
 - [ ] 9.4 覆蓋 `event-log` delta 的 3 個 scenario
