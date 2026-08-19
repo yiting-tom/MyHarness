@@ -35,7 +35,10 @@ GOAL = (
     "資料已上傳為 blob，欄位為 txn_id / ts / account / amount / channel。"
 )
 
-ANALYST_TOOLS = ("read_note", "write_finding", "update_state", "localize_blob")
+ANALYST_TOOLS = (
+    "read_note", "write_finding", "update_state",
+    "localize_blob", "inspect_blob", "duckdb_query",
+)
 
 
 def lane_types(

@@ -134,7 +134,7 @@ Instance 由 orchestrator 在 `plan_update` 時建立；同型別多 instance �
 |---|---|---|
 | 例 | CSV / log / PDF / parquet | 分析結論、plan.md、state.md |
 | `read_artifact` | **拒絕**，回傳 schema 並指向工具存取 | 允許，但先查 index 的 `est_tokens` |
-| 存取方式 | `duckdb_query` / `grep_blob` / `head` | `read_artifact(id, section, budget)` |
+| 存取方式 | `inspect_blob` / `duckdb_query`（結果受兩道上限） | `read_artifact(id, section, budget)` |
 
 **授權**：lane worker 只能碰自己的 namespace + `dispatch(inputs=[...])` 明確授權的 id。
 
@@ -361,6 +361,10 @@ blob 與 note 分屬兩棵子樹，因為兩者的存取規則完全不同（見
 | 降級路徑重試 | 2 次後回失敗 handle | 離線驗證 |
 | OpenRouter 的 `task_budget` | **不宣告** | 預算不足時回 400、output 為 0，拿不到部分結果；spike #6 |
 | 單次 lane 執行成本 | ≈$0.02–0.04（nemotron-3-super-120b） | spike #7；SDK 回報值高於實際帳單，成本斷言以帳單為準 |
+| Blob 的存取方式 | `inspect_blob` + `duckdb_query`，SQL 內不含路徑 | 路徑入 SQL 需要第二套 parser 級授權，兩套裡弱的那套決定安全性 |
+| 查詢沙箱 | ingest 進記憶體後 `enable_external_access=false` | spike #10 走過十二條逃逸路徑；`allowed_paths` 是加法不是減法，擋不住 |
+| Blob 大小上限 | 256 MiB | view 是惰性的，關門後才讀 —— 上限是沙箱的形狀，不是效能調校 |
+| 查詢結果上限 | 50 列 **且** 4000 字元，大結果走 `into` | 40 欄 × 180 字 × 20 列在列數限內仍可灌爆 context |
 
 ### 仍然開放
 
@@ -377,3 +381,7 @@ blob 與 note 分屬兩棵子樹，因為兩者的存取規則完全不同（見
   完整指南需要真實 job 的經驗才寫得出有用的版本。
 - **跨 job artifact 共享**：v1 為 job-scoped，但 id 設計成全域唯一
   （`<job_id>/<kind>/<name>`）以便日後開放。
+- **非表格 blob**：`duckdb_query` 讀 CSV / Parquet / JSON。純文字與日誌目前只能
+  `localize_blob`，沒有 `grep_blob`。等到真的有這種 job 再決定它的輸出上限長什麼樣。
+- **對外的 MCP server**：DESIGN #1/#9/#14 的那一層仍未建。這是目前唯一擋著
+  「能不能直接使用」的東西。

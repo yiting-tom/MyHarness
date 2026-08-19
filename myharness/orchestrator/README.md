@@ -92,6 +92,10 @@ cost                usd / dispatches / throttle_s
 
 ## 已知缺口
 
-**沒有任何工具能處理 blob。** Lane 拿得到本地路徑（`localize_blob`），
-但沒有 `duckdb_query`、沒有腳本執行、沒有 CSV 解析。
-在那之前這個 harness 還不能真的分析資料 —— 見 `spikes/RESULTS.md` §Spike #9。
+**沒有對外的 MCP server。** orchestrator 目前只能從 Python 進入點驅動
+（`myharness.goldens`、`myharness.lanes.driver`），沒有 `analysis_start` /
+`analysis_poll` / `analysis_result`。`JobRunner.status()`、`QueueChannel`、
+`Delivery` 都是為那一層準備的。
+
+**`artifact.read` 事件尚未發出**，所以資料流圖的讀取邊是空的
+（`read_edges_available=False`，不以授權冒充）。

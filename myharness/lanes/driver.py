@@ -46,7 +46,10 @@ async def run_one(
         LaneType(
             name="tabular-analyst",
             charter_path=charter,
-            tools=("read_note", "write_finding", "update_state", "localize_blob"),
+            tools=(
+                "read_note", "write_finding", "update_state",
+                "localize_blob", "inspect_blob", "duckdb_query",
+            ),
             model_tier=tier,
             backend=backend,
             description="表格/交易資料分析",

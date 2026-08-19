@@ -60,16 +60,16 @@
 
 ## 6. 接線與文件
 
-- [ ] 6.1 `duckdb>=1.5` 加入 `pyproject.toml` 必要相依
-- [ ] 6.2 `myharness/artifacts/local.py` 的 `BLOB_ACCESS_HINT` 與實際工具簽名對齊
-- [ ] 6.3 `myharness/goldens.py` 的 `ANALYST_TOOLS` 與 `myharness/lanes/driver.py`
+- [x] 6.1 `duckdb>=1.5` 加入 `pyproject.toml` 必要相依
+- [x] 6.2 `myharness/artifacts/local.py` 的 `BLOB_ACCESS_HINT` 與實際工具簽名對齊
+- [x] 6.3 `myharness/goldens.py` 的 `ANALYST_TOOLS` 與 `myharness/lanes/driver.py`
       加入新工具
-- [ ] 6.4 `charters/tabular-analyst.md`：把「以工具處理」改成具體的工作流程
+- [x] 6.4 `charters/tabular-analyst.md`：把「以工具處理」改成具體的工作流程
       （先 `inspect_blob` 再 `duckdb_query`，大結果用 `into`）
-- [ ] 6.5 `myharness/lanes/README.md` 與 `myharness/orchestrator/README.md`
+- [x] 6.5 `myharness/lanes/README.md` 與 `myharness/orchestrator/README.md`
       移除「沒有任何工具能處理 blob」的說明
-- [ ] 6.6 `myharness/lanes/tabular/README.md`：沙箱為何長這樣、兩道閘、逃生口
-- [ ] 6.7 `DESIGN.md` §9 把「沒有資料處理工具」從開放問題移出
+- [x] 6.6 `myharness/lanes/tabular/README.md`：沙箱為何長這樣、兩道閘、逃生口
+- [x] 6.7 `DESIGN.md` §9 把「沒有資料處理工具」從開放問題移出
 
 ## 7. 端到端
 

@@ -406,6 +406,9 @@ Lane 成功 localize 到那份 138KB 的 CSV（拿到了本地路徑與 schema�
 **這不影響 golden job 的效力**：design.md D7 明確說它斷言的是紀律而非分析品質，
 而紀律全數通過。但在 `duckdb_query` 之類的工具出現前，這個 harness 還不能真的分析資料。
 
+> **已補上**（`add-tabular-tools`）：`inspect_blob` 與 `duckdb_query`，
+> 沙箱設計見下方 Spike #10。
+
 ### 成本
 
 `limit_reached` 是 `max_wall_clock_s`（1,863s，上限 1,800s）—— 其中 **534.9s

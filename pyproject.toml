@@ -9,6 +9,7 @@ description = "Multi-agent data-analysis harness on claude-agent-sdk, exposed as
 requires-python = ">=3.13"
 dependencies = [
     "claude-agent-sdk>=0.2.139",
+    "duckdb>=1.5",
     "jsonschema>=4.23",
 ]
 

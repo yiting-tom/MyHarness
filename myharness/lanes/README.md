@@ -24,7 +24,8 @@ JSON Schema 約束不了長度 —— 模型完全可以回一個符合 schema �
 LaneType(
     name="tabular-analyst",
     charter_path=Path("charters/tabular-analyst.md"),   # 檔案，不是字串
-    tools=("read_note", "write_finding", "update_state", "localize_blob"),
+    tools=("read_note", "write_finding", "update_state",
+           "localize_blob", "inspect_blob", "duckdb_query"),
     model_tier="strong",          # 能力層級，不是供應商的模型名稱
     backend="openrouter",
     token_budget=80_000,
@@ -48,7 +49,8 @@ Charter 必須講清楚三件事：
 2. **`update_state` 只寫跨任務要記得的東西** —— 結論與開放問題，不是細節。
    State 有 token 上限，超過會被**拒絕**（不是截斷），舊的 state 會保留，
    而該次執行會被標記為降級。
-3. **大型資料用 `localize_blob` 取路徑後以工具處理**，不要讀進 context。
+3. **大型資料用 `inspect_blob` / `duckdb_query` 查詢**，不要讀進 context。
+   查詢結果同樣受列數與字元數兩道上限約束，大結果用 `into` 寫成新的 blob。
 
 ## Worker 能碰到什麼
 

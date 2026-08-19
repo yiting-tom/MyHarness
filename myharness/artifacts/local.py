@@ -53,9 +53,11 @@ CREATE INDEX IF NOT EXISTS artifacts_job_kind ON artifacts(job_id, kind);
 CREATE INDEX IF NOT EXISTS artifacts_job_ns   ON artifacts(job_id, namespace);
 """
 
+#: Named in refusals so a worker that reached for the wrong tool is told the
+#: right one. Keep in step with myharness.lanes.tools.DEFAULT_TOOLS.
 BLOB_ACCESS_HINT = (
-    "duckdb_query(artifact, sql)",
-    "grep_blob(artifact, pattern)",
+    "inspect_blob(artifact) to see columns, types and row count",
+    "duckdb_query(artifacts, sql, into) to query it",
     "store.localize(artifact) for a local file path",
 )
 
