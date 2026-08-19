@@ -22,12 +22,12 @@
 
 ## 4. Orchestrator 的工具面
 
-- [ ] 4.1 定義工具集合與其 schema：`plan_update` / `dispatch` / `await_tasks` / `peek` / `ask_user` / `finish`
-- [ ] 4.2 實作 `plan_update`：寫入計畫 note，並建立／更新 lane instance（規格：計畫隨進度更新）
-- [ ] 4.3 實作 `peek`，標記 `readOnlyHint=True` 以允許同輪併發（design D2）
-- [ ] 4.4 實作 peek 預算扣減與耗盡後的拒絕，且不影響其他工具（規格：Peek 有 job 級的總預算的三個 scenario）
-- [ ] 4.5 實作 `finish`：驗證報告 artifact 存在，收斂 job
-- [ ] 4.6 測試：工具面不隨 lane 數量成長、且無任何能回傳 blob 內容的路徑（規格：Orchestrator 的工具面是固定且極小的）
+- [x] 4.1 定義工具集合與其 schema：`plan_update` / `dispatch` / `await_tasks` / `peek` / `ask_user` / `finish`
+- [x] 4.2 實作 `plan_update`：寫入計畫 note，並建立／更新 lane instance（規格：計畫隨進度更新）
+- [x] 4.3 實作 `peek`，標記 `readOnlyHint=True` 以允許同輪併發（design D2）
+- [x] 4.4 實作 peek 預算扣減與耗盡後的拒絕，且不影響其他工具（規格：Peek 有 job 級的總預算的三個 scenario）
+- [x] 4.5 實作 `finish`：驗證報告 artifact 存在，收斂 job
+- [x] 4.6 測試：工具面不隨 lane 數量成長、且無任何能回傳 blob 內容的路徑（規格：Orchestrator 的工具面是固定且極小的）
 
 ## 5. 使用者提問通道
 
@@ -38,7 +38,7 @@
 
 ## 6. 計畫與交接重啟
 
-- [ ] 6.1 實作計畫的讀寫（存為 note artifact，沿用既有預檢與版本；design D5）
+- [x] 6.1 實作計畫的讀寫（存為 note artifact，沿用既有預檢與版本；design D5）
 - [ ] 6.2 實作從既有計畫啟動全新 orchestrator（規格：計畫足以接手）
 - [ ] 6.3 實作 context 用量追蹤與門檻偵測
 - [ ] 6.4 實作交接請求與重啟，並保留未收割的任務（規格：Context 逼近上限時交接重啟的三個 scenario）
@@ -52,9 +52,9 @@
 
 ## 8. 事件與可觀測性
 
-- [ ] 8.1 新增事件型別：`plan.update`、`peek`、`limit.reached`、`no_progress`、`handoff.restart`
-- [ ] 8.2 實作 peek 預算用量的聚合（規格：窺看預算的使用可被追蹤）
-- [ ] 8.3 實作收工原因的判定（規格：收工原因可從事件流判定）
+- [x] 8.1 新增事件型別：`plan.update`、`peek`、`limit.reached`、`no_progress`、`handoff.restart`
+- [x] 8.2 實作 peek 預算用量的聚合（規格：窺看預算的使用可被追蹤）
+- [x] 8.3 實作收工原因的判定（規格：收工原因可從事件流判定）
 - [ ] 8.4 將交接重啟寫入事件流，含當時用量（規格：交接重啟被記錄）
 
 ## 9. 離線測試
