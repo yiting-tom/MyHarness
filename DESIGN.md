@@ -31,17 +31,18 @@
    │   analysis_provide(payload)                                          │
    │        │ 落 blob（0 token）                                          │
    │        ▼                                                             │
-   │   ┌─────────┐  metadata + bounded sample + routing_table             │
-   │   │  Proxy  │  (haiku, stateless, 單次)                              │
+   │   ┌─────────┐  routing_table + metadata + 有界樣本                    │
+   │   │  Proxy  │  (cheap tier, stateless, 單次；零 context 共享)         │
    │   └────┬────┘                                                        │
-   │        │ {lane, reason}  ──── ~40 token 通知 ───┐                    │
-   │        ▼                                        ▼                    │
-   │   ┌─────────────────┐   dispatch(blocking)  ┌───────────────┐        │
-   │   │  Lane instances │◄──────────────────────│ Orchestrator  │        │
-   │   │  txn-2024       │───── handle ~120t ───►│ (opus, 常駐)  │        │
-   │   │  txn-2023       │                       │  plan.md      │        │
-   │   │  kyc-docs       │   plan_update ───────►│  peek 預算    │        │
-   │   │  synthesizer    │   (routing_table)     └───────────────┘        │
+   │        │ {lane, reason} ~40 token —— 只是建議，不派工也不授權          │
+   │        └────────────────────────────────────┐                        │
+   │                                             ▼                        │
+   │   ┌─────────────────┐  dispatch 非阻塞     ┌───────────────┐         │
+   │   │  Lane instances │◄─── + await_tasks ───│ Orchestrator  │         │
+   │   │  txn-2024       │───── handle ~120t ──►│ (strong, 常駐)│         │
+   │   │  txn-2023       │                      │  plan.md      │         │
+   │   │  kyc-docs       │   plan_update ──────►│  peek 預算    │         │
+   │   │  synthesizer    │   (routing_table)    └───────────────┘         │
    │   └────────┬────────┘                                                │
    │            │ 讀寫                                                    │
    │   ┌────────▼──────────────────────────────────────────────┐          │
@@ -59,7 +60,7 @@
 | 1 | 資料流向 | MCP server；user 觸發分析，orchestrator 可要資料(push)，lane 可用工具撈(pull) |
 | 2 | 生命週期 | Job-based 非阻塞，in-memory state，但 state 設計成可序列化 |
 | 3 | 回傳契約 | Artifact + ~120 token handle；orchestrator **不彙整**，報告由 synthesizer lane 寫 |
-| 4 | Proxy | Ingress gate。Haiku、stateless、只看 metadata + bounded sample。依 orchestrator 發布的 routing table 先斬後奏；匹配不到才升級 |
+| 4 | Proxy | Ingress gate。**已實作**：單次、stateless、`ModelTier.CHEAP`，只看 routing table + 有界樣本（12 行／1,200 字元）。**只分類，不派工也不授權** —— 授權仍只發生在 `dispatch(inputs=...)`。零 context 共享有測試背書。失敗一律降級為未路由，資料照常落地 |
 | 5 | Subagent 執行模型 | Ephemeral agent + durable lane state。同 lane 序列化、跨 lane 平行 |
 | 6 | 實作方式 | 自包 `dispatch` custom tool + 嵌套 `query()`。契約由 `output_format` / `task_budget` / Python 程式碼強制 |
 | 7 | Orchestrator context | 常駐 `ClaudeSDKClient` + peek 預算 + plan.md + 60% rolling restart 逃生門 |
@@ -374,8 +375,6 @@ blob 與 note 分屬兩棵子樹，因為兩者的存取規則完全不同（見
 - **Lane state 的 stable / working 分區**：目前是 charter 的文字慣例，store 不理解其結構。
   若壓縮策略需要程式介入才要改。
 - **事件流的 schema 版本欄位**：傾向需要，但可在第一次破壞性變更時才加入。
-- **Proxy 的觸發範圍**：目前只在 `analysis_provide`。lane 內部的大型 tool result
-  是另一個問題（需要 tool-result 過濾器，不是 router）—— 待遇到再處理。
 - **跨 lane 平行上限**：`BackendGate` 已限制 per-backend 並行數（預設 4），
   但跨 backend 的總並行仍無上限。
 - **Charter 的撰寫規範**：`myharness/lanes/README.md` 已有基本要求，
@@ -384,6 +383,5 @@ blob 與 note 分屬兩棵子樹，因為兩者的存取規則完全不同（見
   （`<job_id>/<kind>/<name>`）以便日後開放。
 - **非表格 blob**：`duckdb_query` 讀 CSV / Parquet / JSON。純文字與日誌目前只能
   `localize_blob`，沒有 `grep_blob`。等到真的有這種 job 再決定它的輸出上限長什麼樣。
-- **Proxy（DESIGN #4）**：`analysis_provide` 會落 blob 並通知 orchestrator，
-  但不會用 LLM 判斷該路由到哪條 lane。回應以 `routed: false` 明講。
-  routing table 契約與其失敗語意都還沒設計。
+- **Proxy 的觸發範圍**：目前只在 `analysis_provide`。lane 內部的大型 tool result
+  是另一個問題（需要 tool-result 過濾器，不是 router）—— 待遇到再處理。

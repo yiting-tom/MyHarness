@@ -56,8 +56,10 @@
 
 ## 6. 文件與端到端
 
-- [ ] 6.1 `myharness/proxy/README.md`：為什麼只分類、為什麼不授權、零 context 共享
-- [ ] 6.2 `DESIGN.md` #4 標為已實作；§9 移除 proxy 開放項
-- [ ] 6.3 `myharness/mcp/README.md` 更新「還沒做：proxy」那一節
-- [ ] 6.4 離線端到端：宣告 routing table → provide → 路由 → orchestrator 收到通知
+- [x] 6.1 `myharness/proxy/README.md`：為什麼只分類、為什麼不授權、零 context 共享
+- [x] 6.2 `DESIGN.md` #4 標為已實作；§9 收斂為「觸發範圍」。**架構圖也改了** ——
+      原圖把 proxy 的箭頭畫進 lane（看起來像會派工），且寫著已被 spike #1
+      推翻的 `dispatch(blocking)`
+- [x] 6.3 `myharness/mcp/README.md` 更新「還沒做：proxy」那一節
+- [x] 6.4 離線端到端：宣告 routing table → provide → 路由 → orchestrator 收到通知
 - [ ] 6.5 live：兩份不同型態的資料進同一個 job，確認分別路由到不同 lane

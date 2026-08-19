@@ -70,10 +70,18 @@ poll(job, since=3) → 立刻返回        # 不會等下一次改變
 這條性質是 DESIGN #13「事件流為地基」一路撐到這裡的結果，不是免費的。
 它被寫成規格需求，免得日後有人為了方便把交付快取進記憶體而讓它悄悄失效。
 
-## 還沒做：proxy
+## 分流
 
-`analysis_provide` 會落 blob、發 ingress 事件、通知 orchestrator，
-但**不會**用 LLM 判斷該路由到哪條 lane（DESIGN #4）。
+`analysis_provide` 落完 blob 之後會呼叫分流器，判斷它屬於哪一條 lane，
+並把判斷結果附在給 orchestrator 的通知裡。回應分成四個欄位：
 
-回應裡的 `routed: false` 是明講的。沉默的降級最危險 —— 客戶端會以為資料已經
-送到正確的 lane，然後看不懂拿到的報告。
+```
+routed: true/false          有沒有判定出歸屬
+routed_to: "txn-2024"       判定的 lane（未路由時為 null）
+routing_reason: "..."       一句話理由
+unrouted_because: null      no_table / no_match / failed
+```
+
+**分流只是建議。** 它不派工也不授權 —— orchestrator 仍然要在 dispatch 時
+把 artifact id 放進 `inputs`，lane 才讀得到。詳見
+[`myharness/proxy/README.md`](../proxy/README.md)。
