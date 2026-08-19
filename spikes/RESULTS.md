@@ -410,3 +410,85 @@ Lane 成功 localize 到那份 138KB 的 CSV（拿到了本地路徑與 schema�
 
 `limit_reached` 是 `max_wall_clock_s`（1,863s，上限 1,800s）—— 其中 **534.9s
 花在限流等待**，佔 29%。付費的 nemotron-3-super 仍會被上游限流。
+
+---
+
+## Spike #10 — DuckDB 能不能鎖到不破壞 grant model？
+
+`spikes/spike10_duckdb_sandbox.py`（duckdb 1.5.5，`exit 0` 表示無洩漏）
+
+給 worker 一個 SQL 引擎，等於給它一個檔案讀取器。design.md D2 的 grant model
+只在「worker 沒有繞過的辦法」時才成立，所以這個 spike 只問一件事：
+**ingest 之後，worker 的 SQL 能不能碰到任何沒被授權的東西？**
+
+### 沙箱設定（順序有意義）
+
+```sql
+-- 先 ingest：view 是惰性的，table 不是。授權的檔案要在關門前讀進來。
+CREATE TABLE t AS SELECT * FROM read_csv_auto('<granted blob>');
+SET enable_external_access=false;
+SET allow_community_extensions=false;
+SET autoinstall_known_extensions=false;
+SET autoload_known_extensions=false;
+SET lock_configuration=true;    -- 必須最後：把上面全部凍結
+```
+
+### 逃逸嘗試結果
+
+| 嘗試 | 結果 |
+|---|---|
+| 讀已授權的 table | ✅ 可用（合法路徑沒被鎖死） |
+| `read_csv_auto('/未授權.csv')` | blocked `PermissionException` |
+| glob `.../*.csv` | blocked |
+| `ATTACH '...duckdb'` / `ATTACH ... (TYPE sqlite)` | blocked（後者連 extension 都載不了） |
+| `COPY t TO '...'`（把授權資料寫出去） | blocked |
+| `SET enable_external_access=true` | blocked `InvalidInputException` |
+| `SET lock_configuration=false` | blocked |
+| `INSTALL httpfs` / `LOAD httpfs` | blocked |
+| `read_csv_auto('https://...')` | blocked |
+| `read_text('/未授權')` | blocked |
+| `getenv('OPENROUTER_KEY2')` | 函式不存在 |
+| `duckdb_settings()` | **allowed —— 接受** |
+
+`duckdb_settings()` 只暴露沙箱自己的組態（temp dir、extension dir），
+沒有任何授權資料的旁路，不值得為它加一層 parser 級封鎖。
+
+### 兩個 duckdb 不會幫你擋的洞
+
+1. **`execute()` 會跑多個 statement。**
+   `"CREATE TEMP TABLE z AS SELECT 1 AS a; SELECT * FROM z"` 兩句都執行了。
+   工具必須自己用 `duckdb.extract_statements()` 檢查 **恰好一句**。
+2. **失控查詢不會自己停。** `SELECT count(*) FROM range(1e11) a, range(1e5) b`
+   會跑到天荒地老；`conn.interrupt()` 從另一個 thread 呼叫 0.51s 內就中斷了
+   （`InterruptException`）。所以牆鐘上限必須由 harness 用 timer + interrupt 執行。
+
+`extract_statements()[0].type` 可分辨 `SELECT` / `CREATE` / `DROP` / `UPDATE`，
+所以守門規則是：**恰好一句，且型別為 SELECT**。
+
+### 結論
+
+沙箱守得住，但 **`enable_external_access=false` 和 `lock_configuration=true`
+缺任何一個都不成立** —— 前者不設就能讀任意檔案，後者不設就能把前者關掉。
+和 handle contract 一樣是兩道，少一道只是「很可能安全」。
+
+### 被否決的替代方案：`allowed_paths`
+
+`allowed_paths` / `allowed_directories` 看起來像 per-file allowlist ——
+如果它成立，就能用惰性 view 直接查 blob 檔案，**沒有記憶體上限、沒有 ingest 成本**。
+
+它不成立。只設 `allowed_paths=['<授權檔>']` 加上 `lock_configuration=true` 之後：
+
+```
+granted file     ALLOWED
+UNGRANTED file   ALLOWED       <-- 同目錄的未授權檔案照讀
+/etc/hosts       ALLOWED       <-- 1080 bytes
+COPY over granted file  ALLOWED  <-- 把授權的 blob 覆寫掉了
+```
+
+這些設定是**加法**（在外部存取已開啟的前提下追加允許），不是減法。
+而 `enable_external_access` 是啟動期選項：關掉之後無法再開
+（`Cannot enable external access while database is running`），
+所以也沒辦法「先關再針對性開一條縫」。
+
+**結論：ingest 進記憶體再上鎖是唯一站得住的形狀，代價是 blob 必須有 byte 上限。**
+這條負面結果已寫進 `spike10_duckdb_sandbox.py`，會隨 duckdb 升版一起被重測。
