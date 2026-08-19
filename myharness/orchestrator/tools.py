@@ -17,6 +17,7 @@ from claude_agent_sdk import ToolAnnotations, create_sdk_mcp_server, tool
 from myharness.artifacts.errors import ArtifactError
 from myharness.artifacts.ids import ArtifactId, coerce_artifact_ids
 from myharness.artifacts.tokens import estimate_tokens
+from myharness.orchestrator.routing import RoutingError, RoutingTable, write_routing
 from myharness.artifacts.types import GrantSet
 from myharness.events.types import PEEK, PLAN_UPDATE
 from myharness.jobs.channel import Question, QuestionKind
@@ -35,6 +36,36 @@ MIN_USEFUL_PEEK_TOKENS = 200
 TOOL_NAMES = (
     "plan_update", "dispatch", "await_tasks", "peek", "ask_user", "finish",
 )
+
+
+# Written out rather than using the SDK shorthand, which marks every property
+# required -- that would force a routing_table on every plan update.
+_PLAN_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "plan": {"type": "string", "description": "The plan, in full."},
+        "lanes": {
+            "type": "array",
+            "items": {"type": "object"},
+            "description": "Lane instances to create: {id, type, scope}.",
+        },
+        "routing_table": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "lane": {"type": "string"},
+                    "accepts": {"type": "string"},
+                    "status": {"type": "string", "enum": ["open", "closed"]},
+                },
+                "required": ["lane", "accepts"],
+            },
+            "description": "Optional. What each lane accepts, for classifying "
+                           "data that arrives mid-run.",
+        },
+    },
+    "required": ["plan"],
+}
 
 
 def _ok(payload: Any) -> dict[str, Any]:
@@ -66,14 +97,29 @@ class OrchestratorTools:
         @tool(
             "plan_update",
             "Record the plan and declare which lanes should exist. Call this "
-            "before dispatching, and again whenever your understanding changes.",
-            {"plan": str, "lanes": list},
+            "before dispatching, and again whenever your understanding changes.\n\n"
+            "`routing_table` is optional and declares what each lane accepts, so "
+            "data arriving mid-run can be classified without spending your turn "
+            "on it. Entries are {lane, accepts, status}; `accepts` is a short "
+            "description in your own words, and `status` is \"open\" or "
+            "\"closed\". Omit the field to leave the current table alone.",
+            _PLAN_SCHEMA,
             annotations=mutating,
         )
         async def plan_update(args):
             text = str(args.get("plan", "")).strip()
             if not text:
                 return _err("empty_plan", "plan must not be empty")
+
+            # Parsed before anything is written: a half-applied plan_update
+            # leaves the orchestrator unsure which half took.
+            raw_routing = args.get("routing_table")
+            table: RoutingTable | None = None
+            if raw_routing is not None:
+                try:
+                    table = RoutingTable.from_raw(raw_routing)
+                except RoutingError as exc:
+                    return _err("bad_routing_table", str(exc))
 
             created: list[str] = []
             for raw in args.get("lanes") or []:
@@ -93,13 +139,27 @@ class OrchestratorTools:
                 created.append(spec.id)
 
             revision = await write_plan(self.runner.store, self.job_id, text)
+            routing: list[str] = []
+            if table is not None:
+                await write_routing(self.runner.store, self.job_id, table)
+                routing = [e.lane for e in table.open_entries]
             await self.runner.events.append(
                 self.job_id, PLAN_UPDATE, revision=revision,
                 lanes=sorted(self.runner.lanes), created=created,
                 plan_tokens=estimate_tokens(text),
+                routing_open=routing if table is not None else None,
             )
-            return _ok({"plan_revision": revision, "lanes": sorted(self.runner.lanes),
-                        "created": created})
+            payload = {"plan_revision": revision, "lanes": sorted(self.runner.lanes),
+                       "created": created}
+            if table is not None:
+                payload["routing_open"] = routing
+                unknown = [e.lane for e in table.entries
+                           if e.lane not in self.runner.lanes]
+                if unknown:
+                    # Not an error -- a table may name a lane about to be
+                    # created -- but silence here would look like it worked.
+                    payload["routing_lanes_not_yet_created"] = unknown
+            return _ok(payload)
 
         @tool(
             "dispatch",

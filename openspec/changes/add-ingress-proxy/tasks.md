@@ -1,15 +1,15 @@
 ## 1. Routing table
 
-- [ ] 1.1 `RoutingEntry`（lane / accepts / status）與 `RoutingTable` 型別，
+- [x] 1.1 `RoutingEntry`（lane / accepts / status）與 `RoutingTable` 型別，
       放在 `myharness/orchestrator/plan.py` 旁邊
-- [ ] 1.2 存取：寫成 job 的一個 note artifact，與 plan 同層級（不是新的儲存路徑）
-- [ ] 1.3 `plan_update` 新增選填的 `routing_table` 參數
+- [x] 1.2 存取：寫成 job 的一個 note artifact，與 plan 同層級（不是新的儲存路徑）
+- [x] 1.3 `plan_update` 新增選填的 `routing_table` 參數
       （規格：Orchestrator 以宣告式資料遙控分類器）
-- [ ] 1.4 未附 routing table 時不動既有的（規格：未附 routing table 不影響計畫更新）
-- [ ] 1.5 再次宣告會取代（規格：routing table 可被取代）
-- [ ] 1.6 明確的 JSON Schema，不用簡寫 —— `routing_table` 必須是選填
+- [x] 1.4 未附 routing table 時不動既有的（規格：未附 routing table 不影響計畫更新）
+- [x] 1.5 再次宣告會取代（規格：routing table 可被取代）
+- [x] 1.6 明確的 JSON Schema，不用簡寫 —— `routing_table` 必須是選填
       （前兩個 change 的教訓）
-- [ ] 1.7 壞掉的 entry 要拒絕並說明，不要靜默丟掉
+- [x] 1.7 壞掉的 entry 要拒絕並說明，不要靜默丟掉
 
 ## 2. 樣本
 

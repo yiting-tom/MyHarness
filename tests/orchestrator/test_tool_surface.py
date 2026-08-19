@@ -290,3 +290,96 @@ async def test_dispatch_tool_says_inputs_are_the_authorisation(bench):
 
     source = inspect.getsource(tools_module)
     assert "inputs` is the lane's ONLY authorisation" in source
+
+
+# --- routing table (add-ingress-proxy) -------------------------------------
+
+
+class TestRoutingTable:
+    """The orchestrator steers the proxy with declarative data and nothing else.
+
+    These are about the seam: whether the table survives plan_update intact,
+    and whether the failure modes are refusals rather than silent drops.
+    """
+
+    async def test_a_table_is_stored_and_readable(self, bench):
+        from myharness.orchestrator.routing import read_routing
+
+        out = payload(await bench.h["plan_update"]({
+            "plan": "# 目標\n測試\n",
+            "lanes": [{"id": "txn", "type": "ta"}],
+            "routing_table": [
+                {"lane": "txn", "accepts": "2024 交易明細"},
+                {"lane": "kyc", "accepts": "身分文件", "status": "closed"},
+            ],
+        }))
+        assert out["routing_open"] == ["txn"]
+        table = await read_routing(bench.store, "j7")
+        assert [e.lane for e in table.entries] == ["txn", "kyc"]
+
+    async def test_omitting_the_table_leaves_the_existing_one_alone(self, bench):
+        from myharness.orchestrator.routing import read_routing
+
+        await bench.h["plan_update"]({
+            "plan": "# 目標\n一\n",
+            "routing_table": [{"lane": "txn", "accepts": "交易"}],
+        })
+        out = payload(await bench.h["plan_update"]({"plan": "# 目標\n二\n"}))
+        assert "routing_open" not in out
+        table = await read_routing(bench.store, "j7")
+        assert [e.lane for e in table.entries] == ["txn"], "the table was clobbered"
+
+    async def test_declaring_again_replaces(self, bench):
+        from myharness.orchestrator.routing import read_routing
+
+        await bench.h["plan_update"]({
+            "plan": "p", "routing_table": [{"lane": "a", "accepts": "x"}],
+        })
+        await bench.h["plan_update"]({
+            "plan": "p", "routing_table": [{"lane": "b", "accepts": "y"}],
+        })
+        table = await read_routing(bench.store, "j7")
+        assert [e.lane for e in table.entries] == ["b"]
+
+    async def test_a_bad_entry_is_refused_and_nothing_is_written(self, bench):
+        """Parsed before anything is written -- a half-applied plan_update
+        leaves the orchestrator unsure which half took."""
+        from myharness.orchestrator.plan import read_plan
+
+        out = payload(await bench.h["plan_update"]({
+            "plan": "# 目標\n新的\n",
+            "routing_table": [{"lane": "a"}],
+        }))
+        assert out["error"] == "bad_routing_table"
+        assert "nothing can be routed" in out["message"]
+        plan, _ = await read_plan(bench.store, "j7")
+        assert plan is None, "the plan was written despite the refusal"
+
+    async def test_a_lane_that_does_not_exist_yet_is_flagged_not_refused(self, bench):
+        """A table may legitimately name a lane about to be created; silence
+        would make a typo look like it worked."""
+        out = payload(await bench.h["plan_update"]({
+            "plan": "p",
+            "lanes": [{"id": "txn", "type": "ta"}],
+            "routing_table": [{"lane": "txn", "accepts": "x"},
+                              {"lane": "typo", "accepts": "y"}],
+        }))
+        assert out["routing_lanes_not_yet_created"] == ["typo"]
+        assert "error" not in out
+
+    async def test_the_event_records_which_lanes_are_open(self, bench):
+        await bench.h["plan_update"]({
+            "plan": "p",
+            "routing_table": [{"lane": "a", "accepts": "x"},
+                              {"lane": "b", "accepts": "y", "status": "closed"}],
+        })
+        events = await bench.kinds("plan.update")
+        assert events[-1].get("routing_open") == ["a"]
+
+    async def test_routing_table_is_optional_in_the_schema(self):
+        """The SDK shorthand would have made it required on every plan update."""
+        from myharness.orchestrator.tools import _PLAN_SCHEMA
+
+        assert _PLAN_SCHEMA["required"] == ["plan"]
+        assert "routing_table" in _PLAN_SCHEMA["properties"]
+        assert "lanes" in _PLAN_SCHEMA["properties"]
