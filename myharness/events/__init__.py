@@ -4,6 +4,7 @@ from myharness.events.log import EventLog, LocalEventLog
 from myharness.events.query import (
     Caveat,
     JobSummary,
+    cache_hit_ratio,
     context_peak,
     cost_by_lane,
     derive_caveats,
@@ -20,7 +21,7 @@ from myharness.events.types import Event, MalformedEvent
 
 __all__ = [
     "Caveat", "Event", "EventLog", "JobSummary", "LocalEventLog", "MalformedEvent",
-    "context_peak", "cost_by_lane", "derive_caveats", "duplicate_dispatches",
+    "cache_hit_ratio", "context_peak", "cost_by_lane", "derive_caveats", "duplicate_dispatches",
     "failures", "of_type", "summarize", "throttle_seconds", "throttled_backends",
     "tokens_by_lane", "total_cost_usd",
 ]

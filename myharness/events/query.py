@@ -71,6 +71,21 @@ def tokens_by_lane(events: Iterable[Event]) -> dict[str, dict[str, int]]:
     return {k: dict(v) for k, v in totals.items()}
 
 
+def cache_hit_ratio(events: Iterable[Event]) -> float:
+    """Share of input tokens served from the prompt cache, across a job.
+
+    The ephemeral-worker design pays the charter prefix on every dispatch; this
+    is the number that says whether caching is actually absorbing it.
+    """
+    cached = fresh = 0
+    for e in of_type(events, DISPATCH_END):
+        tok = e.get("tokens") or {}
+        cached += int(tok.get("cache_read") or 0)
+        fresh += int(tok.get("fresh_in") or 0) + int(tok.get("cache_write") or 0)
+    total = cached + fresh
+    return round(cached / total, 3) if total else 0.0
+
+
 def total_cost_usd(events: Iterable[Event]) -> float:
     return sum(float(e.get("usd") or 0.0) for e in events)
 
@@ -205,6 +220,7 @@ class JobSummary:
     context_peak: int
     cost_by_lane: dict[str, float]
     throttle_seconds: float
+    cache_hit_ratio: float
     caveats: Sequence[Caveat]
 
 
@@ -219,5 +235,6 @@ def summarize(events: Sequence[Event]) -> JobSummary:
         context_peak=context_peak(events),
         cost_by_lane=cost_by_lane(events),
         throttle_seconds=throttle_seconds(events),
+        cache_hit_ratio=cache_hit_ratio(events),
         caveats=derive_caveats(events),
     )

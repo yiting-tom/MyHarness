@@ -68,7 +68,7 @@
 - [x] 8.4 **Live**：`max_turns` 設到不足，驗證得到 `max_turns` handle 而非例外
 - [x] 8.5 **Live**：同一 lane 連續兩次任務，驗證第二次能看到第一次寫入 state 的結論、且看不到第一次未寫入 state 的細節
 - [x] 8.6 **Live**：以 OpenRouter 的非 Anthropic 模型執行一次，驗證 handle 契約仍成立
-- [ ] 8.7 量測並記錄：裁切前後的固定 prefix token 數、prompt cache 命中率、單次執行成本，寫入 `spikes/RESULTS.md`
+- [x] 8.7 量測並記錄：裁切前後的固定 prefix token 數、prompt cache 命中率、單次執行成本，寫入 `spikes/RESULTS.md`
 
 ## 10. 後端節流（live 測試發現：付費模型仍持續 429）
 
@@ -82,8 +82,8 @@
 
 ## 9. 收尾
 
-- [ ] 9.1 全套離線測試通過並記錄覆蓋率；live 測試至少完整跑過一次並記錄結果與費用
+- [x] 9.1 全套離線測試通過並記錄覆蓋率；live 測試至少完整跑過一次並記錄結果與費用
 - [x] 9.2 撰寫 `myharness/lanes/README.md`：如何定義一個 LaneType、如何寫 charter、如何新增 backend
 - [x] 9.3 更新根目錄 `DESIGN.md`：將 §4.3 LaneType、§4.1 handle、§5b backend 對齊實際實作
-- [ ] 9.4 更新 `DESIGN.md` §9 開放項目：移除已由本 change 定案者，補上實測得出的新數值
+- [x] 9.4 更新 `DESIGN.md` §9 開放項目：移除已由本 change 定案者，補上實測得出的新數值
 - [x] 9.5 `openspec validate add-lane-worker --strict` 通過

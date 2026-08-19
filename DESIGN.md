@@ -331,10 +331,33 @@ blob 與 note 分屬兩棵子樹，因為兩者的存取規則完全不同（見
 5. MCP long-poll：`analysis_poll(wait=30)` 在 Claude Code 端會不會撞到 client 的 tool timeout。
    （已知：`MCP_TOOL_TIMEOUT` 預設 1e8ms≈27.8h；SDK in-process tool 靜默阻塞 **180s 與 600s 實測皆通過**。）
 
-## 9. 尚未決定的開放項目
+## 9. 開放項目
 
-- **Proxy 的觸發範圍**：目前只在 `analysis_provide`。lane 內部的大型 tool result 是另一個問題（需要 tool-result 過濾器，不是 router）— 待遇到再處理。
-- **跨 lane 平行上限**：目前無限制，可能需要 semaphore。
-- **Charter 的撰寫規範**：state.md 該記什麼／不該記什麼，是 charter 品質的核心，需要一份 charter 撰寫指南。
-- **Lane state eviction**：8k 撞牆時只壓 working 區的具體策略。
-- **跨 job artifact 共享**：v1 為 job-scoped，但 id 設計成全域唯一（`<job_id>/<kind>/<name>`）以便日後開放。
+### 已由實測定案
+
+| 項目 | 定案值 | 依據 |
+|---|---|---|
+| `est_tokens` 估算 | ASCII/4 + 非 ASCII×1.5 | 單一 4 chars/token 會低估中文 4–6 倍，而低估正是會炸掉 worker 的方向 |
+| Handle 欄位上限 | headline 200 字元、整體序列化 2000 | live 實測 handle 為 215–216 字元；被要求寫 3000 字報告時仍在界內 |
+| 工具裁切 | 每個 LaneType 明確宣告，其餘 `disallowed_tools` | 省 ≈16,468 tokens/worker（196k 的 8.4%），spike #7 |
+| Transient 重試 | 時間預算 300s、退避 4s→60s 加 full jitter、per-backend 共享閘 | 次數上限會在限流恢復前就放棄；spike #6 |
+| SDK 內建重試 | `CLAUDE_CODE_MAX_RETRIES=2` | 預設 10 次會在單一呼叫內耗掉數分鐘，harness 看不到也協調不了 |
+| 降級路徑重試 | 2 次後回失敗 handle | 離線驗證 |
+| OpenRouter 的 `task_budget` | **不宣告** | 預算不足時回 400、output 為 0，拿不到部分結果；spike #6 |
+| 單次 lane 執行成本 | ≈$0.02–0.04（nemotron-3-super-120b） | spike #7；SDK 回報值高於實際帳單，成本斷言以帳單為準 |
+
+### 仍然開放
+
+- **Lane state 的 8k 上限**：尚未在真實長 job 中撞到過。撞牆會產生一筆降級事件，
+  那筆事件就是設計壓縮策略所需的資料 —— 在有它之前做壓縮只是猜。
+- **Lane state 的 stable / working 分區**：目前是 charter 的文字慣例，store 不理解其結構。
+  若壓縮策略需要程式介入才要改。
+- **事件流的 schema 版本欄位**：傾向需要，但可在第一次破壞性變更時才加入。
+- **Proxy 的觸發範圍**：目前只在 `analysis_provide`。lane 內部的大型 tool result
+  是另一個問題（需要 tool-result 過濾器，不是 router）—— 待遇到再處理。
+- **跨 lane 平行上限**：`BackendGate` 已限制 per-backend 並行數（預設 4），
+  但跨 backend 的總並行仍無上限。
+- **Charter 的撰寫規範**：`myharness/lanes/README.md` 已有基本要求，
+  完整指南需要真實 job 的經驗才寫得出有用的版本。
+- **跨 job artifact 共享**：v1 為 job-scoped，但 id 設計成全域唯一
+  （`<job_id>/<kind>/<name>`）以便日後開放。

@@ -284,7 +284,8 @@ async def test_end_event_carries_cost_and_usage(bench):
                                                usage={"input_tokens": 4000, "output_tokens": 300})]))
     (end,) = await bench.events_for(DISPATCH_END)
     assert end.get("status") == "ok"
-    assert end.get("tokens") == {"in": 4000, "out": 300}
+    assert end.get("tokens") == {"in": 4000, "out": 300, "fresh_in": 4000,
+                                 "cache_read": 0, "cache_write": 0}
     assert end.get("usd") == 0.31
     assert end.get("transcript") and end.get("artifact")
 
@@ -314,7 +315,8 @@ async def test_null_usage_fields_do_not_crash_the_run(bench):
     assert handle.ok
 
     (end,) = await bench.events_for(DISPATCH_END)
-    assert end.get("tokens") == {"in": 0, "out": 0}
+    assert end.get("tokens") == {"in": 0, "out": 0, "fresh_in": 0,
+                                 "cache_read": 0, "cache_write": 0}
 
 
 async def test_rate_limited_run_is_not_mistaken_for_a_bad_handle(bench):
@@ -343,3 +345,19 @@ async def test_errored_result_without_transient_signal_is_not_a_schema_violation
     handle = await run(bench, transport)
     assert handle.status is not HandleStatus.SCHEMA_VIOLATION
     assert not handle.ok
+
+
+async def test_token_breakdown_keeps_cache_reads_visible(bench):
+    """Summing cached and fresh input hides whether prompt caching is working —
+    and the ephemeral-worker cost model depends entirely on it."""
+    from myharness.events.query import cache_hit_ratio
+
+    usage = {"input_tokens": 200, "output_tokens": 80,
+             "cache_read_input_tokens": 1800, "cache_creation_input_tokens": 0}
+    await run(bench, ScriptedTransport([result(structured=GOOD_HANDLE, usage=usage)]))
+
+    (end,) = await bench.events_for(DISPATCH_END)
+    tokens = end.get("tokens")
+    assert tokens == {"in": 2000, "out": 80, "fresh_in": 200,
+                      "cache_read": 1800, "cache_write": 0}
+    assert cache_hit_ratio(await bench.events.read(JOB)) == 0.9

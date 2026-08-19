@@ -115,6 +115,22 @@ class Accumulated:
         return _as_int(self.usage.get("output_tokens"))
 
     @property
+    def token_breakdown(self) -> dict[str, int]:
+        """Fresh / cached / written input, kept apart.
+
+        Summing them into one number makes prompt-cache effectiveness invisible
+        -- and the whole ephemeral-worker cost model rests on the charter prefix
+        being cached.
+        """
+        return {
+            "in": self.tokens_in,
+            "out": self.tokens_out,
+            "fresh_in": _as_int(self.usage.get("input_tokens")),
+            "cache_read": _as_int(self.usage.get("cache_read_input_tokens")),
+            "cache_write": _as_int(self.usage.get("cache_creation_input_tokens")),
+        }
+
+    @property
     def saw_transient(self) -> bool:
         return any(s in TRANSIENT_STATUSES for s in self.retry_statuses)
 
@@ -319,7 +335,7 @@ async def run_lane_worker(
     await event_log.append(
         request.job_id, DISPATCH_END, id=request.dispatch_id, lane=lane.id,
         status=str(handle.status), artifact=handle.artifact or None,
-        tokens={"in": acc.tokens_in, "out": acc.tokens_out}, turns=acc.turns,
+        tokens=acc.token_breakdown, turns=acc.turns,
         usd=acc.usd, transcript=transcript_id, contract_path=str(path),
         headline=handle.headline, partial=handle.partial, suggest=handle.suggest,
     )

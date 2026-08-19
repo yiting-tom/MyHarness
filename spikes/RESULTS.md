@@ -322,3 +322,45 @@ Live 測試把「預算耗盡」與「回合用盡」都歸類成 `tool_failure`
 開發機環境裡若殘留一把（可能已失效的）`ANTHROPIC_API_KEY`，它的優先權高於
 `ANTHROPIC_AUTH_TOKEN`，會讓自訂 endpoint 的驗證走錯路。
 `BackendProfile.to_sdk_env()` 在設定 `base_url` 時一併把它清空。
+
+---
+
+## Spike #7 — Lane worker 的實際量測（task 8.7）
+
+### 固定 prefix 成本（離線、錄音端點、零成本）
+
+以真實的 `run_lane_worker` 設定攔下請求比較：
+
+| 設定 | tools | tool 定義 tokens | system | prefix 合計 |
+|---|---|---|---|---|
+| 未裁切 | 29 | ≈16,971 | ≈233 | ≈17,204 |
+| `disallowed_tools` 裁切後 | 5 | ≈503 | ≈233 | **≈736** |
+
+**每個 ephemeral worker 省下 ≈16,468 tokens（196k 的 8.4%）。**
+這是**每一次** dispatch 都省 —— 一個 40 次 dispatch 的 job 就是 65 萬 token。
+
+### 實際執行成本（live，`nemotron-3-super-120b-a12b`）
+
+同一條 lane 連跑兩次「寫一句話進 finding 並回報 handle」：
+
+| | tokens in | tokens out | turns | usd | handle |
+|---|---|---|---|---|---|
+| d1 | 6,178 | 940 | 6 | $0.044 | 216 chars |
+| d2 | 6,454 | 1,133 | 6 | $0.040 | 215 chars |
+
+節流等待 44.7s，無 caveats，兩次皆 `ok`。
+
+**帳單核對**：OpenRouter 的 `usage` 從 $5.5882 → $5.6087，
+整段 live 工作（含 28 分鐘的完整測試套件與多次探測）實際計費 **$0.0205**。
+SDK 回報的 `total_cost_usd` 明顯高於實際帳單，成本斷言應以帳單為準。
+
+### ⚠️ 事件裡看不出 cache 命中（已修）
+
+`tokens_in` 原本把 `input_tokens`、`cache_read`、`cache_creation` 加總成一個數字，
+使 prompt cache 的效果無法從事件流量測 —— 而 ephemeral worker 的成本模型**完全建立在
+charter 前綴會被快取**這個前提上。現在 `dispatch.end` 的 `tokens` 拆成
+`in / out / fresh_in / cache_read / cache_write`，並新增 `cache_hit_ratio()` 聚合。
+
+### 單次執行的 handle 大小
+
+live 實測 215–216 字元，上限 2000。即使被要求寫 3000 字報告，handle 仍在上界內。
