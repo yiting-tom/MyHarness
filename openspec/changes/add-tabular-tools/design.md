@@ -31,6 +31,12 @@ worker 指名 artifact id，harness 綁定表名。兩個理由：
 view 是惰性的，table 不是。所以順序必須是「先把授權的檔案讀成 table，再關門」。
 關門之後 worker 的 SQL 再也碰不到檔案系統。
 
+關門只有一道鎖：`enable_external_access=false`。實測它在 duckdb 1.5.5 自我防衛
+（開不回來，且連 `allowed_paths` 都一併凍結），所以 `lock_configuration=true`
+**不是第二道圍籬**，而是縱深防禦 —— 它釘住 `autoload`/`autoinstall`，
+並且讓上述自我防衛（duckdb 的實作性質，不是 API 承諾）不是唯一依靠。
+規格因此只要求「關閉且無法於同次執行中還原」，不指定用幾個設定達成。
+
 spike #10 試過用 `allowed_paths` 做 per-file allowlist 來避開記憶體成本 ——
 它是加法不是減法，只設它的情況下 `/etc/hosts` 照讀、`COPY` 還把授權的 blob 覆寫掉了。
 而 `enable_external_access` 是啟動期選項，關掉之後開不回來，也就無法「先關再開一條縫」。

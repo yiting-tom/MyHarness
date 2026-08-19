@@ -92,6 +92,29 @@ try:
 except Exception as exc:
     print(f"  interrupted after {time.monotonic()-t0:.2f}s ({type(exc).__name__})")
 
+# Which pragma is actually the fence? The table above does not say -- it only
+# shows the full set holding. Answered here so the design cannot overclaim.
+print("\nwhich pragma is load-bearing? (external access off, NOTHING else):")
+solo = duckdb.connect(":memory:")
+solo.execute(f"CREATE TABLE t AS SELECT * FROM read_csv_auto('{GRANTED}')")
+solo.execute("SET enable_external_access=false")
+for label, sql in (
+    ("re-enable it",      "SET enable_external_access=true"),
+    ("widen allowed_paths", f"SET allowed_paths=['{SECRET}']"),
+    ("read ungranted",    f"SELECT * FROM read_csv_auto('{SECRET}')"),
+    ("LOAD httpfs",       "LOAD httpfs"),
+    ("autoload on",       "SET autoload_known_extensions=true"),
+):
+    try:
+        solo.execute(sql).fetchall()
+        print(f"  {label:20s} ALLOWED")
+    except Exception as exc:
+        print(f"  {label:20s} blocked ({type(exc).__name__})")
+solo.close()
+print("  => enable_external_access=false defends itself. lock_configuration is")
+print("     NOT a second fence -- it pins autoload/autoinstall, which stay")
+print("     mutable without it. Keep it, but do not call it the fence.")
+
 # The rejected alternative. `allowed_paths` looks like a per-file allowlist and
 # would have let us query blobs lazily -- no memory cap, no ingest cost. It is
 # not a fence: it only ADDS allowances on top of external access being on.

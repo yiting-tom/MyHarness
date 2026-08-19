@@ -465,11 +465,29 @@ SET lock_configuration=true;    -- 必須最後：把上面全部凍結
 `extract_statements()[0].type` 可分辨 `SELECT` / `CREATE` / `DROP` / `UPDATE`，
 所以守門規則是：**恰好一句，且型別為 SELECT**。
 
-### 結論
+### 修正：只有一道是圍籬
 
-沙箱守得住，但 **`enable_external_access=false` 和 `lock_configuration=true`
-缺任何一個都不成立** —— 前者不設就能讀任意檔案，後者不設就能把前者關掉。
-和 handle contract 一樣是兩道，少一道只是「很可能安全」。
+上面那張表最初被我讀成「兩道閘，缺一不可」。實測不是。
+在 duckdb 1.5.5，**`enable_external_access=false` 自己守得住自己**：
+
+```
+SET enable_external_access=false   （不加 lock_configuration）
+  re-enable external access    blocked  Cannot enable external access while database is running
+  allowed_paths widen          blocked  Cannot change allowed_paths when enable_external_access is disabled
+  allowed_directories widen    blocked  同上
+  LOAD / INSTALL httpfs        blocked
+  autoload_known_extensions=true   ALLOWED   <-- 唯一還能動的
+```
+
+所以：
+
+- **圍籬只有一道**：`enable_external_access=false`。拿掉它，上面整張表全部重新打開。
+- `lock_configuration=true` **不是第二道圍籬**，是縱深防禦：它釘住
+  `autoload`/`autoinstall`（沒有它仍可改），並且讓「圍籬會自我防衛」這件事
+  不是唯一的依靠 —— 那是 duckdb 的實作性質，不是它的 API 承諾。
+
+留著它，但不能宣稱它是圍籬。這一條寫進 `tests/tabular/test_sandbox.py`：
+一個測試證明拿掉圍籬全破，另一個測試證明鎖確實多釘住了 autoload。
 
 ### 被否決的替代方案：`allowed_paths`
 

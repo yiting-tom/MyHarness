@@ -1,15 +1,17 @@
 ## 1. 沙箱
 
-- [ ] 1.1 `myharness/lanes/tabular/sandbox.py`：以 spike #10 驗證過的順序建連線
+- [x] 1.1 `myharness/lanes/tabular/sandbox.py`：以 spike #10 驗證過的順序建連線
       —— 先 ingest，再 `enable_external_access=false`、關閉三項擴充套件設定，
       最後 `lock_configuration=true`（design D3）
-- [ ] 1.2 逃逸測試：未授權讀取、glob、ATTACH、COPY 寫出、重開外部存取、
+- [x] 1.2 逃逸測試：未授權讀取、glob、ATTACH、COPY 寫出、重開外部存取、
       解鎖組態、INSTALL/LOAD、http（規格：查詢引擎在執行使用者 SQL 期間與外界隔離）
-- [ ] 1.3 兩道設定各缺一道的測試，證明兩道都是必要的（design D3）
-- [ ] 1.4 `guard_sql()`：`extract_statements` 要求恰好一句、型別 SELECT
+- [x] 1.3 證明圍籬是哪一道：拿掉 `enable_external_access=false` 全破；
+      `lock_configuration` 額外釘住 autoload。**修正**：原先寫「兩道各缺一道
+      都不成立」是錯的 —— 圍籬只有一道，鎖是縱深防禦（design D3）
+- [x] 1.4 `guard_sql()`：`extract_statements` 要求恰好一句、型別 SELECT
       （規格：查詢僅接受單一唯讀敘述）
-- [ ] 1.5 多敘述、非 SELECT、空字串、無法解析的 SQL 各自的拒絕測試
-- [ ] 1.6 逾時：查詢跑在 thread、timer 打 `interrupt()`、回逾時而非例外
+- [x] 1.5 多敘述、非 SELECT、空字串、無法解析的 SQL 各自的拒絕測試
+- [x] 1.6 逾時：查詢跑在 thread、timer 打 `interrupt()`、回逾時而非例外
       （規格：資料量與執行時間有上限且拒絕時說明原因）
 
 ## 2. 綁定與 ingest
