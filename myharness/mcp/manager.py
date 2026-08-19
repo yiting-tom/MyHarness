@@ -142,6 +142,10 @@ class JobManager:
     def get(self, job_id: str) -> JobHandle | None:
         return self._jobs.get(job_id)
 
+    def ids(self) -> list[str]:
+        """Every job this manager knows, running or not."""
+        return list(self._jobs)
+
     def running_ids(self) -> list[str]:
         return [j for j, h in self._jobs.items() if h.running]
 
@@ -149,6 +153,34 @@ class JobManager:
         return len(self.running_ids()) >= self._max_concurrent
 
     # ---- lifecycle -------------------------------------------------------
+
+    def register(
+        self, job_id: str, *, runner: JobRunner, channel: QueueChannel
+    ) -> JobHandle:
+        """Create the handle without starting anything.
+
+        Two phases because the caller has to wire the notifying event log to
+        *this* handle before the job produces its first event. A single
+        ``start`` that built the handle internally meant the caller was
+        attaching the notifier to a different object than the one being run.
+        """
+        if job_id in self._jobs:
+            raise ManagerError(f"job {job_id} already exists")
+        handle = JobHandle(job_id=job_id, runner=runner, channel=channel)
+        self._jobs[job_id] = handle
+        return handle
+
+    def launch(
+        self, handle: JobHandle, run: Callable[[], Awaitable[LoopOutcome]]
+    ) -> JobHandle:
+        """Set a registered job running in the background."""
+        if self._jobs.get(handle.job_id) is not handle:
+            raise ManagerError(f"{handle.job_id} was not registered here")
+        if handle.task is not None:
+            raise ManagerError(f"{handle.job_id} is already running")
+        handle.task = asyncio.create_task(run(), name=f"job:{handle.job_id}")
+        handle.task.add_done_callback(lambda t: self._settle(handle, t))
+        return handle
 
     def start(
         self,
@@ -158,14 +190,8 @@ class JobManager:
         channel: QueueChannel,
         run: Callable[[], Awaitable[LoopOutcome]],
     ) -> JobHandle:
-        """Register a job and set it running in the background."""
-        if job_id in self._jobs:
-            raise ManagerError(f"job {job_id} already exists")
-        handle = JobHandle(job_id=job_id, runner=runner, channel=channel)
-        self._jobs[job_id] = handle
-        handle.task = asyncio.create_task(run(), name=f"job:{job_id}")
-        handle.task.add_done_callback(lambda t: self._settle(handle, t))
-        return handle
+        """Register and launch in one step, for callers with nothing to wire."""
+        return self.launch(self.register(job_id, runner=runner, channel=channel), run)
 
     def _settle(self, handle: JobHandle, task: asyncio.Task[LoopOutcome]) -> None:
         """Record how the job ended, including ways nobody asked about.

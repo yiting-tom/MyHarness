@@ -513,3 +513,61 @@ COPY over granted file  ALLOWED  <-- 把授權的 blob 覆寫掉了
 
 **結論：ingest 進記憶體再上鎖是唯一站得住的形狀，代價是 blob 必須有 byte 上限。**
 這條負面結果已寫進 `spike10_duckdb_sandbox.py`，會隨 duckdb 升版一起被重測。
+
+---
+
+## Golden job 第六次 —— 第一次真的分析了資料
+
+`add-tabular-tools` 之後的第一次 live 跑（nemotron-3-super-120b-a12b via OpenRouter）。
+
+```
+anomalies=none
+phase=complete  salvaged=False  turns=5  handoffs=0
+context_peak=6,757（orchestrator）/ 30,589（lane 峰值）
+dispatches=3  duplicates=0  failures=0
+cost=$0.2543  peek=0  throttle=129.6s  cache_hit=0.735
+caveats=['unanswered_question', 'unanswered_question']
+```
+
+**十五項斷言全過**，包含兩項對第五次跑會失敗的新斷言。
+
+### 數字是對的，不是看起來對
+
+Lane 用 `duckdb_query` 算出來的每一個數字，都與直接對 CSV 下 SQL 的結果**完全相符**：
+
+| | 報告 | 直接查詢 |
+|---|---|---|
+| distinct accounts | 765 | 765 |
+| app 平均 | 13,981.81 | 13,981.81 |
+| web 平均 | 20,612.47 | 20,612.47 |
+| atm 平均 | 21,347.33 | 21,347.33 |
+| branch 平均 | 21,655.25 | 21,655.25 |
+
+第五次的報告寫的是「由於權限限制，未能讀取…」。這一次寫的是
+「交易帳戶數為 765，且 app 通道平均金額最低（約 13,981.81）」。
+
+### 與第五次的對照
+
+| | 第五次 | 第六次 |
+|---|---|---|
+| 交付內容 | 「未能讀取資料」 | 五項具體發現，數字全對 |
+| orchestrator context 峰值 | 9,720 | **6,757** |
+| 成本 | $0.4440 | **$0.2543** |
+| dispatches | 5 | 3 |
+| 限流等待 | 534.9s（佔 29% 牆鐘） | **129.6s** |
+| 資料流異常 | ungranted_production（CRITICAL） | 無 |
+
+更便宜、更少 context、更少 dispatch —— 因為 lane 這次**一次就把事情做完了**，
+不需要 orchestrator 反覆重派。能力補上之後紀律指標一起變好，不是巧合。
+
+### 兩個值得記下的行為
+
+1. **Orchestrator 派了 d2 去「取 blob 的前兩行」。** 它想驗證資料格式。
+   這沒有違反不變式（lane 把兩行寫進 finding，orchestrator 沒有直接讀 blob），
+   但顯示模型仍會試圖親眼看資料。charter 說得再清楚，它還是會問。
+
+2. **兩個問題沒人回答，走了 default。** `ask_user` 的 timeout 生效，
+   兩者都正確變成 `unanswered_question` caveat 出現在交付裡。
+   其中 q1 問「lane 一直 timeout，blob 路徑對嗎？」—— 第一次 `duckdb_query`
+   呼叫確實比較慢（要 ingest 138KB），orchestrator 把它讀成故障。
+   這不是 bug，但值得記著：第一次查詢的延遲會被誤讀。
