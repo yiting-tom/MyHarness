@@ -1,23 +1,24 @@
 ## 1. Job 生命週期
 
-- [ ] 1.1 `myharness/mcp/manager.py`：`JobManager` 以 job_id 定址背景 `asyncio.Task`
+- [x] 1.1 `myharness/mcp/manager.py`：`JobManager` 以 job_id 定址背景 `asyncio.Task`
       （規格：分析以非阻塞方式啟動）
-- [ ] 1.2 背景 task 的例外經完成回呼寫進事件流，不靠有人 await
+- [x] 1.2 背景 task 的例外經完成回呼寫進事件流，不靠有人 await
       （design D1；規格：背景失敗不得無聲消失）
-- [ ] 1.3 未捕捉例外的測試：讓 loop 拋錯，斷言最終狀態查得到
-- [ ] 1.4 併行上限與其拒絕訊息（規格：併行分析數有上限）
-- [ ] 1.5 job 結束後從 running 集合移除，但識別碼仍可查（design D4）
-- [ ] 1.6 關閉 manager 時取消所有背景 task 並等待它們收尾
+- [x] 1.3 未捕捉例外的測試：讓 loop 拋錯，斷言最終狀態查得到
+- [x] 1.4 併行上限與其拒絕訊息（規格：併行分析數有上限）
+- [x] 1.5 job 結束後從 running 集合移除，但識別碼仍可查（design D4）
+- [x] 1.6 關閉 manager 時取消所有背景 task 並等待它們收尾
 
 ## 2. 狀態變更通知
 
-- [ ] 2.1 每個 job 一個 `asyncio.Event`；定義「實質改變」為 dispatch 起訖、
+- [x] 2.1 每個 job 一個 `asyncio.Event`；定義「實質改變」為 dispatch 起訖、
       新問題、job 結束 —— **不含 `ctx`**（design D2）
-- [ ] 2.2 `wait_for_change(job_id, timeout)`：等到改變或逾時
-- [ ] 2.3 測試：改變發生時立即返回（不等滿 timeout）
-- [ ] 2.4 測試：無事發生時逾時返回，且不是錯誤
-- [ ] 2.5 測試：`ctx` 事件不會喚醒等待者（否則等於每 turn 空 poll 一次）
-- [ ] 2.6 測試：已結束的 job 立即返回
+- [x] 2.2 `wait_for_change(timeout, since=)`：等到改變或逾時。**加了 revision cursor**
+      —— 沒有它，兩次 poll 之間發生的改變會遺失（測試抓到）
+- [x] 2.3 測試：改變發生時立即返回（不等滿 timeout）
+- [x] 2.4 測試：無事發生時逾時返回，且不是錯誤
+- [x] 2.5 測試：`ctx` 事件不會喚醒等待者（否則等於每 turn 空 poll 一次）
+- [x] 2.6 測試：已結束的 job 立即返回
 
 ## 3. 回應上限
 
