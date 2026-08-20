@@ -2,9 +2,11 @@
 
 以 `claude-agent-sdk` 建構、對外以 MCP server 形式提供的多 agent 資料分析 harness。
 
-> 這份文件也有排版過的網頁版：
-> <https://claude.ai/code/artifact/89dbdabe-3ed7-4dce-9546-b267a092c6c1>
-> 兩者內容相同，改動時請一起更新。
+> **這份是正本。** 修改文件請改這裡。
+>
+> 另有一份排版過的網頁版
+> （<https://claude.ai/code/artifact/89dbdabe-3ed7-4dce-9546-b267a092c6c1>），
+> 那是某個時間點的快照，不會跟著更新 —— 內容以本檔為準。
 
 ---
 
