@@ -73,5 +73,6 @@
       並把拒絕理由回灌進 nudge
 - [x] 7.3 `proxy.route` 加上 `model` 欄位 —— 數字看起來不對時，
       「跑的是哪個模型」在事件流裡答不出來
-- [ ] 7.4 **每次分類有 ~8,400 tokens 是 CLI 的固定開銷（佔 93%）** ——
-      記在 spike #12，另開 change 處理（proxy 不走 SDK）
+- [x] 7.4 量出並記錄「每次分類有 ~8,400 tokens 是 CLI 的固定開銷（佔 93%）」
+      —— 見 spike #12。**修掉它不在本 change 範圍**（提案沒承諾繞過 SDK），
+      已另開 `bypass-sdk-for-proxy` 處理
