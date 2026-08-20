@@ -337,3 +337,116 @@ async def test_a_rate_limit_after_real_work_does_not_abandon_the_job(bench, monk
     assert outcome.turns > 1, "the job must survive a transient error"
     assert outcome.reason != "backend_unavailable"
     assert any("請繼續" in text for text in session.sent)
+
+
+# --- refused tool calls are not progress -----------------------------------
+
+
+class TestRefusalsAreNotProgress:
+    """Calling a tool and getting somewhere are different things.
+
+    The orchestrator's tools answer refusals as values rather than errors, so
+    a rejected call is indistinguishable from a productive one in the message
+    stream: the tool ran, it returned, nothing errored. Counting it as action
+    let a live job burn turns re-sending the same rejected plan_update with
+    only `ctx` events to show for it.
+    """
+
+    def test_a_refused_turn_did_not_act(self):
+        from myharness.orchestrator.loop import TurnResult
+
+        assert not TurnResult(tool_calls=1, refused=1).acted
+
+    def test_a_partly_refused_turn_still_acted(self):
+        from myharness.orchestrator.loop import TurnResult
+
+        assert TurnResult(tool_calls=3, refused=1).acted
+
+    def test_a_clean_turn_acted(self):
+        from myharness.orchestrator.loop import TurnResult
+
+        assert TurnResult(tool_calls=1).acted
+
+    def test_a_silent_turn_did_not_act(self):
+        from myharness.orchestrator.loop import TurnResult
+
+        assert not TurnResult(tool_calls=0).acted
+
+
+class TestReadingRefusals:
+    def _block(self, content, is_error=False):
+        from claude_agent_sdk import ToolResultBlock
+
+        return ToolResultBlock(tool_use_id="t1", content=content, is_error=is_error)
+
+    def test_an_error_payload_is_a_refusal(self):
+        from myharness.orchestrator.loop import _refusal_of
+
+        block = self._block([{"type": "text", "text":
+                              '{"error": "bad_routing_table", "message": "no accepts"}'}])
+        reason = _refusal_of(block)
+        assert reason and "bad_routing_table" in reason and "no accepts" in reason
+
+    def test_a_successful_payload_is_not(self):
+        from myharness.orchestrator.loop import _refusal_of
+
+        block = self._block([{"type": "text", "text": '{"plan_revision": 2}'}])
+        assert _refusal_of(block) is None
+
+    def test_a_plain_string_result_is_not_a_refusal(self):
+        from myharness.orchestrator.loop import _refusal_of
+
+        assert _refusal_of(self._block("wrote j/note/x")) is None
+
+    def test_is_error_is_still_honoured(self):
+        from myharness.orchestrator.loop import _refusal_of
+
+        assert _refusal_of(self._block("boom", is_error=True))
+
+    def test_unparseable_content_is_not_a_refusal(self):
+        """Absent evidence of failure, assume it worked -- the alternative is
+        treating every prose result as a rejection."""
+        from myharness.orchestrator.loop import _refusal_of
+
+        assert _refusal_of(self._block([{"type": "text", "text": "{not json"}])) is None
+
+    def test_empty_content(self):
+        from myharness.orchestrator.loop import _refusal_of
+
+        assert _refusal_of(self._block(None)) is None
+
+
+class TestTheRefusalNudge:
+    def _loop(self, tmp_path):
+        import asyncio
+
+        from myharness.artifacts.local import LocalArtifactStore
+        from myharness.events.log import LocalEventLog
+        from myharness.jobs.runner import JobRunner
+        from myharness.jobs.spec import JobSpec
+        from myharness.lanes.types import LaneRegistry
+        from myharness.orchestrator.loop import OrchestratorLoop
+
+        store = LocalArtifactStore(tmp_path)
+        asyncio.get_event_loop()
+        runner = JobRunner(JobSpec(job_id="j", goal="g"), store=store,
+                           event_log=LocalEventLog(tmp_path))
+        return OrchestratorLoop(runner=runner, lanes=LaneRegistry(),
+                                backend="anthropic")
+
+    async def test_the_refusal_is_repeated_as_an_instruction(self, tmp_path):
+        from myharness.orchestrator.loop import TurnResult
+
+        loop = self._loop(tmp_path)
+        turn = TurnResult(tool_calls=1, refused=1,
+                          refusals=("bad_routing_table: lane 'a' has no accepts",))
+        prompt = loop._next_prompt(idle=True, turn=turn)
+        assert "被拒絕" in prompt and "no accepts" in prompt
+        assert "不要用同樣的參數重送" in prompt
+
+    async def test_a_productive_turn_gets_the_ordinary_nudge(self, tmp_path):
+        from myharness.orchestrator.loop import TurnResult
+
+        loop = self._loop(tmp_path)
+        prompt = loop._next_prompt(idle=False, turn=TurnResult(tool_calls=2))
+        assert "被拒絕" not in (prompt or "")

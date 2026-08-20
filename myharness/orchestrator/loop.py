@@ -15,6 +15,7 @@ one dies without it -- so it has to be exercised, not merely documented.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -25,7 +26,9 @@ from claude_agent_sdk import (
     ResultMessage,
     SystemMessage,
     TextBlock,
+    ToolResultBlock,
     ToolUseBlock,
+    UserMessage,
 )
 
 from myharness.backends.gate import ThrottleReport, gates
@@ -125,10 +128,22 @@ class TurnResult:
     errored: bool = False
     transient: bool = False
     text: str = ""
+    #: Tool calls whose result was a refusal. The orchestrator's tools return
+    #: those as values, not errors, so nothing else in the stream shows them.
+    refused: int = 0
+    refusals: tuple[str, ...] = ()
 
     @property
     def acted(self) -> bool:
-        return self.tool_calls > 0
+        """Calling a tool is not the same as getting somewhere.
+
+        A turn whose every call was refused looks identical to a productive one
+        from the message stream alone -- the tool ran, it returned, nothing
+        errored. Counting it as action let an orchestrator loop on the same
+        rejected call until the turn cap, with only `ctx` events to show for
+        forty turns.
+        """
+        return self.tool_calls > self.refused
 
 
 @dataclass
@@ -295,8 +310,9 @@ class OrchestratorLoop:
 
                 idle_turns = 0 if turn.acted else idle_turns + 1
                 if idle_turns > MAX_IDLE_TURNS:
-                    # It only acts through tools; text alone changes nothing.
-                    self._stop_reason = "idle"
+                    # It only acts through tools; text alone changes nothing,
+                    # and neither does a call that comes back refused.
+                    self._stop_reason = "refused" if turn.refused else "idle"
                     return False
 
                 if usage.used >= threshold:
@@ -309,7 +325,7 @@ class OrchestratorLoop:
                         pass
                     return True
 
-                prompt = self._next_prompt(idle=not turn.acted)
+                prompt = self._next_prompt(idle=not turn.acted, turn=turn)
         return False
 
     async def _consume(self, session, prompt: str) -> TurnResult:
@@ -321,6 +337,8 @@ class OrchestratorLoop:
         reported success.
         """
         tool_calls = 0
+        refused = 0
+        refusals: list[str] = []
         errored = False
         transient = False
         texts: list[str] = []
@@ -332,6 +350,15 @@ class OrchestratorLoop:
                         tool_calls += 1
                     elif isinstance(block, TextBlock):
                         texts.append(block.text)
+            elif isinstance(message, UserMessage):
+                # Tool results come back here. The orchestrator's tools return
+                # refusals as values rather than errors (design.md D7), so
+                # is_error is False and only the payload says it failed.
+                for block in getattr(message, "content", None) or []:
+                    if isinstance(block, ToolResultBlock):
+                        if reason := _refusal_of(block):
+                            refused += 1
+                            refusals.append(reason)
             elif isinstance(message, SystemMessage):
                 if message.subtype == "api_retry":
                     transient = True
@@ -342,12 +369,24 @@ class OrchestratorLoop:
                     transient = True
 
         return TurnResult(tool_calls=tool_calls, errored=errored,
-                          transient=transient, text="\n".join(texts)[:500])
+                          transient=transient, text="\n".join(texts)[:500],
+                          refused=refused, refusals=tuple(refusals[:3]))
 
-    def _next_prompt(self, *, idle: bool = False) -> str | None:
+    def _next_prompt(
+        self, *, idle: bool = False, turn: TurnResult | None = None
+    ) -> str | None:
         """What to say next, if anything, without a human in the loop."""
         if self.runner.must_abort:
             return None
+        if turn is not None and turn.refused and not turn.acted:
+            # The model has already seen the refusal in the tool result, but
+            # repeating it as an instruction breaks the loop where re-reading
+            # its own transcript evidently did not.
+            reasons = "；".join(turn.refusals)
+            return (
+                f"【系統】你上一輪的工具呼叫全部被拒絕：{reasons}。"
+                "先照錯誤訊息修正參數再試一次，不要用同樣的參數重送。"
+            )
         # News first. A nudge can be repeated next turn; an announcement that
         # data has arrived cannot, and losing it means the client's payload is
         # stored where nobody will look for it.
@@ -431,3 +470,33 @@ def collect_text(messages: Sequence[Any]) -> str:
         for block in message.content
         if isinstance(block, TextBlock)
     )
+
+
+def _refusal_of(block: Any) -> str | None:
+    """The refusal message in a tool result, or None if it succeeded.
+
+    The tools answer with ``{"error": ..., "message": ...}`` inside ordinary
+    text content rather than setting ``is_error`` -- a refusal a model can read
+    and act on beats a transport-level failure it cannot (design.md D7). The
+    cost is that only the payload knows, so this is where the loop finds out.
+    """
+    if getattr(block, "is_error", False):
+        return "tool reported is_error"
+    content = getattr(block, "content", None)
+    if content is None:
+        return None
+    if isinstance(content, str):
+        chunks = [content]
+    else:
+        chunks = [str(c.get("text", "")) for c in content if isinstance(c, dict)]
+    for chunk in chunks:
+        text = chunk.strip()
+        if not text.startswith("{"):
+            continue
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict) and payload.get("error"):
+            return f"{payload['error']}: {str(payload.get('message', ''))[:120]}"
+    return None
