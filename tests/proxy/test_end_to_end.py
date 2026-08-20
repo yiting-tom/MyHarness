@@ -169,3 +169,30 @@ async def test_the_classifier_never_saw_the_plan(svc):
     for leaked in ("異常樣態", "決策與理由", "先做通路分佈"):
         assert leaked not in prompt, f"{leaked!r} reached the classifier"
     assert "交易明細" in prompt, "the routing table did not reach it either"
+
+
+class TestTheOrchestratorIsToldRoutingExists:
+    """A feature nothing mentions is a feature nobody uses.
+
+    The tool description explains routing_table, but a model reads the kickoff
+    to decide what to do first. Without a mention there, a routing table gets
+    declared only by luck -- and with no table the classifier short-circuits, so
+    the whole path stays dark.
+    """
+
+    def test_the_kickoff_mentions_routing_table(self):
+        from myharness.orchestrator.loop import KICKOFF
+
+        assert "routing_table" in KICKOFF
+
+    def test_it_says_when_to_bother(self):
+        from myharness.orchestrator.loop import KICKOFF
+
+        assert "中途還會提供資料" in KICKOFF
+
+    def test_it_repeats_that_routing_is_not_authorisation(self):
+        """The single most expensive misunderstanding available here."""
+        from myharness.orchestrator.loop import KICKOFF
+
+        assert "不會給任何 lane 讀取權限" in KICKOFF
+        assert "inputs" in KICKOFF

@@ -103,11 +103,17 @@ KICKOFF = """\
 
 # 你的做法
 1. 先呼叫 plan_update 寫下計畫並宣告需要的 lane。
+   **如果預期使用者中途還會提供資料，順便帶上 routing_table** ——
+   宣告每條 lane 收什麼，之後進來的資料會自動被分流器判斷歸屬並通知你，
+   你就不必自己讀每一份新資料的 metadata。
 2. 用 dispatch 派工 —— 一次派多個，它會立刻返回，之後用 await_tasks 一起收割。
 3. 需要細節時用 peek，但它有整個 job 的預算上限；預算緊時改派 lane 去讀。
 4. 最後派一條 synthesis lane 寫報告，再用 finish 收工。**不要自己寫報告。**
 
 你看不到原始資料，也不需要看。你的工作是判斷與調度。
+
+分流器的判斷只是建議：它不會派工，也不會給任何 lane 讀取權限。
+要讓 lane 讀到資料，你仍然必須在 dispatch 的 inputs 帶上那個 artifact id。
 """
 
 
