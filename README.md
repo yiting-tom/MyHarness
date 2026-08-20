@@ -14,6 +14,9 @@
 | Lane worker | 執行者的 context | ephemeral agent + durable lane state |
 | Artifact 讀取 | 任何讀取者 | blob 拒絕讀入 context，note 有 est_tokens 預檢 |
 
+**先讀這個**：[`docs/introduction.md`](docs/introduction.md) —— 介紹與使用教學，
+從安裝到加自己的 lane，含每一道上限的理由與實測數字。
+
 完整設計見 [`DESIGN.md`](DESIGN.md)，實測結果見 [`spikes/RESULTS.md`](spikes/RESULTS.md)。
 
 ## 安裝
@@ -40,7 +43,8 @@ analysis_result(job_id=...)                 # 摘要 + 章節價目表
 analysis_drill(job_id=..., section_id="方法") # 需要哪節才讀哪節
 ```
 
-六個工具與其上限見 [`myharness/mcp/README.md`](myharness/mcp/README.md)。
+六個工具與其上限見 [`myharness/mcp/README.md`](myharness/mcp/README.md)，
+完整教學見 [`docs/introduction.md`](docs/introduction.md)。
 
 ## 不用 MCP 直接跑
 
@@ -78,7 +82,8 @@ Golden job 每次跑都斷言這些（`tests/golden/`，`pytest -m live tests/go
 - **報告含有只能靠實際計算得出的數字**
 
 最近一次（第六次）：15/15 全過，context 峰值 6,757、成本 $0.2543，
-報告裡的每個數字都與直接查 CSV 的結果相符。
+報告裡的每個數字都與直接查 CSV 的結果相符 —— 對照見
+[`docs/introduction.md`](docs/introduction.md#它保證什麼)。
 
 ## 開發
 
