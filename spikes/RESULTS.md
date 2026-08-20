@@ -630,3 +630,60 @@ drill 回得出內容。總計 494 秒、$0.1008。
 
    修法：kickoff 直接從 store 列出這個 job 的 blob（id、大小、宣告的欄位），
    不管事情發生的順序如何都正確。修完之後同樣的 job 只問了一個問題就開始派工。
+
+---
+
+## Spike #12 — 真實分類器，兩份資料，兩條 lane
+
+`spikes/spike12_proxy_live.py`。離線測試用關鍵字分類器，證明了接線但沒證明
+**一個便宜模型真的分得出來**。這個 spike 讓真的 nano 模型只看 routing table
+加十二行樣本，判斷兩份 CSV 的歸屬。
+
+```
+[209.7s] routing table published: True
+
+txn.csv   routed=True  -> txn  "a CSV of transaction records with fie..."
+kyc.csv   routed=True  -> kyc  "a structured KYC CSV containing holder an..."
+
+5/5 通過：表有發布、兩份各自路由正確、都通知了 orchestrator、
+         回應裡沒有帶到任何一列資料
+```
+
+兩份都是 `confidence: high`，理由也對得上。**分類這件事，便宜模型做得到。**
+
+### ⚠️ 每次分類有 ~8,400 tokens 不是我寫的
+
+| | tokens |
+|---|---|
+| 我的 system prompt | 126 |
+| 我的 user prompt（最壞情況樣本） | 493 |
+| **合計自己寫的** | **619** |
+| 實際計費 input | **8,991** |
+| **差額** | **~8,372（佔 93%）** |
+
+`disallowed_tools` 有生效（擋掉 31 個內建工具，spike #2b 量過那省下 16,468）。
+剩下的 ~8.4k 是 **Claude Code CLI 自己的 base system prompt**，`disallowed_tools`
+碰不到它。
+
+對一條 60k 預算的 lane worker 來說，8.4k 是用 SDK 的已知代價。
+對一個自己 prompt 只有 619 tokens 的分類器來說，**開銷是請求的 93%**。
+
+### 這推翻了 D7 的前提嗎？
+
+D7 說「proxy 每份資料呼叫一次，所以用最便宜的模型」。模型層級的選擇沒錯，
+但省下的是分母裡比較小的那一項 —— 真正的成本是固定開銷，換模型不會改變它。
+
+**跟進方向：proxy 不要走 SDK。** 它是單次、無工具、無 session、
+輸出一小段文字 —— 正好是 agent SDK 什麼都沒幫上的情境。直接打後端的 HTTP API
+可以把 8,991 降到 ~700。這與之前那個沒跑的
+`spikes/spike08_compare.py`（「不用 claude-agent-sdk 會怎樣」）是同一個問題，
+而現在有一個具體的、值得優化的數字了。
+
+### 金額數字不可信
+
+事件記的是 `usd=0.0509`（txn.csv）。9k input 的 nano 模型不可能是這個價
+（nano 約 $0.03/M，應該是 $0.0003 量級）。這與 spike #7 早就記下的
+「SDK 回報值高於實際帳單」一致 —— **token 數是實數，金額是 SDK 的估計。**
+
+已把 `model` 加進 `proxy.route` 事件：第一次看到數字不對時，
+「到底跑的是哪個模型」在事件流裡答不出來。

@@ -228,3 +228,20 @@ def test_the_event_payload_is_small():
     event = routed.to_event()
     assert len(event["reason"]) <= 200
     assert event["lane"] == "txn-2024" and event["unrouted"] is None
+
+
+class TestTheModelIsRecorded:
+    """"Which model actually ran" was unanswerable from the event stream the
+    first time the live numbers looked wrong."""
+
+    async def test_a_routed_answer_names_the_model(self):
+        t = FakeTransport(Msg('{"lane": "txn-2024"}'))
+        assert (await run(t)).model == PROFILE.resolve_model("cheap")
+
+    async def test_a_failure_names_it_too(self):
+        t = FakeTransport(raises=RuntimeError("down"))
+        assert (await run(t)).model == PROFILE.resolve_model("cheap")
+
+    async def test_it_reaches_the_event(self):
+        t = FakeTransport(Msg('{"lane": "txn-2024"}'))
+        assert (await run(t)).to_event()["model"]

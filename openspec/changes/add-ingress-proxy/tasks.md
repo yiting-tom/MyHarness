@@ -62,4 +62,16 @@
       推翻的 `dispatch(blocking)`
 - [x] 6.3 `myharness/mcp/README.md` 更新「還沒做：proxy」那一節
 - [x] 6.4 離線端到端：宣告 routing table → provide → 路由 → orchestrator 收到通知
-- [ ] 6.5 live：兩份不同型態的資料進同一個 job，確認分別路由到不同 lane
+- [x] 6.5 live：兩份不同型態的資料進同一個 job，確認分別路由到不同 lane
+      （spike #12：5/5 通過，兩份都 `confidence: high`）
+
+## 7. 過程中發現、不在原計畫的
+
+- [x] 7.1 kickoff 沒提過 routing table —— 沒有表分類器就短路，整條路是暗的
+- [x] 7.2 **被拒絕的工具呼叫算成了「有進展」** —— live 看到 orchestrator 空轉六輪
+      只發 `ctx`。`acted` 數的是呼叫次數不是結果；改成「至少一個沒被拒絕」，
+      並把拒絕理由回灌進 nudge
+- [x] 7.3 `proxy.route` 加上 `model` 欄位 —— 數字看起來不對時，
+      「跑的是哪個模型」在事件流裡答不出來
+- [ ] 7.4 **每次分類有 ~8,400 tokens 是 CLI 的固定開銷（佔 93%）** ——
+      記在 spike #12，另開 change 處理（proxy 不走 SDK）

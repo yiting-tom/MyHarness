@@ -87,6 +87,9 @@ class Routing:
     usd: float = 0.0
     tokens_in: int = 0
     tokens_out: int = 0
+    #: Recorded because "which model actually ran" was unanswerable from the
+    #: event stream the first time the numbers looked wrong.
+    model: str = ""
 
     @property
     def routed(self) -> bool:
@@ -98,6 +101,7 @@ class Routing:
             "confidence": self.confidence,
             "reason": self.reason[:200],
             "unrouted": str(self.unrouted) if self.unrouted else None,
+            "model": self.model,
             "usd": round(self.usd, 6),
             "tokens": {"in": self.tokens_in, "out": self.tokens_out},
         }
@@ -136,8 +140,9 @@ async def classify(
                        reason="orchestrator 尚未宣告任何開放的 lane")
 
     transport = transport or SdkTransport()
+    model = profile.resolve_model(ModelTier.CHEAP)
     options = ClaudeAgentOptions(
-        model=profile.resolve_model(ModelTier.CHEAP),
+        model=model,
         system_prompt=SYSTEM_PROMPT,
         max_turns=MAX_TURNS,
         # The classifier has no tools. It reads and answers.
@@ -153,16 +158,17 @@ async def classify(
         )
     except TimeoutError:
         return Routing(None, unrouted=Unrouted.FAILED,
-                       reason=f"分流器逾時（{timeout_s:.0f}s）")
+                       reason=f"分流器逾時（{timeout_s:.0f}s）", model=model)
     except Exception as exc:  # noqa: BLE001 - ingress must not depend on this
         return Routing(None, unrouted=Unrouted.FAILED,
-                       reason=f"{type(exc).__name__}: {str(exc).splitlines()[0][:120]}")
+                       reason=f"{type(exc).__name__}: {str(exc).splitlines()[0][:120]}",
+                       model=model)
 
     answer = _parse(text)
     if answer is None:
         return Routing(None, unrouted=Unrouted.FAILED,
                        reason="分流器沒有回傳可解析的 JSON",
-                       usd=usd, tokens_in=tin, tokens_out=tout)
+                       usd=usd, tokens_in=tin, tokens_out=tout, model=model)
 
     lane = answer.get("lane")
     confidence = str(answer.get("confidence") or "low").lower()
@@ -171,7 +177,7 @@ async def classify(
     if lane in (None, "", "null"):
         return Routing(None, confidence=confidence, reason=reason,
                        unrouted=Unrouted.NO_MATCH, usd=usd,
-                       tokens_in=tin, tokens_out=tout)
+                       tokens_in=tin, tokens_out=tout, model=model)
 
     lane = str(lane).strip()
     if not table.accepts_from(lane):
@@ -181,9 +187,10 @@ async def classify(
             None, confidence=confidence,
             reason=f"分流器回了 {lane!r}，但它不在開放的 lane 清單裡",
             unrouted=Unrouted.NO_MATCH, usd=usd, tokens_in=tin, tokens_out=tout,
+            model=model,
         )
     return Routing(lane, confidence=confidence, reason=reason,
-                   usd=usd, tokens_in=tin, tokens_out=tout)
+                   usd=usd, tokens_in=tin, tokens_out=tout, model=model)
 
 
 async def _collect(
