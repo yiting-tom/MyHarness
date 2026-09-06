@@ -1372,3 +1372,114 @@ if not profile.supports(BackendCapability.TASK_BUDGET):
 
 **`write_finding` 的 name 驗證沒有被觸發** —— 這次沒有任何 lane 傳 artifact id
 當名稱，所以那條修復這次沒上場。
+
+## Golden job 第十二次 —— 一次不算數的執行，和它意外證明的事
+
+第十二次跑在自架 `aird-35b` 上，`jobs-scratch/golden12`。**這次執行不能
+當作預算修復的驗證**，理由是時間：
+
+```
+run start   07:19:13Z = 15:19:13
+worker.py   mtime      15:19:46   ← 修好的檔案比 run 晚 33 秒
+commit                 15:21:08   ← 這時 d1 已經結束了
+```
+
+跑的是修好之前的 worker，而且模組在啟動時就 import 進記憶體了。所以
+「警告出現 0 次」只是重述 #11 的結論，不是新資訊。記在這裡是因為
+**「我以為我在驗證修好的碼」本身就是一種要能被抓到的錯誤**，而抓到它
+靠的是 mtime 與 event 時間戳對不上，不是靠讀 log。
+
+### 但它把 #11 診斷的 bug 演示得非常乾淨
+
+```
+d2  transcript 結尾  {"role":"result","subtype":"success"}   ← SDK 說完成
+    dispatch.end     status   = budget_exceeded
+                     headline = "token 預算耗盡，任務未完成"
+                     artifact = golden12/note/lanes/analyst/findings/txn-stats
+```
+
+一次**成功**的執行，答案正確（765 / app），被貼上「預算耗盡、任務未完成」。
+orchestrator 收到的是一句假話，然後照樣派了 critic 下去。
+
+#11 說「上限從來沒有停下任何東西，它在已經跑完的執行上貼標籤」——
+這是那句話的直接證據，而不是推論。
+
+d1 同理：SDK 的結束原因是 `error_max_turns`（第 12 回合用盡），
+harness 回報的卻是 `budget_exceeded`。真正的失敗原因被蓋掉了，
+因為 `_run_once` 的例外檢查排在 `max_turns_hit` 前面 —— 在舊碼裡那個
+例外必然在最後一則訊息才發生，所以它必然蓋掉真正的原因。
+
+
+## Golden job 第十三次 —— 訊號送到了，但只剩兩次呼叫的餘裕
+
+`jobs-scratch/golden13`，確認載入修好的 worker。
+
+```
+anomalies=none
+phase=complete salvaged=False turns=1 handoffs=0
+context_peak=16,880 dispatches=4 duplicates=0 failures=2
+cost=$0.6786 caveats=['budget_exceeded', 'no_cost_ceiling']
+ground truth: 2,940 rows, 765 accounts, cheapest channel app
+報告缺少：無
+```
+
+### 上限第一次真的中斷了一次執行
+
+```
+d1  budget_exceeded  turns=28  artifact=None   in=0  out=0
+      call 14  [harness] token 預算已用 82%，而你還沒有寫任何 finding。…
+      call 15  （同樣的警告再一次）
+      → 切斷，transcript 沒有 result 訊息
+```
+
+`end=None`（沒有 `ResultMessage`）是關鍵：執行是**在進行中**被停掉的，
+不是跑完之後被標記。這是這個 harness 一直宣稱有、但直到現在才真的有的
+東西。
+
+### 而答案是：太晚了
+
+| 觀察 | #11 之前寫下的解讀 |
+|---|---|
+| 警告後 1–2 次工具呼叫內 `write_finding` | 門檻與措辭都對 |
+| 警告後又查了五、六次才寫 | 75% 太晚，或措辭不夠強 |
+| **警告出現但從未 `write_finding`** | **訊號送到了模型不理** |
+
+落在第三格，但第三格的解讀要修正。從 transcript 重放估計值：
+
+```
+d1  call 12  est=36,407  61%   turn_cost=3,076   還剩 7.7 輪
+    call 13  est=39,615  66%   turn_cost=3,208   還剩 6.4 輪
+    call 14  est=49,738  83%   turn_cost=3,471   還剩 3.0 輪  ← 警告
+    call 15  est=53,507  89%   turn_cost=3,769   還剩 1.7 輪
+    call 16  超過 60,000 → 切斷
+```
+
+不是「模型不理」，是**它只有兩次呼叫可用，而它用掉在又一次查詢上**。
+估計值是超線性成長的 —— 每一輪把整段對話重送一次，所以對話越長、
+每輪越貴。75% 這個百分比在曲線後段等於「還剩三輪」，在前段等於
+「還剩三十輪」。**同一個數字在不同時點意思完全不同。**
+
+對照組：d2 在 est 34% 的時候就自己寫了 finding，51% 收工，全程沒有
+警告，也沒有被誤切。所以估計值沒有校準過頭 —— 它沒有把健康的執行
+提早殺掉。
+
+### 第二個缺陷：被切斷的執行在帳上是零
+
+```
+d1  budget_exceeded  in=0  out=0
+```
+
+`usage` 隨 `ResultMessage` 而來，而被中途切斷的執行等不到它。於是
+**花得最多的那些執行，回報的 token 是零**。`dispatch.end` 的數字、
+job 層的成本累計、context 佔用，全部漏掉這一筆。
+
+修法上這一條比門檻更明確：既然已經有估計值了，被切斷時就該回報估計值，
+並標明它是估計而非回報。
+
+### 沒有再犯的
+
+- 三個 orphan finding（analyst 換名字重寫）**這次沒有出現**：d2 兩次
+  `write_finding` 都寫進同一個 `txn-2024-analysis`。
+- `anomalies=none`，ground truth 全對。
+- `caveats` 多了 `budget_exceeded` —— 這是對的，job 確實有一條 lane
+  被預算切掉，讀報告的人應該知道。
