@@ -21,6 +21,7 @@ from myharness.events.types import (
     DISPATCH_START,
     INGRESS,
     JOB_FINISH,
+    JOB_START,
     PROXY_ROUTE,
     STATUS_DUPLICATE,
     LIMIT_REACHED,
@@ -181,6 +182,28 @@ def derive_caveats(events: Sequence[Event]) -> Sequence[Caveat]:
                     },
                 )
             )
+
+    # job.start already records the ceilings, so "this run had none" is
+    # derivable from the log alone -- which keeps it answerable for a job some
+    # earlier process ran, like every other caveat.
+    for e in of_type(events, JOB_START):
+        # Present-and-None means "this run declared no ceiling". Absent means
+        # the stream does not say -- an older log, or one written by hand --
+        # and inferring "no ceiling" from silence would put a caveat on runs
+        # that had one.
+        if "budget_usd" not in e.data or e.data["budget_usd"] is not None:
+            continue
+        caveats.append(
+            Caveat(
+                kind="no_cost_ceiling",
+                detail=(
+                    "本次執行沒有金額上限：後端未宣告成本回報，"
+                    "累計金額不對應實際計費。把關的是派工次數"
+                    f"（{e.get('max_dispatches')}）與時間上限。"
+                ),
+                context={"max_dispatches": e.get("max_dispatches")},
+            )
+        )
 
     for e in of_type(events, LIMIT_REACHED):
         caveats.append(

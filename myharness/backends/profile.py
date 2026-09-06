@@ -28,6 +28,10 @@ class BackendCapability(StrEnum):
     STRUCTURED_OUTPUT = "structured_output"
     PROMPT_CACHING = "prompt_caching"
     TASK_BUDGET = "task_budget"
+    #: The dollar figure this backend reports corresponds to actual billing.
+    #: Without it the number is not merely absent but invented -- golden run #7
+    #: was charged $0 and reported $1.0014 -- so it must not gate anything.
+    COST_REPORTING = "cost_reporting"
 
 
 class WireFormat(StrEnum):
@@ -178,6 +182,10 @@ OPENROUTER: Final = BackendProfile(
     capabilities=frozenset({
         BackendCapability.STRUCTURED_OUTPUT,
         BackendCapability.PROMPT_CACHING,
+        # Spike #7 recorded that the figure runs high. High is still reported;
+        # this capability is about whether the number means anything, not
+        # about its accuracy.
+        BackendCapability.COST_REPORTING,
     }),
     base_url="https://openrouter.ai/api",
     auth_token_env="OPENROUTER_KEY",

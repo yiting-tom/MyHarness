@@ -140,7 +140,8 @@ class JobRunner:
     def _limit_breached(self) -> LimitKind | None:
         if self.state.dispatches >= self.spec.max_dispatches:
             return LimitKind.DISPATCHES
-        if self.state.spent_usd >= self.spec.max_budget_usd:
+        if (self.spec.max_budget_usd is not None
+                and self.state.spent_usd >= self.spec.max_budget_usd):
             return LimitKind.BUDGET_USD
         if self.elapsed_s() >= self.spec.max_wall_clock_s:
             return LimitKind.WALL_CLOCK

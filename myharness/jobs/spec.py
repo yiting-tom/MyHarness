@@ -49,7 +49,10 @@ class JobSpec:
     job_id: str
     goal: str
     max_dispatches: int = DEFAULT_MAX_DISPATCHES
-    max_budget_usd: float = DEFAULT_MAX_BUDGET_USD
+    #: None means this run has no dollar ceiling, because the backend does
+    #: not report money this harness can believe. Not the same as a very
+    #: large ceiling, and the delivery says so.
+    max_budget_usd: float | None = DEFAULT_MAX_BUDGET_USD
     max_wall_clock_s: float = DEFAULT_MAX_WALL_CLOCK_S
     peek_budget_tokens: int = DEFAULT_PEEK_BUDGET_TOKENS
     question_quota: int = DEFAULT_QUESTION_QUOTA

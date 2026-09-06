@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from claude_agent_sdk import (
@@ -32,7 +32,7 @@ from claude_agent_sdk import (
 )
 
 from myharness.backends.gate import ThrottleReport, gates
-from myharness.backends.profile import BackendProfile, registry as backends
+from myharness.backends.profile import BackendCapability, BackendProfile, registry as backends
 from myharness.lanes.worker import TRANSIENT_STATUSES
 from myharness.events.types import (
     CTX,
@@ -188,6 +188,27 @@ class OrchestratorLoop:
     def __post_init__(self) -> None:
         if self.tools is None:
             self.tools = OrchestratorTools(runner=self.runner, lanes=self.lanes)
+        self._drop_uncountable_budget()
+
+    def _drop_uncountable_budget(self) -> None:
+        """Remove the dollar ceiling when the backend does not report dollars.
+
+        JobRunner takes a JobSpec and knows nothing about backends, which is
+        the right split -- so the decision lands here, the one layer holding
+        both. Golden run #7 tripped max_budget_usd at $1.0014 on a model that
+        bills nothing; the figure was not missing, it was invented, and a
+        ceiling compared against an invented number is not a gate.
+
+        There is deliberately no "unless the caller asked for it" exception:
+        an explicitly set ceiling would fire on the same fabricated figures.
+        Callers who need to bound a run on such a backend have max_dispatches
+        and max_wall_clock_s, both of which count things we count ourselves.
+        """
+        if self.runner.spec.max_budget_usd is None:
+            return
+        if self.profile.supports(BackendCapability.COST_REPORTING):
+            return
+        self.runner.spec = replace(self.runner.spec, max_budget_usd=None)
 
     @property
     def profile(self) -> BackendProfile:
