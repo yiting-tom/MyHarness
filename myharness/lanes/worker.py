@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Final
 
 from claude_agent_sdk import (
     AssistantMessage,
@@ -98,6 +98,16 @@ class Accumulated:
     #: Characters the model itself produced, kept apart from the rest of the
     #: conversation so input and output can be estimated separately.
     output_chars: int = 0
+    #: API round trips so far. One goes out with the opening prompt and one
+    #: more each time tool results come back -- which is NOT the same as the
+    #: number of AssistantMessages. Golden #14's d1 streamed 27 of those for
+    #: 13 requests (thinking, tool_use and text arrive as separate messages),
+    #: so charging a turn's cost per message doubled the estimate.
+    requests: int = 1
+    #: What every request re-sends regardless of the conversation: the CLI's
+    #: own system prompt, the charter, and the tool definitions. Set once at
+    #: dispatch, because none of it is visible in the stream.
+    fixed_tokens_per_request: int = 0
     #: Running estimate of cumulative input tokens. ``usage`` arrives only with
     #: the final message, so it is worth nothing to anything that has to act
     #: while the run is still going (golden run #11).
@@ -166,6 +176,17 @@ class Accumulated:
         }
 
     @property
+    def estimate_breakdown(self) -> dict[str, int]:
+        """What the estimate was built from, whether or not it was used."""
+        return {
+            "requests": self.requests,
+            "conversation_tokens": math.ceil(
+                self.conversation_chars / ASCII_CHARS_PER_TOKEN),
+            "fixed_per_request": self.fixed_tokens_per_request,
+            "tokens_in": self.estimated_tokens_in,
+        }
+
+    @property
     def budget_tokens(self) -> int:
         """Best available count of what this run has consumed.
 
@@ -230,9 +251,26 @@ def _tool_result_text(block: Any) -> str:
     return "" if content is None else str(content)
 
 
-def _estimated_turn_cost(acc: Accumulated) -> int:
-    """What re-sending the conversation so far would cost, in tokens."""
-    return math.ceil(acc.conversation_chars / ASCII_CHARS_PER_TOKEN)
+#: What one SDK request costs before a single word of conversation: the CLI's
+#: own system prompt and the tool definitions. Measured by
+#: spikes/spike14_turn_overhead.py against the self-hosted backend -- 664 tokens
+#: for a two-tool lane, of which the charter (counted separately and exactly)
+#: was 305. Re-run the spike rather than adjusting this by feel.
+FRAMEWORK_TOKENS_PER_REQUEST: Final = 360
+
+
+def _estimated_request_cost(acc: Accumulated) -> int:
+    """What the next request costs: everything re-sent, plus the conversation.
+
+    Both halves matter and the earlier version had only one. Counting the
+    conversation alone made golden #14's d1 estimate 45k against a reported
+    62k; charging it once per streamed message rather than once per request
+    made golden #13's d1 estimate 101k against a reported 72k. Same expression,
+    opposite errors, because the ratio of conversation to overhead differs from
+    run to run.
+    """
+    return (acc.fixed_tokens_per_request
+            + math.ceil(acc.conversation_chars / ASCII_CHARS_PER_TOKEN))
 
 
 def _message_chars(message: Any) -> int:
@@ -255,22 +293,21 @@ def _consume(message: Any, acc: Accumulated) -> None:
     if isinstance(message, AssistantMessage):
         acc.output_chars += chars
         acc.turns += 1
-        # A turn re-sends the whole conversation, so cumulative input grows by
-        # roughly its current size each time. Rough is the point: an estimate
-        # that moves is worth more than an exact number that arrives once the
-        # run is over.
-        acc.estimated_tokens_in += _estimated_turn_cost(acc)
         blocks = [_block_to_dict(b) for b in message.content]
         acc.transcript.append({"role": "assistant", "content": blocks})
         acc.texts += [b.text for b in message.content if isinstance(b, TextBlock)]
         if getattr(message, "usage", None):
             acc.usage = dict(message.usage)
     elif isinstance(message, UserMessage):
-        # Tool results arrive here. Recording only the role -- which is what
-        # the catch-all below used to do -- left the transcript with half the
-        # conversation: every question the model asked was present and every
-        # answer it got was gone, so "what did the model actually see" had no
-        # answer after the fact (golden run #10).
+        # Tool results arriving means another request is about to go out
+        # carrying everything so far, which is the moment the estimate grows.
+        acc.requests += 1
+        acc.estimated_tokens_in += _estimated_request_cost(acc)
+        # Recording only the role -- which is what the catch-all below used to
+        # do -- left the transcript with half the conversation: every question
+        # the model asked was present and every answer it got was gone, so
+        # "what did the model actually see" had no answer after the fact
+        # (golden run #10).
         acc.transcript.append({
             "role": "user",
             "content": [_block_to_dict(b) for b in _content_blocks(message)],
@@ -371,7 +408,17 @@ async def _run_once(
     charter: str,
     enforce_schema: bool,
 ) -> tuple[Accumulated, BaseException | None]:
-    acc = Accumulated()
+    # Seeded rather than empty: the opening request already carries the charter,
+    # the tool definitions and the task, and none of that ever appears in the
+    # stream. A run that is cut off after two requests was never free.
+    acc = Accumulated(
+        fixed_tokens_per_request=(
+            FRAMEWORK_TOKENS_PER_REQUEST
+            + math.ceil(len(charter) / ASCII_CHARS_PER_TOKEN)
+        ),
+        conversation_chars=len(prompt),
+    )
+    acc.estimated_tokens_in = _estimated_request_cost(acc)
     options = _options(request, profile, toolbox, charter=charter, enforce_schema=enforce_schema)
     try:
         budget = request.lane.type.token_budget
@@ -496,6 +543,11 @@ async def _run_with_toolbox(
         request.job_id, DISPATCH_END, id=request.dispatch_id, lane=lane.id,
         status=str(handle.status), artifact=handle.artifact or None,
         tokens=acc.token_breakdown, turns=acc.turns,
+        # The estimate's own inputs, so its error against the reported figure
+        # is readable from the event stream. Three golden runs were diagnosed
+        # by replaying transcripts, and transcripts excerpt tool results --
+        # which is exactly the term that dominates.
+        estimate=acc.estimate_breakdown,
         usd=acc.usd, transcript=transcript_id, contract_path=str(path),
         headline=handle.headline, partial=handle.partial, suggest=handle.suggest,
     )

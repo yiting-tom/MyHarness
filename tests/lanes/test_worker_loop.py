@@ -438,38 +438,91 @@ def test_a_string_bodied_user_message_does_not_crash():
 # never fired and the ceiling relabelled a finished run instead of stopping one.
 
 
-def test_consumption_is_visible_before_the_run_ends():
-    from claude_agent_sdk import AssistantMessage, TextBlock
+def _exchange(acc, reply="x" * 4_000, tool_result="r" * 1_000):
+    """One round trip: the model answers, tool results come back, a request goes out."""
+    from claude_agent_sdk import (AssistantMessage, TextBlock, ToolResultBlock,
+                                  UserMessage)
 
-    from myharness.lanes.worker import Accumulated, _consume
+    from myharness.lanes.worker import _consume
+
+    _consume(AssistantMessage(content=[TextBlock(text=reply)], model="m"), acc)
+    _consume(UserMessage(content=[ToolResultBlock(
+        tool_use_id="t", content=tool_result)]), acc)
+
+
+def test_consumption_is_visible_before_the_run_ends():
+    from myharness.lanes.worker import Accumulated
 
     acc = Accumulated()
-    assert acc.budget_tokens == 0
-
     for _ in range(5):
-        # No usage, which is what the CLI actually streams mid-run.
-        _consume(AssistantMessage(content=[TextBlock(text="x" * 4_000)], model="m"), acc)
+        # No usage anywhere, which is what the CLI actually streams mid-run.
+        _exchange(acc)
 
     assert acc.tokens_in == 0, "the reported figure is genuinely absent here"
     assert acc.budget_tokens > 0, "and yet the run has plainly spent something"
 
 
-def test_the_estimate_grows_with_every_turn():
-    """Cumulative input, not conversation size: a turn re-sends everything."""
-    from claude_agent_sdk import AssistantMessage, TextBlock
-
-    from myharness.lanes.worker import Accumulated, _consume
+def test_the_estimate_grows_with_every_request():
+    """Cumulative input, not conversation size: a request re-sends everything."""
+    from myharness.lanes.worker import Accumulated
 
     acc = Accumulated()
     seen = []
     for _ in range(4):
-        _consume(AssistantMessage(content=[TextBlock(text="y" * 1_000)], model="m"), acc)
+        _exchange(acc, reply="y" * 1_000, tool_result="")
         seen.append(acc.budget_tokens)
 
     assert seen == sorted(seen) and len(set(seen)) == len(seen)
-    # Each turn costs more than the last, because the conversation is longer.
+    # Each request costs more than the last, because the conversation is longer.
     steps = [b - a for a, b in zip(seen, seen[1:])]
     assert steps == sorted(steps)
+
+
+def test_streamed_messages_are_not_requests():
+    """Golden #14: 27 AssistantMessages arrived for 13 actual API calls.
+
+    thinking, tool_use and text stream as separate messages within one reply,
+    so charging a request's cost per message roughly doubled the estimate.
+    """
+    from claude_agent_sdk import AssistantMessage, TextBlock, ThinkingBlock
+
+    from myharness.lanes.worker import Accumulated, _consume
+
+    acc = Accumulated()
+    for block in (ThinkingBlock(thinking="…", signature=""),
+                  TextBlock(text="z" * 2_000),
+                  TextBlock(text="z" * 2_000)):
+        _consume(AssistantMessage(content=[block], model="m"), acc)
+
+    assert acc.turns == 3, "three messages did stream"
+    assert acc.requests == 1, "but no new request went out"
+    assert acc.estimated_tokens_in == 0, "and nothing was charged for them"
+
+
+def test_the_opening_request_is_not_free():
+    """The charter and the task are sent before anything streams back."""
+    from myharness.lanes.worker import FRAMEWORK_TOKENS_PER_REQUEST, Accumulated
+
+    acc = Accumulated(fixed_tokens_per_request=FRAMEWORK_TOKENS_PER_REQUEST + 300,
+                      conversation_chars=800)
+    from myharness.lanes.worker import _estimated_request_cost
+
+    assert _estimated_request_cost(acc) > FRAMEWORK_TOKENS_PER_REQUEST
+
+
+def test_the_estimate_includes_what_every_request_re_sends():
+    """Conversation alone estimated golden #14's d1 at 45k against 62k reported."""
+    from myharness.lanes.worker import Accumulated
+
+    bare = Accumulated(conversation_chars=40_000)
+    with_overhead = Accumulated(conversation_chars=40_000, fixed_tokens_per_request=664)
+    for acc in (bare, with_overhead):
+        for _ in range(10):
+            _exchange(acc, reply="", tool_result="")
+
+    assert with_overhead.estimated_tokens_in > bare.estimated_tokens_in
+    # Ten requests, each carrying the same fixed payload.
+    assert with_overhead.estimated_tokens_in - bare.estimated_tokens_in == 10 * 664
 
 
 def test_a_reported_figure_wins_when_it_arrives():
@@ -544,3 +597,22 @@ def test_a_reported_figure_is_never_replaced_by_the_estimate():
     tokens = acc.token_breakdown
     assert "estimated" not in tokens
     assert tokens == {"in": 7, "out": 0, "fresh_in": 7, "cache_read": 0, "cache_write": 0}
+
+
+async def test_the_event_carries_the_estimate_alongside_the_reported_figure(bench):
+    """So the estimate's error is readable without replaying a transcript.
+
+    Runs #12, #13 and #14 were all diagnosed by replaying transcripts, and
+    transcripts excerpt tool results at 2,000 characters -- which is the term
+    that dominates a lane doing a dozen queries over a large table.
+    """
+    await run(bench, ScriptedTransport([
+        assistant("done"),
+        result(structured=GOOD_HANDLE, usage={"input_tokens": 4_000, "output_tokens": 300}),
+    ]))
+    (end,) = await bench.events_for(DISPATCH_END)
+    estimate = end.get("estimate")
+    assert set(estimate) == {"requests", "conversation_tokens",
+                             "fixed_per_request", "tokens_in"}
+    assert end.get("tokens")["in"] == 4_000, "reported, not estimated"
+    assert estimate["fixed_per_request"] > 0, "and the estimate is recorded anyway"
