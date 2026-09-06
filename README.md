@@ -25,7 +25,19 @@
 uv pip install -e ".[dev]"
 ```
 
-需要一個後端金鑰。OpenRouter 的話，在 `.env` 放 `OPENROUTER_KEY=sk-or-...`。
+需要一個後端。兩條路都可以：
+
+```bash
+# 託管：OpenRouter
+OPENROUTER_KEY=sk-or-v1-...
+
+# 自架：任何 Anthropic-compatible 的 proxy（LiteLLM 等）
+HARNESS_PROXY_BASE_URL=http://host:4000
+HARNESS_PROXY_MODEL=your-model
+HARNESS_PROXY_KEY=sk-...            # 端點不需認證就留空
+```
+
+自架跑得完整條鏈 —— 見下面的 golden run #7／#8。
 
 ## 從 Claude Code 連接
 
@@ -81,14 +93,23 @@ Golden job 每次跑都斷言這些（`tests/golden/`，`pytest -m live tests/go
 - 報告可回溯到原始資料
 - **報告含有只能靠實際計算得出的數字**
 
-最近一次（第六次）：15/15 全過，context 峰值 6,757、成本 $0.2543，
-報告裡的每個數字都與直接查 CSV 的結果相符 —— 對照見
-[`docs/introduction.md`](docs/introduction.md#它保證什麼)。
+| Run | 後端 | 時間 | Context 峰值 | 資料流異常 | 數字對不對 |
+|---|---|---:|---:|---|---|
+| #6 | OpenRouter 120B | ~494s | 6,757 | 無 | 全對 |
+| #7 | 自架 35B | 264s | 9,491 | 無 | 全對 |
+| #8 | 自架 35B | 176s | 8,543 | 無 | 全對 |
+
+「數字對不對」指的是報告裡的 765 個不重複帳戶與四個 channel 平均金額，
+與直接對 CSV 下 SQL 的結果**逐項相符**。那不是模型猜得到的數字。
+
+**一個 35B 的自架模型跑得完整條鏈。** 對照與兩次執行暴露的問題見
+[`docs/introduction.md`](docs/introduction.md#它保證什麼)
+與 [`spikes/RESULTS.md`](spikes/RESULTS.md)。
 
 ## 開發
 
 ```bash
-pytest                  # 離線，不花錢
+pytest                  # 離線，不花錢（750 tests）
 pytest -m live          # 打真實 API，要金鑰，會花錢
 openspec list           # 進行中的規格變更
 ```

@@ -7,6 +7,7 @@
 > 另有一份排版過的網頁版
 > （<https://claude.ai/code/artifact/89dbdabe-3ed7-4dce-9546-b267a092c6c1>），
 > 那是某個時間點的快照，不會跟著更新 —— 內容以本檔為準。
+> 那份快照早於自架後端與 golden #7／#8，落後得比之前多。
 
 ---
 
@@ -90,16 +91,34 @@ cd MyHarness
 uv pip install -e ".[dev]"
 ```
 
-### 2. 設定後端金鑰
+### 2. 設定後端
 
-後端是可插拔的。用 OpenRouter 的話，在專案根目錄放一個 `.env`：
+後端是可插拔的。在專案根目錄放一個 `.env`，兩條路擇一（或都放）：
 
-```
+```bash
+# 託管：OpenRouter
 OPENROUTER_KEY=sk-or-v1-...
+
+# 自架：任何 Anthropic-compatible 的 proxy（LiteLLM 等）
+HARNESS_PROXY_BASE_URL=http://host:4000
+HARNESS_PROXY_MODEL=your-model
+HARNESS_PROXY_KEY=sk-...            # 端點不需認證就留空
 ```
 
-也支援自架的 LiteLLM 或 Anthropic 直連。每個 lane 型別可以指定自己的後端與模型層級 ——
-寫的是 `model_tier="strong"` 這種能力層級，不是供應商的模型名稱。
+位址與模型名稱**走環境變數，不寫進 repo** —— 一個 LAN 位址 commit 進來，
+對其他任何人都是錯的。三個變數湊齊才會註冊成 backend `self-hosted`。
+
+每個 lane 型別指定自己的後端與模型層級 —— 寫的是 `model_tier="strong"` 這種
+能力層級，不是供應商的模型名稱。所以同一條 lane 換後端不用改 charter。
+
+> **自架真的跑得完。** Golden run #7／#8 在一個 35B 的自架模型上跑完整條鏈：
+> 規劃、開 lane、SQL 查詢、寫 finding、收斂成報告，數字全對。
+> 見[它保證什麼](#它保證什麼)。
+>
+> Lane worker 走 SDK，所以端點必須是 **Anthropic-compatible**（LiteLLM 的
+> `/v1/messages` 會翻譯）。實測它連工具呼叫都帶得過去 —— 那是 lane worker
+> 能不能跑的真正關卡，`supports_function_calling` 在 model info 裡沒宣告，
+> 但可用。
 
 ### 3. 接上 Claude Code
 
@@ -333,7 +352,14 @@ kyc.csv   routed=True  -> kyc   "a structured KYC CSV containing holder…"
 >
 > 對一條 60k 預算的 lane worker 來說，那是用 SDK 換到工具面、多輪與 session 的
 > 已知代價。對一個單次、無工具的分類器來說，那就是全部的成本。
-> 修法是讓 proxy 不走 SDK，直接打後端 API —— 已另開 `bypass-sdk-for-proxy` 處理。
+
+> ✅ **已修（`bypass-sdk-for-proxy`）。** 分類器改成直接打後端 HTTP API，
+> 不經 SDK。同一個 prompt 實測 **8,991 → 584 input tokens（−93.5%）**，
+> 路由結果不變。
+>
+> 584 就是我們自己 prompt 的長度 —— **固定開銷不是變小，是不存在**。
+> 後端要宣告 `direct_wire` 才走這條路：OpenRouter 有 `base_url` 但它講
+> Anthropic，只看 base_url 會把它送去打 404。
 
 ---
 
@@ -440,6 +466,60 @@ Lane 用 `duckdb_query` 算出來的每一個數字，都與直接對 CSV 下 SQ
 更便宜、更少 context、更少 dispatch —— 因為 lane 這次一次就把事情做完了，
 不需要 orchestrator 反覆重派。能力補上之後紀律指標一起變好，不是巧合。
 
+### 第七次與第八次：換到自架的 35B
+
+| | #6（OpenRouter 120B） | #7（自架 35B） | #8（自架 35B） |
+|---|---:|---:|---:|
+| 時間 | ~494s | 264s | 176s |
+| 限流等待 | 129.6s | 0s | 0s |
+| Context 峰值 | 6,757 | 9,491 | 8,543 |
+| Dispatches | 3 | 5 | 2 |
+| 資料流異常 | 無 | 無 | 無 |
+| 數字對不對 | 全對 | 全對 | 全對 |
+
+**一個 35B 的自架模型跑得完整條鏈。** 而且第七次它自己看出這份資料是合成的
+（「mean ≈ median、無偏態、金額分佈過度均勻」）—— 那不在任務裡。
+
+> ⚠️ **#7 與 #8 不是受控對照。** 兩次的 plan 不同（三條 lane vs 兩條），
+> 快了 88 秒主要是因為少開一條 lane。三次執行之間唯一能直接比較的是
+> 「數字對不對」與「有沒有資料流異常」，那兩項都是全過。
+
+#### #7 暴露的兩件事
+
+**金額上限在一個 $0 的後端上觸發了。** `+120.5s limit.reached max_budget_usd
+value=1.0014` —— 那個模型不收錢，$1.0014 是 SDK 的估計。**一個不可信的數字
+做了一個真的控制決定。**
+
+已修（`cost-ceiling-needs-a-currency`）：後端要宣告 `COST_REPORTING`，
+沒宣告的就沒有金額上限，而**這件事會寫在報告的已知限制上**：
+
+> 本次執行沒有金額上限：後端未宣告成本回報，累計金額不對應實際計費。
+> 把關的是派工次數（12）與時間上限。
+
+沒有例外 —— 呼叫端明確指定也不會讓它復活，因為那個上限會照著同一批捏造的
+數字觸發。#8 驗證 `limit.reached` 不再出現。
+
+**60k 的 lane 預算對上 64k 的視窗太緊。** #7 的 anomaly lane 連續兩次燒光
+`token_budget=60_000`，第一次還超出 16%；#8 用到 93%。同一份 charter 在
+OpenRouter 上沒發生過 —— 這個模型話比較多。**還沒修。**
+
+但 orchestrator 自己修好了：它把任務逐次縮小（d2 → d3 → d4 的 prompt 一次比
+一次短），第三次以一半預算完成。那是第一次在**真實**失敗上看到 caveat 回饋生效。
+
+#### 一個順帶的觀察
+
+#8 的兩次派工**都**是降級狀態，但兩份產出都是對的：
+
+```
+d1  analyst  budget_exceeded   in 55.9k (93%)  → finding 5 節，數字全對
+d2  synth    schema_violation  in  9.9k (25%)  → 報告 4 節，數字全對
+```
+
+**handle 是回來的東西，finding 是做過的事，兩者可以各自壞掉。** 這正是
+「完整分析寫進 finding，不要寫在回覆裡」的用途 —— 回覆壞掉不會讓工作消失。
+代價是 caveat 比實際悲觀。沒改：悲觀比樂觀安全，而 orchestrator 有 peek
+可以自己判斷（#8 peek 了 3,679 tokens，是 #7 的 3.6 倍，它正在做這件事）。
+
 ---
 
 ## 加一條自己的 lane
@@ -528,11 +608,25 @@ myharness --root jobs-scratch/golden monitor golden
 
 `DESIGN.md` 的十七個決策都實作完了。以下是清單以外、真的跑起來之後才浮現的東西。
 
-### 分類器的固定開銷（已量出，未修）
+### Lane 預算與自架模型的視窗（已量出，未修）
 
-每次分類有 8,372 tokens 是 Claude Code CLI 的 base system prompt，佔請求的 93%。
-分類器是單次、無工具、無 session —— 正好是 agent SDK 什麼都沒幫上的情境。
-`bypass-sdk-for-proxy` 已提案，做法是讓它直接打後端 API。
+`token_budget=60_000` 與一個 `max_model_len=65536` 的自架模型只差 9%，
+中間沒有餘裕。Golden #7 的 anomaly lane 連續兩次燒光預算（一次超出 16%），
+#8 用到 93%。同一份 charter 在 OpenRouter 的 120B 上沒發生過。
+
+該調到多少需要更多次執行才說得準 —— 單一資料點不夠，而 orchestrator 目前
+會自己把任務縮小來繞過它。
+
+### 經 LiteLLM 會多 192 tokens
+
+同一個 prompt、同一個模型，經 LiteLLM 的 `/v1/chat/completions` 比直接打
+vLLM 多**固定 192 tokens**，跟長度、語言、輪數都無關 —— 是它注入的一段
+system prompt。
+
+這踩到「分類器的輸入 SHALL **僅包含** routing table、中繼資料與有界樣本」。
+規模比 SDK 那 8,372 小兩個數量級，性質一樣：是我們沒寫、也看不到的指令。
+所以**分類器走 vLLM 直連，不走 LiteLLM**；lane worker 要工具與多輪，
+192 對 60k 是零頭，走 LiteLLM 換帳務仍划算。
 
 ### 非表格資料
 
@@ -550,6 +644,8 @@ myharness --root jobs-scratch/golden monitor golden
 節流閘是 per-backend 共享的，有時間預算與 full jitter 退避，
 但**跨 backend 的總並行還沒有上限**。
 
+自架端點上這一項是 0 秒（#7、#8），所以限流只在託管後端上是問題。
+
 ### Lane 內部的大型 tool result
 
 分類器只在 `analysis_provide` 這一個入口作用。如果一條 lane 自己用工具撈回一大塊資料，
@@ -560,14 +656,14 @@ myharness --root jobs-scratch/golden monitor golden
 ## 開發
 
 ```bash
-pytest                  # 離線，不花錢（716 tests）
+pytest                  # 離線，不花錢（750 tests）
 pytest -m live          # 打真實 API，要金鑰，會花錢
 openspec list           # 進行中的規格變更
 ```
 
 專案用規格驅動流程（OpenSpec）：每個改動先寫 proposal 與 design，
 再把需求寫成可斷言的 scenario，實作完才歸檔進 `openspec/specs/`。
-目前 10 個 capability、79 條需求、716 個測試、94% coverage。
+目前 10 個 capability、83 條需求、750 個測試、94% coverage。
 
 ### 可行性驗證都留著
 
