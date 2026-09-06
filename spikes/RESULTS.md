@@ -1111,8 +1111,22 @@ lane 把事情做完、寫進檔案，然後才失敗。**
 所以這是違反既有需求的 bug，不是行為變更 —— 不用開 change。
 
 修法：產出邊不再是必要條件，`produced_by` 是同一份證據的另一條路徑。
-偵測到時額外標明 `unreported=True`，因為那句話有診斷價值 ——
-**它代表 lane 做完了工作，然後在交回指標之前失敗。**
+偵測到時額外標明 `unreported=True`。
+
+> **一個自我更正。** 我原本把 `unreported` 解讀成「lane 做完工作然後在交回指標
+> 之前失敗」。用時間戳把 finding 對回派工區間，那個解讀是錯的：
+>
+> ```
+> 派工     d1 analyst-1   9.1s – 71.7s     d2 analyst-1  77.2s – 147.5s
+> finding  +102.9s d2 · +119.4s d2 · +142.5s d2
+> ```
+>
+> **三份 finding 全是 d2 寫的，d1 一份都沒寫。** d2 成功了，它只是寫了三次
+> （名稱一次比一次不同：`txn2024_stats_and_anomalies` → `txn-2024-stats-and-anomalies`
+> → `txn-2024-stats`），而 handle 只指得到最後一個。
+>
+> 所以真正的成因是：**一次派工可以寫很多份 finding，handle 只能指一份，
+> 其餘的對資料流圖完全不存在。** 修法沒變，機制的診斷變了。
 
 ```
 ▲ WARNING  analyst-1:txn-2024-stats-and-anomalies 被產出但沒有任何後續派工讀到它，
@@ -1123,3 +1137,63 @@ lane 把事情做完、寫進檔案，然後才失敗。**
 > 這跟 `ungranted_production` 是同一類事情 —— 在逐行的事件輸出裡看不出來。
 > 差別是這次連資料流圖也看不出來，因為圖本身就是從 handle 推導的。
 > **監視器信任了一個會失敗的來源。**
+
+
+---
+
+## Lane 預算：問題不是太小，是 lane 看不見它
+
+Golden #7 的 anomaly lane 燒光兩次、#9 的 d1 用到 **133%**。原本的假設是
+`token_budget=60_000` 對上 `max_model_len=65536` 太緊。看了 d1 的 transcript
+才知道不是。
+
+### d1 做了什麼
+
+```
+ 2  inspect_blob
+ 5  duckdb_query   ← 之後連續 24 次
+33  "Clear bimodal pattern emerging. Let me dig deeper."
+39  "340 night transactions cluster in just 5 accounts with tiny amounts"
+57  "top-5 accounts are tiny, night-heavy, app-only; the rest are high-value daytime"
+62  duckdb_query   ← 預算在這裡耗盡
+```
+
+**24 次查詢，一次 `write_finding` 都沒有。** 而且它的分析是**對的** ——
+它找到了 bimodal 分佈、找到了那 5 個夜間小額 app-only 的帳戶。
+那些結論全部隨著 context 一起消失，連它查過什麼都沒有人知道。
+
+它不是在偷懶。**它把 `write_finding` 當成最後一步，而它不知道自己沒有最後一步了。**
+
+### 沒有背壓訊號
+
+`_run_once` 每收一則訊息就檢查 `acc.tokens_in + acc.tokens_out > token_budget`，
+超過就 `_LocalBudgetExceeded` —— **直接砍掉，沒有預警**。worker 知道用了多少，
+lane 不知道，而兩者之間沒有任何通道。
+
+### 修法：把訊號接上去，再告訴它怎麼用
+
+**訊號（程式碼）。** `WorkerToolbox.budget_used` 由 worker loop 每則訊息更新。
+過 75% 之後，**每一個**工具結果的結尾附上一行：
+
+```
+[harness] token 預算已用 82%，而你還沒有寫任何 finding。現在就用 write_finding
+寫下目前為止的結論 —— 預算用盡時未落檔的分析會全部消失。
+```
+
+已經寫過 finding 的話換一句：「把新結論補進去，然後回傳 handle 結束。
+不要再開新的查詢。」
+
+**每次都附，不是只講一次** —— 一則三十個訊息之前的提示，不是模型在決定
+「要不要再查一次」時正在注意的東西。
+
+**指令（charter）。** `tabular-analyst.md` 新增一節，除了「看到提示就照做」，
+還有一條更早的規則：
+
+> **第一個有結論價值的結果出來就先 `write_finding`**，之後再用同一個名稱補寫。
+> 一份寫了三成的 finding，遠勝於一份沒寫成的。
+
+### 沒有調整 `token_budget`
+
+因為單一資料點不足以說該調到多少，而且 #9 證明了真正的問題不在大小 ——
+d1 就算有 120k 也可能一樣查到最後一刻才想寫。**先給它看得見的東西，
+再看數字要不要動。** 下一次 golden 執行是驗證。

@@ -85,6 +85,13 @@ DEFAULT_TOOLS: tuple[str, ...] = (
 )
 
 
+#: Share of the token budget after which every tool result carries a warning.
+#: Golden run #9 spent a whole 60k budget on 24 queries without once calling
+#: write_finding, and the analysis died with it. The lane was not being
+#: careless -- it had no way to know how much was left.
+BUDGET_WARN_AT = 0.75
+
+
 def _ok(text: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": text}]}
 
@@ -116,6 +123,10 @@ class WorkerToolbox:
     state_rejected: bool = False
     reads: int = 0
     queries: int = 0
+    #: Share of the lane's token budget consumed so far, updated by the worker
+    #: loop after every streamed message. The worker knows this and the lane
+    #: does not, which is the whole reason it gets attached to tool results.
+    budget_used: float = 0.0
 
     #: Holds every localisation open for as long as the worker runs. A blob
     #: materialised by an object-store backend is deleted when its context
@@ -145,6 +156,29 @@ class WorkerToolbox:
     @property
     def last_finding(self) -> str | None:
         return self.findings[-1] if self.findings else None
+
+    def _result(self, text: str) -> dict[str, Any]:
+        """A tool result, plus a budget warning once one is warranted.
+
+        Repeated on every call rather than said once: a single notice thirty
+        messages back is not what the model is attending to when it decides
+        whether to run one more query.
+        """
+        if self.budget_used < BUDGET_WARN_AT:
+            return _ok(text)
+        pct = int(self.budget_used * 100)
+        if self.findings:
+            warning = (
+                f"\n\n[harness] token 預算已用 {pct}%。你已經寫過 finding —— "
+                "把新結論補進去，然後回傳 handle 結束。不要再開新的查詢。"
+            )
+        else:
+            warning = (
+                f"\n\n[harness] token 預算已用 {pct}%，而你還沒有寫任何 finding。"
+                "現在就用 write_finding 寫下目前為止的結論 —— "
+                "預算用盡時未落檔的分析會全部消失。"
+            )
+        return _ok(text + warning)
 
     def build_server(self):
         """An SDK in-process MCP server exposing this toolbox."""
@@ -177,7 +211,7 @@ class WorkerToolbox:
             except ArtifactError as exc:
                 return _err(exc.to_dict())
             self.reads += 1
-            return _ok(text)
+            return self._result(text)
 
         @tool(
             "write_finding",
@@ -195,7 +229,7 @@ class WorkerToolbox:
                 produced_by=f"lane:{self.lane.id}",
             )
             self.findings.append(str(meta.id))
-            return _ok(f"wrote {meta.id} ({meta.est_tokens} est tokens)")
+            return self._result(f"wrote {meta.id} ({meta.est_tokens} est tokens)")
 
         @tool(
             "update_state",
@@ -231,7 +265,7 @@ class WorkerToolbox:
                 self.state_rejected = True
                 return _err(exc.to_dict())
             self.state_revision = meta.revision
-            return _ok(f"state updated (revision {meta.revision}, ~{est} tokens)")
+            return self._result(f"state updated (revision {meta.revision}, ~{est} tokens)")
 
         @tool(
             "localize_blob",
@@ -253,7 +287,7 @@ class WorkerToolbox:
                 path = await self._open.enter_async_context(
                     self.store.localize(aid, grants=self.grants)
                 )
-                return _ok(json.dumps(
+                return self._result(json.dumps(
                     {"path": str(path), "bytes": meta.bytes, "schema": meta.schema},
                     ensure_ascii=False,
                 ))
@@ -274,9 +308,9 @@ class WorkerToolbox:
                 str(args.get("artifact", "")).strip()
             )
             if isinstance(result, QueryFailure):
-                return _ok(result.text())
+                return self._result(result.text())
             self.reads += 1
-            return _ok(result.text())
+            return self._result(result.text())
 
         @tool(
             "duckdb_query",
@@ -310,11 +344,11 @@ class WorkerToolbox:
                 into=str(args.get("into") or "").strip(),
             )
             if isinstance(result, QueryFailure):
-                return _ok(result.text())
+                return self._result(result.text())
             self.queries += 1
             if isinstance(result, IntoResult):
                 self.derived.append(str(result.artifact.id))
-            return _ok(result.text())
+            return self._result(result.text())
 
         available = {
             "read_note": read_note,

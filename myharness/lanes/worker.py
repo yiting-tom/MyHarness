@@ -245,11 +245,19 @@ async def _run_once(
     acc = Accumulated()
     options = _options(request, profile, toolbox, charter=charter, enforce_schema=enforce_schema)
     try:
+        budget = request.lane.type.token_budget
         async for message in transport.stream(prompt, options):
             _consume(message, acc)
+            # The lane cannot see its own consumption; the toolbox attaches
+            # this to tool results so it can stop and write before it is cut
+            # off. Golden run #9 spent a whole budget on 24 queries and never
+            # called write_finding -- the analysis died undocumented, and the
+            # lane had no way to know it was about to.
+            if budget:
+                toolbox.budget_used = (acc.tokens_in + acc.tokens_out) / budget
             # Local ceiling for backends that cannot enforce one server-side.
             if not profile.supports(BackendCapability.TASK_BUDGET):
-                if acc.tokens_in + acc.tokens_out > request.lane.type.token_budget:
+                if acc.tokens_in + acc.tokens_out > budget:
                     return acc, _LocalBudgetExceeded()
     except BaseException as exc:  # noqa: BLE001 - classified below, never re-raised
         return acc, exc

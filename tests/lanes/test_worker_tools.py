@@ -162,3 +162,53 @@ async def test_only_declared_tools_are_exposed(tmp_path: Path):
     toolbox.build_server()
     assert list(toolbox.handlers) == ["read_note"]
     assert toolbox.tool_names() == ["mcp__lane__read_note"]
+
+
+# --- the lane cannot see its own consumption ------------------------------
+#
+# Golden run #9: a lane spent its entire 60k budget on 24 queries, never once
+# called write_finding, and the analysis vanished with it. It was not being
+# careless -- nothing told it how much was left.
+
+
+def _text(result) -> str:
+    return result["content"][0]["text"]
+
+
+async def test_a_result_carries_no_warning_below_the_threshold(bench):
+    from myharness.lanes.tools import BUDGET_WARN_AT
+
+    toolbox, _ = bench
+    toolbox.budget_used = BUDGET_WARN_AT - 0.01
+    assert "[harness]" not in _text(toolbox._result("rows: 12"))
+
+
+async def test_past_the_threshold_a_lane_with_nothing_written_is_told_to_write(bench):
+    toolbox, _ = bench
+    toolbox.budget_used = 0.8
+    text = _text(toolbox._result("rows: 12"))
+
+    assert text.startswith("rows: 12")  # the result itself is never displaced
+    assert "80%" in text
+    assert "write_finding" in text
+    # The consequence, not just the instruction: an unfiled analysis does not
+    # come back truncated, it does not come back at all.
+    assert "全部消失" in text
+
+
+async def test_a_lane_that_has_written_is_told_to_finish_instead(bench):
+    toolbox, _ = bench
+    toolbox.budget_used = 0.9
+    toolbox.findings.append("j/note/lanes/a/findings/1")
+    text = _text(toolbox._result("rows: 12"))
+
+    assert "不要再開新的查詢" in text
+    assert "write_finding" not in text, "it already has one; telling it to write again invites a duplicate"
+
+
+async def test_the_warning_repeats_on_every_call(bench):
+    """Said once, thirty messages back, is not what the model is attending to
+    when it decides whether to run one more query."""
+    toolbox, _ = bench
+    toolbox.budget_used = 0.8
+    assert all("[harness]" in _text(toolbox._result(f"r{i}")) for i in range(3))
