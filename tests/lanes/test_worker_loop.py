@@ -424,3 +424,66 @@ def test_a_string_bodied_user_message_does_not_crash():
 
     _consume(UserMessage(content="plain text"), acc := Accumulated())
     assert acc.transcript[0]["content"][0]["text"] == "plain text"
+
+
+# --- the ceiling that only fired once the run was over ---------------------
+#
+# Golden run #11: d1 finished at 113% of budget having never seen the warning.
+# usage is populated by the final message, so acc.tokens_in read zero for the
+# entire run. Both the warning and the local ceiling read it, so the warning
+# never fired and the ceiling relabelled a finished run instead of stopping one.
+
+
+def test_consumption_is_visible_before_the_run_ends():
+    from claude_agent_sdk import AssistantMessage, TextBlock
+
+    from myharness.lanes.worker import Accumulated, _consume
+
+    acc = Accumulated()
+    assert acc.budget_tokens == 0
+
+    for _ in range(5):
+        # No usage, which is what the CLI actually streams mid-run.
+        _consume(AssistantMessage(content=[TextBlock(text="x" * 4_000)], model="m"), acc)
+
+    assert acc.tokens_in == 0, "the reported figure is genuinely absent here"
+    assert acc.budget_tokens > 0, "and yet the run has plainly spent something"
+
+
+def test_the_estimate_grows_with_every_turn():
+    """Cumulative input, not conversation size: a turn re-sends everything."""
+    from claude_agent_sdk import AssistantMessage, TextBlock
+
+    from myharness.lanes.worker import Accumulated, _consume
+
+    acc = Accumulated()
+    seen = []
+    for _ in range(4):
+        _consume(AssistantMessage(content=[TextBlock(text="y" * 1_000)], model="m"), acc)
+        seen.append(acc.budget_tokens)
+
+    assert seen == sorted(seen) and len(set(seen)) == len(seen)
+    # Each turn costs more than the last, because the conversation is longer.
+    steps = [b - a for a, b in zip(seen, seen[1:])]
+    assert steps == sorted(steps)
+
+
+def test_a_reported_figure_wins_when_it_arrives():
+    """The estimate is a stand-in, never a replacement."""
+    from myharness.lanes.worker import Accumulated
+
+    acc = Accumulated(estimated_tokens_in=1_000)
+    acc.usage = {"input_tokens": 50_000, "output_tokens": 2_000}
+    assert acc.budget_tokens == 52_000
+
+
+def test_a_tool_result_counts_toward_consumption():
+    """Query results are most of what fills a lane's context."""
+    from claude_agent_sdk import ToolResultBlock, UserMessage
+
+    from myharness.lanes.worker import Accumulated, _consume
+
+    acc = Accumulated()
+    _consume(UserMessage(content=[ToolResultBlock(
+        tool_use_id="t1", content="row\n" * 5_000)]), acc)
+    assert acc.conversation_chars > 15_000

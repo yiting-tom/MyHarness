@@ -13,6 +13,7 @@ to do about them (DESIGN.md decision #12).
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -31,6 +32,7 @@ from claude_agent_sdk import (
 from myharness.artifacts.ids import ArtifactId
 from myharness.artifacts.store import ArtifactStore
 from myharness.artifacts.types import GrantSet
+from myharness.artifacts.tokens import ASCII_CHARS_PER_TOKEN
 from myharness.backends.gate import BackendGate, ThrottleReport, gates
 from myharness.backends.profile import BackendCapability, BackendProfile
 from myharness.events.log import EventLog
@@ -91,6 +93,12 @@ class Accumulated:
     result: ResultMessage | None = None
     turns: int = 0
     usage: dict[str, int] = field(default_factory=dict)
+    #: Characters of conversation seen so far -- prompts, tool results, replies.
+    conversation_chars: int = 0
+    #: Running estimate of cumulative input tokens. ``usage`` arrives only with
+    #: the final message, so it is worth nothing to anything that has to act
+    #: while the run is still going (golden run #11).
+    estimated_tokens_in: int = 0
     usd: float = 0.0
     retry_statuses: list[int] = field(default_factory=list)
     max_turns_hit: bool = False
@@ -131,6 +139,18 @@ class Accumulated:
             "cache_read": _as_int(self.usage.get("cache_read_input_tokens")),
             "cache_write": _as_int(self.usage.get("cache_creation_input_tokens")),
         }
+
+    @property
+    def budget_tokens(self) -> int:
+        """Best available count of what this run has consumed.
+
+        Prefers what the backend reported and falls back to the estimate,
+        because the reported figure is authoritative but arrives too late to
+        act on: ``usage`` is populated by the final message, so during the run
+        it reads zero no matter how much has been spent.
+        """
+        reported = self.tokens_in + self.tokens_out
+        return max(reported, self.estimated_tokens_in)
 
     @property
     def saw_transient(self) -> bool:
@@ -185,10 +205,34 @@ def _tool_result_text(block: Any) -> str:
     return "" if content is None else str(content)
 
 
+def _estimated_turn_cost(acc: Accumulated) -> int:
+    """What re-sending the conversation so far would cost, in tokens."""
+    return math.ceil(acc.conversation_chars / ASCII_CHARS_PER_TOKEN)
+
+
+def _message_chars(message: Any) -> int:
+    """Roughly how much text this message adds to the conversation."""
+    total = 0
+    for block in _content_blocks(message):
+        if isinstance(block, TextBlock):
+            total += len(block.text)
+        elif isinstance(block, ToolUseBlock):
+            total += len(json.dumps(block.input, ensure_ascii=False))
+        elif isinstance(block, ToolResultBlock):
+            total += len(_tool_result_text(block))
+    return total
+
+
 def _consume(message: Any, acc: Accumulated) -> None:
     """Fold one streamed message into the accumulator."""
+    acc.conversation_chars += _message_chars(message)
     if isinstance(message, AssistantMessage):
         acc.turns += 1
+        # A turn re-sends the whole conversation, so cumulative input grows by
+        # roughly its current size each time. Rough is the point: an estimate
+        # that moves is worth more than an exact number that arrives once the
+        # run is over.
+        acc.estimated_tokens_in += _estimated_turn_cost(acc)
         blocks = [_block_to_dict(b) for b in message.content]
         acc.transcript.append({"role": "assistant", "content": blocks})
         acc.texts += [b.text for b in message.content if isinstance(b, TextBlock)]
@@ -311,11 +355,15 @@ async def _run_once(
             # off. Golden run #9 spent a whole budget on 24 queries and never
             # called write_finding -- the analysis died undocumented, and the
             # lane had no way to know it was about to.
+            spent = acc.budget_tokens
             if budget:
-                toolbox.budget_used = (acc.tokens_in + acc.tokens_out) / budget
+                toolbox.budget_used = spent / budget
             # Local ceiling for backends that cannot enforce one server-side.
+            # Reading acc.tokens_in here meant the ceiling only ever tripped on
+            # the final message -- it relabelled a finished run rather than
+            # stopping one (golden run #11).
             if not profile.supports(BackendCapability.TASK_BUDGET):
-                if acc.tokens_in + acc.tokens_out > budget:
+                if spent > budget:
                     return acc, _LocalBudgetExceeded()
     except BaseException as exc:  # noqa: BLE001 - classified below, never re-raised
         return acc, exc

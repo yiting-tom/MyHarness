@@ -1294,3 +1294,81 @@ harness 自己的註記（預算警告、拒絕的提示）是**接在結果結�
 
 transcript 是 blob，不進任何人的 context —— 但無界仍然違反這個 repo 的紀律，
 而且會讓一次執行寫出好幾 MB 的重複列。
+
+---
+
+## Golden job 第十一次 —— 訊號沒送到，而且原因比預期嚴重
+
+Transcript 修好之後第一次可以真的查證。查證結果是**警告從未出現**。
+
+```
+d1 transcript: 48 lines
+  call 16 (line 40)  *** write_finding  name='txn-2024-analysis'
+  工具呼叫總數 : 17
+  警告出現次數 : 0
+```
+
+而 d1 的用量是 **68,206（113%）** —— 它一定過了 75%。所以不是「沒撞到」，
+是**接線本身沒有作用**。
+
+### 原因：`usage` 只在最後一則訊息才有值
+
+```python
+if getattr(message, "usage", None):
+    acc.usage = dict(message.usage)
+```
+
+串流中的 `AssistantMessage` 的 `usage` 是 `None`。真正的數字是
+`ResultMessage` 帶回來的 —— 也就是**整場跑完之後**。
+
+所以 `acc.tokens_in` 在整個執行期間都是 0，`budget_used` 也是 0，
+警告永遠不會觸發。
+
+### 但更嚴重的是同一行影響到的另一個東西
+
+```python
+# Local ceiling for backends that cannot enforce one server-side.
+if not profile.supports(BackendCapability.TASK_BUDGET):
+    if acc.tokens_in + acc.tokens_out > budget:
+        return acc, _LocalBudgetExceeded()
+```
+
+**這道「上限」讀的是同一個數字，所以它也只在最後一則訊息才可能成立。**
+
+意思是：它從來沒有停下任何東西。它在一次**已經跑完**的執行上貼一張
+`budget_exceeded` 的標籤。#9 的 d1 之所以做了 24 次查詢，不是因為上限
+放它過，是因為**上限根本沒在看**。
+
+註解寫的是「Local ceiling for backends that cannot enforce one server-side」——
+它不是一道上限，是一個事後的分類。
+
+### 修法：一個會動的估計，勝過一個來不及的真值
+
+`Accumulated` 新增 `conversation_chars` 與 `estimated_tokens_in`：
+每收一則訊息累加它的字元數，每個 assistant turn 把「重送整段對話」的
+成本加進累計（一個 turn 會把目前為止的對話整份再送一次，所以累計輸入
+大致是每輪對話長度的總和）。
+
+`budget_tokens` 取 `max(回報值, 估計值)` —— 回報值是權威的，但它到得太晚；
+估計值粗糙，但它在還來得及行動的時候就在那裡。警告與上限都改讀它。
+
+複用 `artifacts/tokens.py` 的 `ASCII_CHARS_PER_TOKEN`，那份估計本來就
+「寧可高估」，而這裡高估的後果是早一點收手，方向是對的。
+
+### 這次執行的其他事
+
+| | #10 | #11 |
+|---|---|---|
+| 時間 | 612s | — |
+| Dispatches | 4 | 4 |
+| Context 峰值 | 12,195 | 12,237 |
+| 資料流異常 | 2 orphan | **3 orphan** |
+| Ground truth | 全對 | 全對 |
+
+三個 orphan 全部來自 analyst 的重複命名：`summary-stats-report`、
+`two-exact-numbers`、`txn-two-precise-numbers`。同一件事寫了好幾次、
+換了好幾個名字 —— 跟 #9 一樣的樣態。charter 說「用同一個名稱補寫」，
+模型沒照做。這是下一個要處理的。
+
+**`write_finding` 的 name 驗證沒有被觸發** —— 這次沒有任何 lane 傳 artifact id
+當名稱，所以那條修復這次沒上場。
