@@ -30,6 +30,21 @@ class BackendCapability(StrEnum):
     TASK_BUDGET = "task_budget"
 
 
+class WireFormat(StrEnum):
+    """What a backend's HTTP API speaks, for callers that bypass the SDK.
+
+    Declared rather than probed, like capabilities: the SDK path needs an
+    Anthropic-compatible endpoint because the CLI is what talks to it, but a
+    caller going direct is free to speak whatever the endpoint actually
+    understands. A profile that declares nothing here has no direct path --
+    ``base_url`` alone does not imply one, because OpenRouter has a base_url
+    and speaks Anthropic.
+    """
+
+    OPENAI = "openai"
+    ANTHROPIC = "anthropic"
+
+
 class ModelTier(StrEnum):
     """Capability tier a lane asks for, resolved per backend to a real model."""
 
@@ -83,6 +98,12 @@ class BackendProfile:
     base_url: str | None = None
     auth_token_env: str | None = None
     extra_env: dict[str, str] = field(default_factory=dict)
+    #: Set only when this endpoint can be called without the SDK. See WireFormat.
+    direct_wire: WireFormat | None = None
+
+    @property
+    def has_direct_path(self) -> bool:
+        return self.direct_wire is not None and bool(self.base_url)
 
     def supports(self, capability: BackendCapability) -> bool:
         return capability in self.capabilities
@@ -172,6 +193,35 @@ SELF_HOSTED: Final = BackendProfile(
     auth_token_env="HARNESS_PROXY_KEY",
 )
 
+#: Env vars for an OpenAI-compatible endpoint reached without the SDK.
+#: Deployment-specific, so it lives in the environment rather than in the
+#: repository -- a LAN address committed here would be wrong everywhere else.
+DIRECT_BASE_URL_ENV: Final = "HARNESS_DIRECT_BASE_URL"
+DIRECT_MODEL_ENV: Final = "HARNESS_DIRECT_MODEL"
+DIRECT_KEY_ENV: Final = "HARNESS_DIRECT_KEY"
+
+
+def direct_openai_from_env(name: str = "direct") -> BackendProfile | None:
+    """A profile for an OpenAI-compatible endpoint, or None if unconfigured.
+
+    Capabilities stay empty for the same reason SELF_HOSTED's do: an endpoint
+    named by an environment variable has proved nothing. ``auth_token_env`` is
+    set only when a key is present, because a local vLLM commonly has no auth
+    at all and ``credential()`` raises on an env var that is declared and empty.
+    """
+    base_url = (os.environ.get(DIRECT_BASE_URL_ENV) or "").strip().rstrip("/")
+    model = (os.environ.get(DIRECT_MODEL_ENV) or "").strip()
+    if not base_url or not model:
+        return None
+    return BackendProfile(
+        name=name,
+        models={tier: model for tier in ModelTier},
+        capabilities=frozenset(),
+        base_url=base_url,
+        auth_token_env=DIRECT_KEY_ENV if os.environ.get(DIRECT_KEY_ENV) else None,
+        direct_wire=WireFormat.OPENAI,
+    )
+
 
 class BackendRegistry:
     def __init__(self, *profiles: BackendProfile) -> None:
@@ -193,3 +243,6 @@ class BackendRegistry:
 
 
 registry: Final = BackendRegistry(ANTHROPIC_DIRECT, OPENROUTER, SELF_HOSTED)
+
+if (_direct := direct_openai_from_env()) is not None:
+    registry.register(_direct)

@@ -763,3 +763,69 @@ D5 那個三分（查無此分析／存在但不在此程序執行中／執行�
   但 design 的說法要修正
 - **D5 的落差比預期大**：不只是「進行中的 task 接不回來」，而是連
   「這個 job 存在但不在這裡跑」都沒有原生的表達方式
+
+---
+
+## Spike #17 — 直接路徑：8,991 → 584
+
+Spike #12 量到每次分類有 8,372 tokens（93%）是 Claude Code CLI 的 base system
+prompt。`bypass-sdk-for-proxy` 的做法是讓分類器不走 SDK，直接打後端 HTTP API。
+這次有一台可用的自架端點，所以量得成。
+
+```
+Run: HARNESS_DIRECT_BASE_URL=http://<host>:<port> HARNESS_DIRECT_MODEL=<model> \
+     pytest -m live tests/proxy/test_live_direct.py -s
+```
+
+### 結果
+
+```
+  own prompt: 787 chars
+  txn.csv   -> txn-2024  high    in=584   out=67
+  kyc.csv   -> kyc-docs  high    in=576   out=58
+  SDK path : 8,991 input tokens (spike #12)
+  direct   :   584 input tokens (93.5% less)
+```
+
+**固定開銷不是變小，是不存在。** 584 就是我們自己 prompt 的長度 ——
+proposal 估的「自己寫的 619」對得上。兩份資料都路由正確、都 high confidence，
+而且一份純 log 的雜訊資料回了 `null` 而不是硬猜。
+
+一個 35B 的自架模型做分流綽綽有餘，且這台端點 $0 —— **live 測試從此不用錢**。
+
+### LiteLLM 會加 192 tokens
+
+順手量到的，值得記：同一個 prompt、同一個模型，經 LiteLLM proxy
+（`/v1/chat/completions`）比直接打 vLLM 多 **固定 192 tokens**。
+
+```
+shape                                    vLLM  LiteLLM   delta
+user 'hi'                                  13      205    +192
+user 'hi'*50                               62      254    +192
+system 'x' + user 'hi'                     19      207    +188
+2 turns                                    29      221    +192
+```
+
+跟長度、語言、輪數都無關 —— 是常數。有 system message 時是 188，少的 4 個是
+role framing，表示它**併進** system prompt 而不是另加一則。
+
+**這踩到 `specs/proxy/spec.md` 的「分類器的輸入 SHALL 僅包含 routing table、
+中繼資料與有界樣本」。** 規模差兩個數量級（8,372 → 192），但性質一樣：
+是我們沒寫、也看不到的指令。所以分類器走 vLLM 直連，不走 LiteLLM。
+
+Lane worker 與 orchestrator 另當別論 —— 它們要工具與多輪，192 對 60k 預算是
+零頭，走 LiteLLM 換帳務很划算。這跟「只動 proxy」的界線剛好一致。
+
+### 一個對 proposal 的修正：判斷條件不是「有 base_url」
+
+proposal 寫「後端有 `base_url` 時走直接路徑」。做下去才發現那是錯的：
+**OpenRouter 有 `base_url`，但它講的是 Anthropic**。照那個條件，
+OpenRouter 會被送去直接路徑然後打 404。
+
+改成 `BackendProfile.direct_wire` 明確宣告端點講哪一種話 —— 與
+「capabilities are declared, not probed」（design.md D7）同一個原則。
+`has_direct_path` 要求 wire 與 base_url 兩者皆備，並有一條測試釘住
+「OpenRouter 有 base_url 但沒有直接路徑」。
+
+端點位址走環境變數（`HARNESS_DIRECT_BASE_URL` / `_MODEL` / `_KEY`），
+不寫進 repo —— 一個 LAN 位址 commit 進來，對其他任何人都是錯的。

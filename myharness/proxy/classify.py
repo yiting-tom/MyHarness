@@ -23,9 +23,11 @@ from typing import Any
 
 from claude_agent_sdk import ClaudeAgentOptions
 
+from myharness.backends.gate import BackendGate
 from myharness.backends.profile import BackendProfile, ModelTier
 from myharness.lanes.transport import SdkTransport, WorkerTransport
 from myharness.orchestrator.routing import RoutingTable
+from myharness.proxy.direct import DirectTransport, complete_via_gate
 from myharness.proxy.sample import Sample
 
 #: Classification is one short call. Running long means something is wrong, not
@@ -132,30 +134,48 @@ async def classify(
     *,
     profile: BackendProfile,
     transport: WorkerTransport | None = None,
+    direct: DirectTransport | None = None,
+    gate: BackendGate | None = None,
     timeout_s: float = DEFAULT_TIMEOUT_S,
 ) -> Routing:
-    """Ask which lane. Never raises; every failure is an unrouted value."""
+    """Ask which lane. Never raises; every failure is an unrouted value.
+
+    Two paths, one contract. A backend that declares a wire format is called
+    directly; everything else goes through the SDK. Both return the same
+    ``Routing``, and both injection points stay open so the offline suite never
+    needs a network.
+    """
     if not table.open_entries:
         return Routing(None, unrouted=Unrouted.NO_TABLE,
                        reason="orchestrator 尚未宣告任何開放的 lane")
 
-    transport = transport or SdkTransport()
     model = profile.resolve_model(ModelTier.CHEAP)
-    options = ClaudeAgentOptions(
-        model=model,
-        system_prompt=SYSTEM_PROMPT,
-        max_turns=MAX_TURNS,
-        # The classifier has no tools. It reads and answers.
-        allowed_tools=[],
-        disallowed_tools=BackendProfile.disallowed_for(()),
-        env=profile.to_sdk_env(),
-    )
     prompt = build_prompt(table, meta_text, sample)
 
     try:
-        text, usd, tin, tout = await asyncio.wait_for(
-            _collect(transport, prompt, options), timeout_s
-        )
+        if profile.has_direct_path:
+            # Nothing here builds ClaudeAgentOptions: the framework's system
+            # prompt is exactly what this path exists to not pay for, and it
+            # arrives with the options object, not with the tools.
+            completion, _ = await complete_via_gate(
+                profile, model=model, system=SYSTEM_PROMPT, user=prompt,
+                transport=direct, gate=gate, timeout_s=timeout_s,
+            )
+            text, usd, tin, tout = (completion.text, completion.usd,
+                                    completion.tokens_in, completion.tokens_out)
+        else:
+            options = ClaudeAgentOptions(
+                model=model,
+                system_prompt=SYSTEM_PROMPT,
+                max_turns=MAX_TURNS,
+                # The classifier has no tools. It reads and answers.
+                allowed_tools=[],
+                disallowed_tools=BackendProfile.disallowed_for(()),
+                env=profile.to_sdk_env(),
+            )
+            text, usd, tin, tout = await asyncio.wait_for(
+                _collect(transport or SdkTransport(), prompt, options), timeout_s
+            )
     except TimeoutError:
         return Routing(None, unrouted=Unrouted.FAILED,
                        reason=f"分流器逾時（{timeout_s:.0f}s）", model=model)
