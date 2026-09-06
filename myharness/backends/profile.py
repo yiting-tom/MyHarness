@@ -13,7 +13,7 @@ live tests, and the event log records which path each run actually took.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Final
 
@@ -193,6 +193,36 @@ SELF_HOSTED: Final = BackendProfile(
     auth_token_env="HARNESS_PROXY_KEY",
 )
 
+#: Where the self-hosted proxy lives, and which model it serves. Same reason as
+#: the direct vars below: an address is a property of a deployment, not of this
+#: repository.
+PROXY_BASE_URL_ENV: Final = "HARNESS_PROXY_BASE_URL"
+PROXY_MODEL_ENV: Final = "HARNESS_PROXY_MODEL"
+
+
+def self_hosted_from_env() -> BackendProfile | None:
+    """Fill in SELF_HOSTED from the environment, or None if unconfigured.
+
+    Every tier resolves to the same model: a single-model deployment has no
+    cheap tier to fall back to, and silently mapping ``cheap`` onto the only
+    model available is more honest than raising for a tier the caller is
+    entitled to ask for.
+
+    Capabilities stay empty. The stub's comment says an unknown proxy must
+    prove what it can enforce, and being named by an env var proves nothing --
+    the worker's schema-retry path covers the difference.
+    """
+    base_url = (os.environ.get(PROXY_BASE_URL_ENV) or "").strip().rstrip("/")
+    model = (os.environ.get(PROXY_MODEL_ENV) or "").strip()
+    if not base_url or not model:
+        return None
+    return replace(
+        SELF_HOSTED,
+        models={tier: model for tier in ModelTier},
+        base_url=base_url,
+        auth_token_env="HARNESS_PROXY_KEY" if os.environ.get("HARNESS_PROXY_KEY") else None,
+    )
+
 #: Env vars for an OpenAI-compatible endpoint reached without the SDK.
 #: Deployment-specific, so it lives in the environment rather than in the
 #: repository -- a LAN address committed here would be wrong everywhere else.
@@ -246,3 +276,6 @@ registry: Final = BackendRegistry(ANTHROPIC_DIRECT, OPENROUTER, SELF_HOSTED)
 
 if (_direct := direct_openai_from_env()) is not None:
     registry.register(_direct)
+
+if (_self_hosted := self_hosted_from_env()) is not None:
+    registry.register(_self_hosted)

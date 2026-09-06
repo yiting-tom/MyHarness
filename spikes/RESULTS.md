@@ -829,3 +829,108 @@ OpenRouter 會被送去直接路徑然後打 404。
 
 端點位址走環境變數（`HARNESS_DIRECT_BASE_URL` / `_MODEL` / `_KEY`），
 不寫進 repo —— 一個 LAN 位址 commit 進來，對其他任何人都是錯的。
+
+---
+
+## Golden job 第七次 —— 第一次跑在自架模型上
+
+第六次跑在 OpenRouter 的 nemotron-super-120b 上。第七次換成自架的
+`aird-35b`（vLLM 0.27.1，`max_model_len=65536`），經 LiteLLM 的 Anthropic
+路由（`/v1/messages`），由 LiteLLM 翻譯成 OpenAI 格式。
+
+```
+Run: HARNESS_PROXY_BASE_URL=http://<host>:4000 HARNESS_PROXY_MODEL=<model> \
+     python -m myharness.goldens --backend self-hosted --root jobs-scratch/golden7
+```
+
+### 結果：264 秒，紀律全過，數字全對
+
+```
+anomalies=none
+phase=complete salvaged=False turns=1 handoffs=0
+context_peak=9,491 dispatches=5 duplicates=0 failures=2
+cost=$1.3671 peek=1009 throttle=0s
+ground truth: 2,940 rows, 765 accounts, cheapest channel app
+報告缺少：無
+```
+
+| 數字 | 報告 | 直接查詢 |
+|---|---:|---:|
+| 不重複帳戶 | 765 | 765 |
+| 總筆數 | 2,940 | 2,940 |
+| app 平均金額 | 13,981.81 | 13,981.81 |
+| web 平均金額 | 20,612.47 | 20,612.47 |
+| atm 平均金額 | 21,347.33 | 21,347.33 |
+| branch 平均金額 | 21,655.25 | 21,655.25 |
+
+**一個 35B 的自架模型跑得完整條鏈**：規劃、開三條 lane、派工、SQL 查詢、
+寫 finding、收斂成報告。而且它自己看出來這份資料是合成的
+（「mean ≈ median、無偏態、金額分佈過度均勻」），那不在任務裡。
+
+| | 第六次（OpenRouter） | 第七次（自架） |
+|---|---:|---:|
+| 時間 | ~494s | **264s** |
+| 限流等待 | 129.6s | **0s** |
+| Context 峰值 | 6,757 | 9,491 |
+| Dispatches | 3 | 5 |
+| 失敗的派工 | 0 | 2 |
+| 資料流異常 | 無 | 無 |
+
+### ⚠️ 發現一：`max_budget_usd` 在一個免費的後端上觸發了
+
+```
++120.5s  limit.reached  limit=max_budget_usd value=1.0014 dispatches=3
+```
+
+**這個模型是 $0。** 那 $1.0014 是 SDK 的估計 —— spike #12 早就記過
+「token 數是實數，金額是 SDK 的估計」，但那次只是數字難看。這次那個
+不可信的數字**做了一個真的控制決定**：job 在 120 秒時進入收尾模式。
+
+Job 還是善終了（寬限派工 d4、d5 都成功，報告完整）—— 那是善終保證在起作用。
+但一個以美元計價的上限，套在一個不回報美元的後端上，就是在拿一個虛構的數字
+當閘門。
+
+修法有兩條，都還沒做：
+- 後端宣告它會不會回報成本；不回報的就別用金額上限，改用 token 上限
+- 或者 `JobSpec` 允許 `max_budget_usd=None`，由 dispatch 數與 token 數把關
+
+### ⚠️ 發現二：60k 預算對上 64k 視窗太緊
+
+```
+d2  analyst-anomaly  budget_exceeded  in 69.6k  (pct=1.161)
+d3  analyst-anomaly  budget_exceeded  in 60.5k  (pct=1.008)
+d4  analyst-anomaly  ok               in 30.8k  (pct=0.514)
+```
+
+`analyst-anomaly` 連續兩次燒光 60,000 的 token 預算，第一次還超出 16%。
+第六次在 OpenRouter 上沒發生過 —— 同樣的 charter，這個模型話比較多、輪數比較長。
+
+`token_budget=60_000` 與 `max_model_len=65536` 只差 9%，中間沒有餘裕。
+
+**但 orchestrator 自己修好了。** 它把任務逐次縮小（d2 → d3 → d4 的 task
+文字一次比一次短），第三次以 30.8k 完成。這正是 caveat 回饋該有的行為，
+而且是第一次在真實失敗上看到它生效。
+
+### CLI 會抱怨模型名稱，但照跑
+
+```
+[claude-code:unrecognized_model] {"model":"aird-35b","query_source":"sdk"}
+```
+
+Claude Code CLI 不認得這個名字，每次請求都印一次警告 —— **不是致命錯誤**。
+`plan.update` 有內容、工具呼叫正常、五次派工三次成功，證明它一路都在工作。
+
+### 前置驗證：LiteLLM 的 Anthropic 路由支援工具呼叫
+
+跑 golden 之前先單獨測過，這是 lane worker 能不能跑的真正關卡：
+
+```
+POST /v1/messages  tools=[inspect_blob]
+→ stop_reason: tool_use
+→ {"type":"tool_use","name":"inspect_blob","input":{"artifact":"job/blob/raw/txn-2024"}}
+```
+
+model info 裡 `supports_function_calling` 是 `null`（未宣告），但實測可用。
+這正是 design.md D7「capabilities are declared, not probed」預期由 live 測試
+補上的那種空白 —— 所以 `self-hosted` 的 capabilities 仍維持空集合，
+差額由 worker 的 schema-retry 補。
