@@ -1584,3 +1584,76 @@ analyst-1:txn-2024_distinct_accounts
 
 `d2` 另外拿到 `state_rejected`：分析寫進去了，lane state 沒更新 ——
 兩個並行實例搶同一份 state。
+
+## Golden job 第十五次 —— 儀器裝好了，然後它指出係數是錯的
+
+`jobs-scratch/golden15`。第一次不用重放 transcript 就能讀出估計值的誤差：
+
+```
+id   lane      status            reported  estimate    err  reqs   convo  fixed
+d1   analyst1  budget_exceeded     72,121    49,674   -31%    18   4,367    666
+d2   critic1   ok                  12,296     5,677   -54%     3   1,859    755
+d3   synth1    schema_violation    24,328    12,021   -51%     5   3,456    518
+```
+
+一次執行，三個校準點，直接從 `dispatch.end` 的 `estimate` 欄讀出來。
+這正是加這個欄位的目的 —— #12 / #13 / #14 三次診斷都是靠重放 transcript
+推的，而 transcript 把工具結果截在 2,000 字。
+
+```
+anomalies=none   ground truth 全對   報告缺少：無
+```
+
+### 修好的部分確實修好了
+
+每請求計費（不再每則串流訊息算一次）與固定開銷都進去了。d1 的
+`requests=18` 對應 31 則 assistant 訊息 —— 舊碼會算 31 次。
+
+### 但誤差還有 31–54%，而且中文越多偏得越多
+
+d1 是 analyst，讀的是 ASCII 的查詢結果，−31%。
+d2 / d3 是 critic 與 synthesizer，讀的是中文 finding，−54% / −51%。
+
+`myharness/artifacts/tokens.py` 的 docstring 自己寫著：
+
+> A flat "4 chars per token" underestimates CJK text by roughly 4-6x, and this
+> harness analyses Chinese data, so ASCII and non-ASCII are counted separately.
+
+而 `worker.py` 從頭到尾繞過 `estimate_tokens()`，直接 import
+`ASCII_CHARS_PER_TOKEN` 用那個平的除數 —— **正是那份 docstring 寫來防止的
+那件事**。全 repo 只有 worker.py 這麼做，其他七個呼叫點都用
+`estimate_tokens`。
+
+### 然而係數本身也是錯的，而且錯在相反方向
+
+拿真實文本量（重複的填充字串會被 BPE 壓掉，量到的是 tokenizer 的
+merge 不是文本）：
+
+```
++2,000 字中文（docs/introduction.md 的中文字元）  Δ/request = 614
++2,000 字 CSV（txn-2024 的前 2,000 字元）        Δ/request = 916
+
+→ 每個中文字      ≈ 0.31 tokens   （程式寫 1.50，高了 4.8 倍）
+→ 每個 token      ≈ 2.18 個 ASCII 字元（程式寫 4.00，低了 1.8 倍）
+```
+
+CSV 的 ASCII 密度高（數字、逗號），tokenize 得比散文差很多，而 lane 的
+對話正是被查詢輸出主導的。
+
+所以直接把 worker.py 改成呼叫 `estimate_tokens()` **會讓中文重的 lane
+反過來高估約 5 倍**，把健康的執行提早砍掉。這不是換一個函式就好的事。
+
+### 連帶：警告這次一次都沒響，而原因是同一個
+
+d1 的估計值收在 49,674 = 預算的 83%，門檻是 75%。但 Σ 是二次成長的，
+反推每個請求：第 16 個請求約 65%、第 17 個約 74%、第 18 個才 83% ——
+**門檻是在最後一次工具呼叫之後才被跨過的。**
+
+估計值低 31%，警告就晚 31%，而在曲線末段「晚 31%」等於「不會響」。
+
+d1 的 `end=success`：它跑完了，寫了 finding，然後被貼上
+`budget_exceeded`。上限又是事後標籤 —— 因為估計值沒到 60,000，而回報值
+（77,868，130%）到得太晚。
+
+**估計值的準度現在是唯一的關鍵。** 警告、上限、成本歸屬三件事的品質，
+完全等於它的品質。

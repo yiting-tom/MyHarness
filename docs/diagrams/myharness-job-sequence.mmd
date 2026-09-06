@@ -1,0 +1,86 @@
+---
+title: MyHarness — 一次完整 job 的時序
+---
+sequenceDiagram
+    autonumber
+
+    actor C as ① client agent
+    participant S as MCP service<br/>analysis_*
+
+    box rgba(150,115,166,0.12) harness — strict_mcp_config · setting_sources=[] · 內建工具全剝光
+        participant O as ② orchestrator<br/>一個 job 一個 · 長壽對話
+        participant A as ArtifactStore<br/>唯一的資料通道
+        participant W as ③ lane worker<br/>每次 dispatch 一個新的
+        participant P as ④ proxy classifier<br/>單發 · 0 工具 · 1 turn
+    end
+
+    Note over C,P: 開場 — job 立刻回，工作在背景跑
+    C->>S: analysis_start(task)
+    S-->>C: job_id（不等結果）
+    S->>O: 開一個 job
+    activate O
+    O->>A: plan_update → 寫 plan ＋ routing note
+    A-->>O: plan_revision
+    Note over O,A: routing table 是對外宣告「我在等什麼資料」
+
+    Note over C,P: 中途餵資料 — client 用它自己的 WebFetch／外部 MCP 去抓
+    C->>S: analysis_provide(payload)
+    S->>A: put_blob(raw/…)
+    A-->>S: artifact id ＋ bytes
+    Note over S,A: 內容不進 client 也不進 orchestrator 的 context
+    S->>P: classify(routing table ＋ 有界樣本)
+    activate P
+    Note over P: 看不到 goal／plan／finding<br/>失敗永不阻塞 ingress
+    P-->>S: lane=… 或「未分流，原因如下」
+    deactivate P
+    S->>O: notify()【系統】使用者提供了新資料
+    S-->>C: routed／routed_to／announced 三件事分開講
+
+    Note over C,P: 分析 — worker 做完就死，跨任務只靠 lane state note
+    O->>W: dispatch("tabular-analyst", inputs=[blob id])
+    activate W
+    Note over O,W: inputs 是唯一的授權——<br/>任務文字裡提到 artifact 不給任何權限
+    W->>A: inspect_blob → duckdb_query
+    A-->>W: 結果截斷；大結果用 into 寫回成新 blob
+    W->>A: write_finding ＋ update_state
+    W-->>O: 窄口① LaneHandle ≤ 2000 chars
+    deactivate W
+
+    O->>W: dispatch("critic", inputs=[analyst 的 finding])
+    activate W
+    Note over W: 沒有查詢工具——只能問<br/>「這結論撐得住它列出的證據嗎」
+    W->>A: read_note → write_finding(critique)
+    W-->>O: 窄口① LaneHandle
+    deactivate W
+
+    Note over C,P: 收斂與交付 — orchestrator 不准自己寫報告
+    O->>W: dispatch("synthesizer", inputs=[所有 finding])
+    activate W
+    W->>A: read_note × N → write_finding（分節報告）
+    W-->>O: 窄口① LaneHandle
+    deactivate W
+
+    opt 需要親自看一小段
+        O->>A: 窄口③ peek(artifact, max_tokens)
+        A-->>O: 一小段文字（吃全 job 共用預算）
+    end
+
+    O->>S: finish(report_artifact)
+    S->>A: stat(report)
+    alt 報告沒有分節（是 finding 不是報告）
+        A-->>S: sections 為空
+        S-->>O: report_has_no_sections — 先派 synthesis lane 寫報告
+    else 正常
+        A-->>S: sections[]
+        S-->>O: status=complete
+    end
+    deactivate O
+
+    Note over C,P: 窄口④ — 交付不會炸掉 client 的 context
+    C->>S: analysis_poll(wait=30)
+    S-->>C: 有進展才回；空回覆＝還在跑
+    C->>S: analysis_result(job_id)
+    S-->>C: 摘要 ≤1500 chars ＋ 章節價目表 ＋ caveats
+    Note over C,S: caveats 從 event log 算，不從報告拿——<br/>模型最會忘記講的就是它做不到的事
+    C->>S: analysis_drill(section_id="方法")
+    S-->>C: 只有那一節的全文
