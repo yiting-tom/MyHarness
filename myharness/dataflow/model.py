@@ -87,6 +87,10 @@ class DispatchInfo:
     tokens_in: int = 0
     tokens_out: int = 0
     cache_read: int = 0
+    #: True when the token counts are the harness's own estimate rather than
+    #: anything the backend reported -- a run stopped mid-stream never receives
+    #: the message that carries usage (golden run #13).
+    tokens_estimated: bool = False
     turns: int = 0
     transcript: str | None = None
 

@@ -315,8 +315,12 @@ async def test_null_usage_fields_do_not_crash_the_run(bench):
     assert handle.ok
 
     (end,) = await bench.events_for(DISPATCH_END)
-    assert end.get("tokens") == {"in": 0, "out": 0, "fresh_in": 0,
-                                 "cache_read": 0, "cache_write": 0}
+    tokens = end.get("tokens")
+    # Nothing was reported, so the estimate stands in and says so. The cache
+    # columns are left alone: they would be fabrications, and cache_hit_ratio
+    # reads them.
+    assert tokens["estimated"] is True
+    assert tokens["fresh_in"] == tokens["cache_read"] == tokens["cache_write"] == 0
 
 
 async def test_rate_limited_run_is_not_mistaken_for_a_bad_handle(bench):
@@ -487,3 +491,56 @@ def test_a_tool_result_counts_toward_consumption():
     _consume(UserMessage(content=[ToolResultBlock(
         tool_use_id="t1", content="row\n" * 5_000)]), acc)
     assert acc.conversation_chars > 15_000
+
+
+# Golden run #13: the ceiling stopped d1 mid-stream for the first time, and the
+# dispatch reported in=0 out=0. usage rides in on ResultMessage, which an
+# interrupted run never receives -- so the runs that cost the most were the
+# ones counted as free.
+
+
+def test_an_interrupted_run_reports_the_estimate_rather_than_zero():
+    from claude_agent_sdk import AssistantMessage, TextBlock, ToolResultBlock, UserMessage
+
+    from myharness.lanes.worker import Accumulated, _consume
+
+    acc = Accumulated()
+    for _ in range(4):
+        _consume(AssistantMessage(content=[TextBlock(text="q" * 2_000)], model="m"), acc)
+        _consume(UserMessage(content=[ToolResultBlock(
+            tool_use_id="t", content="row\n" * 500)]), acc)
+
+    tokens = acc.token_breakdown
+    assert tokens["estimated"] is True
+    assert tokens["in"] > 0 and tokens["out"] > 0
+
+
+def test_output_is_estimated_from_what_the_model_wrote():
+    """Not from the whole conversation: tool results are input, not output."""
+    from claude_agent_sdk import AssistantMessage, TextBlock, ToolResultBlock, UserMessage
+
+    from myharness.lanes.worker import Accumulated, _consume
+
+    acc = Accumulated()
+    _consume(AssistantMessage(content=[TextBlock(text="a" * 400)], model="m"), acc)
+    _consume(UserMessage(content=[ToolResultBlock(
+        tool_use_id="t", content="b" * 40_000)]), acc)
+
+    assert acc.token_breakdown["out"] == acc.estimated_tokens_out
+    assert acc.estimated_tokens_out < 200, "a huge tool result is not output"
+
+
+def test_a_reported_figure_is_never_replaced_by_the_estimate():
+    """One reported number is enough to make the whole breakdown measured.
+
+    A backend that reports input but not output is telling us its output was
+    zero, and overwriting that with a guess would be the harness inventing
+    usage the backend denied.
+    """
+    from myharness.lanes.worker import Accumulated
+
+    acc = Accumulated(conversation_chars=80_000, estimated_tokens_in=20_000)
+    acc.usage = {"input_tokens": 7, "output_tokens": 0}
+    tokens = acc.token_breakdown
+    assert "estimated" not in tokens
+    assert tokens == {"in": 7, "out": 0, "fresh_in": 7, "cache_read": 0, "cache_write": 0}

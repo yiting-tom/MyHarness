@@ -164,19 +164,28 @@ def _dispatch_table(flow: DataFlow, colour: bool, width: int) -> str:
     if not flow.dispatches:
         return ""
     lines = [style(rule("派工明細", width), "bold", enabled=colour)]
-    header = (f"  {pad('id', 5)}{pad('lane', 9)}{pad('status', 12)}"
+    header = (f"  {pad('id', 5)}{pad('lane', 17)}{pad('status', 18)}"
               f"{pad('in', 8, 'right')}{pad('out', 8, 'right')}"
               f"{pad('cache', 8, 'right')}{pad('usd', 9, 'right')}")
     lines.append(style(header, "dim", enabled=colour))
+    estimated = False
     for d in flow.dispatches.values():
+        # "~" rather than a separate column: the reader needs to know which of
+        # these numbers were measured, and a footnote nobody reads would not
+        # tell them.
+        mark = "~" if d.tokens_estimated else ""
+        estimated = estimated or d.tokens_estimated
         lines.append(
-            f"  {pad(d.id, 5)}{pad(d.lane, 9)}"
-            f"{pad(style(d.status, *STATUS_STYLE.get(d.status, DEFAULT_STATUS_STYLE), enabled=colour), 12)}"
-            f"{pad(human_tokens(d.tokens_in), 8, 'right')}"
-            f"{pad(human_tokens(d.tokens_out), 8, 'right')}"
+            f"  {pad(d.id, 5)}{pad(d.lane, 17)}"
+            f"{pad(style(d.status, *STATUS_STYLE.get(d.status, DEFAULT_STATUS_STYLE), enabled=colour), 18)}"
+            f"{pad(mark + human_tokens(d.tokens_in), 8, 'right')}"
+            f"{pad(mark + human_tokens(d.tokens_out), 8, 'right')}"
             f"{pad(human_tokens(d.cache_read), 8, 'right')}"
             f"{pad(f'${d.usd:.4f}', 9, 'right')}"
         )
+    if estimated:
+        lines.append(style("  ~ = harness 估計值，後端未回報（執行被中途停止）",
+                           "dim", enabled=colour))
     return "\n".join(lines)
 
 

@@ -169,6 +169,7 @@ def _end(flow: DataFlow, event: Event) -> None:
         tokens_in=int(tokens.get("in") or 0),
         tokens_out=int(tokens.get("out") or 0),
         cache_read=int(tokens.get("cache_read") or 0),
+        tokens_estimated=bool(tokens.get("estimated")),
         turns=int(event.get("turns") or 0),
         transcript=event.get("transcript"),
     )

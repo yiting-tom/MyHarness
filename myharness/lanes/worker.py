@@ -95,6 +95,9 @@ class Accumulated:
     usage: dict[str, int] = field(default_factory=dict)
     #: Characters of conversation seen so far -- prompts, tool results, replies.
     conversation_chars: int = 0
+    #: Characters the model itself produced, kept apart from the rest of the
+    #: conversation so input and output can be estimated separately.
+    output_chars: int = 0
     #: Running estimate of cumulative input tokens. ``usage`` arrives only with
     #: the final message, so it is worth nothing to anything that has to act
     #: while the run is still going (golden run #11).
@@ -125,19 +128,41 @@ class Accumulated:
         return _as_int(self.usage.get("output_tokens"))
 
     @property
-    def token_breakdown(self) -> dict[str, int]:
+    def estimated_tokens_out(self) -> int:
+        return math.ceil(self.output_chars / ASCII_CHARS_PER_TOKEN)
+
+    @property
+    def token_breakdown(self) -> dict[str, Any]:
         """Fresh / cached / written input, kept apart.
 
         Summing them into one number makes prompt-cache effectiveness invisible
         -- and the whole ephemeral-worker cost model rests on the charter prefix
         being cached.
+
+        When nothing was reported at all, the estimate stands in for the
+        totals. ``usage`` arrives with the final message, so a run the local
+        ceiling interrupts never gets one -- and reporting zero would make the
+        runs that cost the most the ones that count as free (golden run #13).
+        The cache columns stay at zero rather than being invented, so
+        ``cache_hit_ratio`` keeps measuring only what a backend actually said.
         """
-        return {
+        reported = {
             "in": self.tokens_in,
             "out": self.tokens_out,
             "fresh_in": _as_int(self.usage.get("input_tokens")),
             "cache_read": _as_int(self.usage.get("cache_read_input_tokens")),
             "cache_write": _as_int(self.usage.get("cache_creation_input_tokens")),
+        }
+        if any(reported.values()):
+            return reported
+        return {
+            **reported,
+            "in": self.estimated_tokens_in,
+            "out": self.estimated_tokens_out,
+            # Present only when the numbers are ours, so a consumer that does
+            # not know about the key still reads a plausible total, and one
+            # that does can decline to treat it as measurement.
+            "estimated": True,
         }
 
     @property
@@ -225,8 +250,10 @@ def _message_chars(message: Any) -> int:
 
 def _consume(message: Any, acc: Accumulated) -> None:
     """Fold one streamed message into the accumulator."""
-    acc.conversation_chars += _message_chars(message)
+    chars = _message_chars(message)
+    acc.conversation_chars += chars
     if isinstance(message, AssistantMessage):
+        acc.output_chars += chars
         acc.turns += 1
         # A turn re-sends the whole conversation, so cumulative input grows by
         # roughly its current size each time. Rough is the point: an estimate
@@ -472,9 +499,12 @@ async def _run_with_toolbox(
         usd=acc.usd, transcript=transcript_id, contract_path=str(path),
         headline=handle.headline, partial=handle.partial, suggest=handle.suggest,
     )
+    # The same fallback as the breakdown: an interrupted run reports no usage,
+    # and a lane shown at 0% is exactly the lane that ran out.
+    used = int(acc.token_breakdown["in"])
     await event_log.append(
-        request.job_id, CTX, who=f"lane:{lane.id}", used=acc.tokens_in,
-        pct=round(acc.tokens_in / lane_type.token_budget, 3) if lane_type.token_budget else 0,
+        request.job_id, CTX, who=f"lane:{lane.id}", used=used,
+        pct=round(used / lane_type.token_budget, 3) if lane_type.token_budget else 0,
     )
     return handle
 

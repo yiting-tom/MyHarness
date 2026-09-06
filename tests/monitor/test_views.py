@@ -244,3 +244,37 @@ def test_inspect_exits_nonzero_when_something_is_critical(tmp_path: Path, capsys
 
     _write_job(tmp_path, healthy())
     assert main(["--root", str(tmp_path), "inspect", JOB]) == 0
+
+
+def test_estimated_token_counts_are_marked_as_estimates():
+    """Golden run #13: an interrupted dispatch reported in=0/out=0.
+
+    The number now comes from the harness's own estimate, and the table has to
+    say so -- an unmarked estimate sitting next to measured columns reads as a
+    measurement.
+    """
+    stream = (Stream().start().ingress(BLOB)
+              .dispatch("d1", "a", [BLOB])
+              .done("d1", "a", None, status="budget_exceeded", usd=0.0,
+                    tokens={"in": 61_000, "out": 4_000, "fresh_in": 0,
+                            "cache_read": 0, "cache_write": 0, "estimated": True})
+              .dispatch("d2", "syn", [BLOB]).done("d2", "syn", REPORT)
+              .finish(REPORT))
+    events = stream.events
+    flow = build_dataflow(events)
+    assert flow.dispatches["d1"].tokens_estimated is True
+    assert flow.dispatches["d2"].tokens_estimated is False
+
+    out = render_inspect(flow, events, colour=False)
+    assert "~61.0k" in out
+    assert "harness 估計值" in out
+
+
+def test_a_long_lane_name_does_not_eat_the_status_column():
+    """"tabular-analyst" is 15 characters and ran off the row in golden #13."""
+    stream = (Stream().start().ingress(BLOB)
+              .dispatch("d1", "tabular-analyst", [BLOB])
+              .done("d1", "tabular-analyst", None, status="budget_exceeded")
+              .finish(None))
+    out = render_inspect(build_dataflow(stream.events), stream.events, colour=False)
+    assert "tabular-analyst  budget_exceeded" in out
