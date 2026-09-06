@@ -123,11 +123,24 @@ def _unused_inputs(flow: DataFlow) -> list[Anomaly]:
     return out
 
 
+#: A finding's produced_by, set by write_finding. Evidence that a lane wrote it
+#: even when no dispatch reported doing so.
+LANE_PRODUCER_PREFIX = "lane:"
+
+
 def _orphan_outputs(flow: DataFlow) -> list[Anomaly]:
     """Analysis nobody read and that did not become the report.
 
     Lane state is excluded: it exists for the lane's own next run, so having no
     reader is its normal condition rather than a symptom.
+
+    A produced edge is not required, and requiring one used to silence the case
+    this check exists for. Production edges come from the dispatch's handle, and
+    a lane that runs out of budget returns a handle with no artifact -- so a
+    finding written moments before the failure had no writer, was skipped here,
+    and appeared in the flow graph as if the dispatch had produced nothing.
+    Golden run #9 lost two that way. The artifact index still records who wrote
+    it, which is the same evidence by a different route.
     """
     out = []
     for node in flow.of_kind(NodeKind.FINDING):
@@ -135,12 +148,18 @@ def _orphan_outputs(flow: DataFlow) -> list[Anomaly]:
             continue
         if flow.edges_from(node.id, EdgeKind.GRANTED):
             continue
-        if not flow.writers_of(node.id):
+        writers = flow.writers_of(node.id)
+        if not writers and not node.produced_by.startswith(LANE_PRODUCER_PREFIX):
             continue
+        detail = f"{node.label} 被產出但沒有任何後續派工讀到它，也不是最終報告"
+        if not writers:
+            # Worth saying: it means the lane did the work and then failed
+            # before it could hand back a pointer to it.
+            detail += f"（{node.produced_by} 寫出，但沒有任何派工回報產出它）"
         out.append(Anomaly(
-            AnomalyKind.ORPHAN_OUTPUT, Severity.WARNING,
-            f"{node.label} 被產出但沒有任何後續派工讀到它，也不是最終報告",
-            {"artifact": node.id, "est_tokens": node.est_tokens},
+            AnomalyKind.ORPHAN_OUTPUT, Severity.WARNING, detail,
+            {"artifact": node.id, "est_tokens": node.est_tokens,
+             "produced_by": node.produced_by, "unreported": not writers},
         ))
     return out
 

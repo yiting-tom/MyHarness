@@ -197,3 +197,54 @@ def test_golden5_provenance_is_reconstructible(golden5):
     chain = [d.id for d in flow.provenance(flow.report_artifact)]
     assert {"d1", "d2", "d3", "d4", "d5"} == set(chain)
     assert flow.provenance_cost(flow.report_artifact)["usd"] > 0
+
+
+# --- work that happened and then vanished ---------------------------------
+
+
+def test_a_finding_written_before_a_failure_is_still_an_orphan():
+    """Golden run #9 lost two findings this way.
+
+    Production edges come from the dispatch's handle, and a lane that exhausts
+    its budget returns a handle with no artifact. Requiring a produced edge
+    therefore silenced exactly the case this check exists for: work that was
+    done, written to disk, and reported by nobody.
+    """
+    finding = f"{JOB}/note/lanes/analyst/findings/written-then-lost"
+    stream = (
+        Stream()
+        .dispatch("d1", "analyst", inputs=[f"{JOB}/blob/raw/data"])
+        # No artifact on the handle: the budget ran out before it could report.
+        .done("d1", "analyst", artifact=None, status="budget_exceeded")
+    )
+    flow = build_dataflow(stream.events, [meta(finding, produced_by="lane:analyst")],
+                          job_id=JOB)
+
+    orphans = [a for a in detect(flow) if a.kind is AnomalyKind.ORPHAN_OUTPUT]
+    assert [a.context["artifact"] for a in orphans] == [finding]
+    assert orphans[0].context["unreported"] is True
+    assert "lane:analyst" in orphans[0].detail
+
+
+def test_a_reported_orphan_is_not_marked_unreported():
+    """The two are different diagnoses and must not read the same."""
+    finding = f"{JOB}/note/lanes/a/findings/1"
+    stream = (
+        Stream()
+        .dispatch("d1", "a", inputs=[f"{JOB}/blob/raw/data"])
+        .done("d1", "a", artifact=finding)
+    )
+    flow = build_dataflow(stream.events, [meta(finding)], job_id=JOB)
+
+    (orphan,) = [a for a in detect(flow) if a.kind is AnomalyKind.ORPHAN_OUTPUT]
+    assert orphan.context["unreported"] is False
+    assert "沒有任何派工回報" not in orphan.detail
+
+
+def test_a_finding_no_lane_claims_is_still_skipped():
+    """The guard that hid the bug had a real job: not every note in the store
+    belongs to this job's flow. produced_by is what distinguishes them."""
+    finding = f"{JOB}/note/lanes/ghost/findings/1"
+    flow = build_dataflow(Stream().start().events,
+                          [meta(finding, produced_by="")], job_id=JOB)
+    assert not [a for a in detect(flow) if a.kind is AnomalyKind.ORPHAN_OUTPUT]

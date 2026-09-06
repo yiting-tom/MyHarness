@@ -95,7 +95,22 @@ def test_the_charter_requires_a_citation_for_every_objection():
     assert "指名出處" in text
 
 
-def test_the_charter_makes_missing_grants_the_first_thing_reported():
-    """A critique of half the findings misleads more than none at all."""
+def test_the_charter_asks_only_for_what_the_critic_can_know():
+    """Golden #9: the first version told it to report findings it was not
+    granted, which is unknowable from inside -- the grant list is its whole
+    field of view. It was granted one of three and said nothing, exactly as
+    that instruction forced. It now states its own coverage instead, so a
+    reader holding the full picture can see the gap themselves.
+    """
     text = CHARTER.read_text(encoding="utf-8")
-    assert "沒有授權給你" in text
+    assert "你無法知道你沒被授權到什麼" in text
+    assert "不要猜測有哪些 finding 存在而你沒拿到" in text
+    assert "實際讀過" in text
+
+
+def test_the_charter_makes_confidence_mandatory():
+    """Golden #9 came back with confidence None."""
+    text = CHARTER.read_text(encoding="utf-8")
+    assert "`confidence` 是**必填**的" in text
+    # The obvious way to get this wrong is to read "nothing found" as low.
+    assert "不要因為找不到問題就填低" in text

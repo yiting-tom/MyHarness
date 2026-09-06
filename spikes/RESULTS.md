@@ -1077,3 +1077,49 @@ synthesizer 拿到兩份輸入，報告裡出現 `58,071`，並多了「異常�
 
 critic 的 handle 沒有填 confidence，而 charter 花了一整節講它該怎麼填。
 待查：是 handle 驗證放行了空值，還是 charter 的位置不夠顯眼。
+
+### 追查 #9 的兩個缺陷：一個比原本以為的嚴重
+
+**Charter 那條規則已改。** 「若有 lane 的產出沒有授權給你，那是你必須說出來的
+第一件事」改成：產出的第一段列出**實際讀過**的 artifact id 與未檢查的面向。
+critic 無法知道它沒拿到什麼 —— 它能做的是把視野本身寫清楚，讓看得到全貌的人
+自己發現缺口。`confidence` 也改成明確必填，並註明「不要因為找不到問題就填低」。
+
+**但追查過程中發現一個更嚴重的：`orphan_output` 漏掉了最該抓的 case。**
+
+`myharness inspect golden9` 回報 `異常：無`，而 artifact store 裡有**三份**
+analyst finding，只有一份被用到。兩份沒人讀的分析，監視器完全沒看見。
+
+原因在兩段程式碼的交界：
+
+```python
+# build.py _end() —— 產出邊只來自 dispatch 的 handle
+artifact = event.get("artifact")
+produced = (str(artifact),) if artifact else ()      # budget_exceeded → 空的
+
+# anomalies.py _orphan_outputs()
+if not flow.writers_of(node.id):
+    continue                                          # 沒有 writer 就跳過
+```
+
+d1 燒光預算，handle 沒帶 artifact，所以它寫出的兩份 finding 沒有 PRODUCED 邊、
+沒有 writer、被跳過。**`orphan_output` 恰好排除了最容易產生 orphan 的情況 ——
+lane 把事情做完、寫進檔案，然後才失敗。**
+
+而 `specs/dataflow/spec.md` 說的是「**被產出**但從未被任何後續執行讀取」。
+那兩份確實被產出了（`produced_by='lane:analyst-1'` 記在 artifact index 裡）。
+所以這是違反既有需求的 bug，不是行為變更 —— 不用開 change。
+
+修法：產出邊不再是必要條件，`produced_by` 是同一份證據的另一條路徑。
+偵測到時額外標明 `unreported=True`，因為那句話有診斷價值 ——
+**它代表 lane 做完了工作，然後在交回指標之前失敗。**
+
+```
+▲ WARNING  analyst-1:txn-2024-stats-and-anomalies 被產出但沒有任何後續派工讀到它，
+           也不是最終報告（lane:analyst-1 寫出，但沒有任何派工回報產出它）
+▲ WARNING  analyst-1:txn2024_stats_and_anomalies  同上
+```
+
+> 這跟 `ungranted_production` 是同一類事情 —— 在逐行的事件輸出裡看不出來。
+> 差別是這次連資料流圖也看不出來，因為圖本身就是從 handle 推導的。
+> **監視器信任了一個會失敗的來源。**
