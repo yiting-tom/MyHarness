@@ -3,7 +3,9 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .env
-jobs/
+# Anchored: an unanchored jobs/ also matched tests/jobs/, so that whole test
+# package was never committed.
+/jobs/
 spikes/__pycache__/
 *.egg-info/
 dist/
