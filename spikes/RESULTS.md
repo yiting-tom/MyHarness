@@ -934,3 +934,63 @@ model info 裡 `supports_function_calling` 是 `null`（未宣告），但實測
 這正是 design.md D7「capabilities are declared, not probed」預期由 live 測試
 補上的那種空白 —— 所以 `self-hosted` 的 capabilities 仍維持空集合，
 差額由 worker 的 schema-retry 補。
+
+---
+
+## Golden job 第八次 —— 拿掉金額閘之後
+
+驗證 `cost-ceiling-needs-a-currency`。同一個自架端點，同一份資料。
+
+### 主要斷言：`limit.reached` 不再出現
+
+```
+job.start  budget_usd=None  max_dispatches=12
+limit.reached events: NONE
+caveats=['budget_exceeded', 'no_cost_ceiling']
+```
+
+第七次在 +120.5s 被 `max_budget_usd=1.0014` 推進收尾模式。第八次沒有 ——
+`OrchestratorLoop` 看到 `self-hosted` 未宣告 `COST_REPORTING`，把上限設成 `None`，
+而這件事寫在交付上：
+
+> **[no_cost_ceiling]** 本次執行沒有金額上限：後端未宣告成本回報，累計金額不對應
+> 實際計費。把關的是派工次數（12）與時間上限。
+
+六個 ground-truth 數字仍然全中（765 / 2,940 / 四個 channel 平均）。
+
+### 對照第七次
+
+| | 第七次（有金額閘） | 第八次（無） |
+|---|---:|---:|
+| 時間 | 264s | 176s |
+| Dispatches | 5 | 2 |
+| Context 峰值 | 9,491 | 8,543 |
+| Peek tokens | 1,009 | 3,679 |
+| `limit.reached` | max_budget_usd | **無** |
+| 資料流異常 | 無 | 無 |
+| Ground truth | 全中 | 全中 |
+
+> ⚠️ **這不是受控對照。** 兩次的 plan 不同 —— 第七次開了三條 lane
+> （analyst-stats / analyst-anomaly / synth-report），第八次開兩條（analyst / synth）。
+> 快了 88 秒主要是因為少開一條 lane，不是因為拿掉了金額閘。
+>
+> 能確定的只有主要斷言：**閘不再誤觸**。派工數與時間的差異需要更多次執行才說得準。
+
+### 一個順帶的觀察：handle status 與產出品質是脫鉤的
+
+第八次兩次派工**都**是降級狀態，但兩份產出都是對的：
+
+```
+d1  analyst  budget_exceeded   in 55.9k (93%)  → finding 有 5 節，數字全對
+d2  synth    schema_violation  in  9.9k (25%)  → 報告有 4 節，數字全對
+```
+
+`budget_exceeded` 是「預算耗盡，任務未完成」，但 lane 早就把 finding 寫好了 ——
+handle 回不回得來，跟它有沒有做完事，是兩件事。`schema_violation` 同理：
+報告存在且正確，只是 handle 沒通過驗證。
+
+這正是 `write_finding`「完整分析寫進 finding，不要寫在回覆裡」的價值：
+**回覆壞掉不會讓工作消失。** 但也意味著 caveat 會比實際情況悲觀 ——
+報告上寫著「任務未完成」，而那份分析其實是完整的。目前不打算改：
+悲觀的 caveat 比樂觀的安全，而且 orchestrator 有 peek 可以自己判斷
+（第八次它 peek 了 3,679 tokens，是第七次的 3.6 倍，正是在做這件事）。

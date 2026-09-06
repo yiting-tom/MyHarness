@@ -33,7 +33,7 @@
 ## 5. 驗證
 
 - [x] 5.1 離線套件全過，既有的金額上限測試不需修改
-- [ ] 5.2 live：重跑 golden #7，斷言不再出現
+- [x] 5.2 live：重跑 golden #7，斷言不再出現
       `limit.reached limit=max_budget_usd`，且報告帶上新的 caveat
-- [ ] 5.3 對照 #7 的 5 次派工，記錄關掉金額閘之後派工數與時間的變化
-- [ ] 5.4 記錄到 `spikes/RESULTS.md`
+- [x] 5.3 對照 #7 的 5 次派工，記錄關掉金額閘之後派工數與時間的變化
+- [x] 5.4 記錄到 `spikes/RESULTS.md`
