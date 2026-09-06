@@ -212,3 +212,57 @@ async def test_the_warning_repeats_on_every_call(bench):
     toolbox, _ = bench
     toolbox.budget_used = 0.8
     assert all("[harness]" in _text(toolbox._result(f"r{i}")) for i in range(3))
+
+
+# --- a name is a label, not a path ----------------------------------------
+
+
+async def test_a_finding_name_that_is_an_artifact_id_is_refused(bench):
+    """Golden run #10.
+
+    A worker reads artifact ids all run and reaches for one here. The harness
+    nested it under the lane's own namespace and produced
+    lanes/critic/findings/<job>/note/lanes/analyst/findings/critique -- a path
+    nothing looks for, which the flow graph then reported as an orphan.
+    """
+    toolbox, ids = bench
+    result = text_of(await toolbox.handlers["write_finding"]({
+        "name": "j/note/lanes/analyst/findings/critique", "text": "## 結論\nok\n",
+    }))
+    assert result.startswith("ERROR")
+    assert "'/'" in result
+    # A refusal the model can act on beats one it can only be confused by.
+    assert "artifact id" in result
+    assert not toolbox.findings, "nothing may be written on a refusal"
+
+
+async def test_an_overlong_name_is_refused(bench):
+    toolbox, _ = bench
+    result = text_of(await toolbox.handlers["write_finding"]({
+        "name": "a" * 61, "text": "x",
+    }))
+    assert result.startswith("ERROR")
+    assert "60" in result
+
+
+async def test_a_chinese_name_is_refused_rather_than_raised(bench):
+    """The charters are in Chinese, so this is what a worker reaches for.
+
+    ArtifactId already rejects it, but by raising from inside put_note -- a
+    stack trace where the caller is a model that needs a sentence.
+    """
+    toolbox, _ = bench
+    result = text_of(await toolbox.handlers["write_finding"]({
+        "name": "交易異常分析", "text": "## 結論\nok\n",
+    }))
+    assert result.startswith("ERROR")
+    assert "中文請放在 finding 的內容裡" in result
+
+
+async def test_an_ordinary_name_still_works(bench):
+    toolbox, _ = bench
+    result = text_of(await toolbox.handlers["write_finding"]({
+        "name": "txn-stats", "text": "## 結論\nok\n",
+    }))
+    assert not result.startswith("ERROR")
+    assert toolbox.findings and toolbox.findings[-1].endswith("/findings/txn-stats")

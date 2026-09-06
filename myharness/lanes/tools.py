@@ -13,6 +13,7 @@ tool just wastes a turn.
 from __future__ import annotations
 
 import json
+import re
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from typing import Any
@@ -91,9 +92,38 @@ DEFAULT_TOOLS: tuple[str, ...] = (
 #: careless -- it had no way to know how much was left.
 BUDGET_WARN_AT = 0.75
 
+#: Longest a finding's name may be. Names appear in artifact ids, grant lists
+#: and the flow graph; a sentence there is unreadable everywhere at once.
+MAX_FINDING_NAME_CHARS = 60
+
 
 def _ok(text: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": text}]}
+
+
+#: What ArtifactId already permits in one path segment. Mirrored rather than
+#: imported so the refusal can name the rule; ArtifactId's own check raises,
+#: and an exception is not something a worker can act on (design.md D5).
+_FINDING_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def _bad_finding_name(name: str) -> str | None:
+    """Why this name cannot be used, or None if it can.
+
+    Every branch here would otherwise be an InvalidArtifactId raised from
+    inside put_note -- a stack trace where the caller is a model that needs a
+    sentence.
+    """
+    if "/" in name:
+        return "name 不可以含有 '/' —— 它是一個標籤，不是路徑或 artifact id"
+    if len(name) > MAX_FINDING_NAME_CHARS:
+        return f"name 最多 {MAX_FINDING_NAME_CHARS} 個字元，收到 {len(name)}"
+    if not _FINDING_NAME.match(name):
+        # The charters are written in Chinese, so a Chinese finding name is the
+        # likeliest thing a worker will reach for, and it used to raise.
+        return ("name 只能用 ASCII 英數字、'.'、'-'、'_'，且需以英數字開頭 —— "
+                "中文請放在 finding 的內容裡，不要放在名稱")
+    return None
 
 
 def _err(payload: dict[str, Any]) -> dict[str, Any]:
@@ -224,6 +254,19 @@ class WorkerToolbox:
             text = str(args.get("text", ""))
             if not text.strip():
                 return _err({"code": "empty_finding", "message": "text must not be empty"})
+            # A worker reads artifact ids all run and reaches for one here.
+            # Golden #10's critic passed a whole id and the harness nested it
+            # under its own namespace, producing
+            # lanes/critic/findings/<job>/note/lanes/analyst/findings/critique
+            # -- a path nothing looks for and the flow graph reports as an
+            # orphan. Refuse with something the model can act on rather than
+            # silently building it (design.md D5).
+            if problem := _bad_finding_name(name):
+                return _err({
+                    "code": "bad_name", "message": problem, "given": name[:120],
+                    "hint": "name 是一個短標籤，例如 'critique' 或 'txn-stats'，"
+                            "不是 artifact id。namespace 由 harness 加上。",
+                })
             meta = await self.store.put_note(
                 self.job_id, self.lane.finding_name(name), text,
                 produced_by=f"lane:{self.lane.id}",

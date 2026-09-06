@@ -1197,3 +1197,66 @@ lane 不知道，而兩者之間沒有任何通道。
 因為單一資料點不足以說該調到多少，而且 #9 證明了真正的問題不在大小 ——
 d1 就算有 120k 也可能一樣查到最後一刻才想寫。**先給它看得見的東西，
 再看數字要不要動。** 下一次 golden 執行是驗證。
+
+---
+
+## Golden job 第十次 —— 預算訊號，以及一個我驗不了的驗證
+
+驗 `budget_used` 訊號。結果是**行為變了，但直接證據拿不到**。
+
+### 主要觀察：`budget_exceeded` 這次帶著 finding
+
+| | #9 d1 | #10 d1 |
+|---|---|---|
+| status | `budget_exceeded` | `budget_exceeded` |
+| 用量 | 79,887（133%） | 64,832（108%） |
+| 查詢次數 | 24 | 23 |
+| **artifact** | **`None`** | **`findings/txn-2024-stats-and-anomaly`** |
+| `write_finding` | **從未呼叫** | 呼叫了（第 57 則訊息） |
+
+同樣的 lane、同樣的資料、同樣打爆預算 —— 但這次分析落檔了。
+
+### ⚠️ 但我沒辦法證明是訊號造成的
+
+我原本打算從 transcript 找 `[harness]` 字樣。找不到，而**那不代表警告沒發出** ——
+`_consume` 只在 `AssistantMessage` 時寫 transcript，而警告在**工具結果**裡，
+那是 user role。
+
+**transcript 少了一半的對話。** 這使得「模型看到了什麼」這件事在事後無法查證，
+而這正是要驗證任何 prompt 層面的改動時唯一需要的東西。這是一個獨立的
+觀測缺口，比這次的驗證本身重要。
+
+所以誠實的結論是：**行為朝預測的方向變了，n=1，機制未被直接證實。**
+離線測試證明訊號的組裝是對的（4 條），真正送到模型面前這一段沒有證據。
+
+### 兩個這次跑出來的 bug
+
+**1. `write_finding` 的 name 沒有驗證。** critic 把一整個 artifact id 當名稱傳進來：
+
+```
+golden10/note/lanes/critic/findings/golden10/note/lanes/analyst/findings/critique
+```
+
+harness 直接把它接在自己的 namespace 底下，做出一個沒有人會去找的路徑 ——
+然後資料流圖把它報成 orphan。worker 整場都在讀 artifact id，會伸手拿一個
+來當名稱是完全可預期的。
+
+已修：`/`、超過 60 字元、非 ASCII 一律拒絕，並回一句可據以行動的訊息。
+其中**非 ASCII 那條原本會拋例外** —— `ArtifactId` 早就擋了，但它 `raise`，
+而呼叫端是一個需要一句話的模型。charter 是中文寫的，模型用中文命名 finding
+是最可能發生的事。
+
+**2. 資料流異常這次真的抓到了。**
+
+```
+[WARNING] critic:critique 被產出但沒有任何後續派工讀到它（lane:critic 寫出，
+          但沒有任何派工回報產出它）
+[WARNING] synth:synth-state 同上
+```
+
+前一個 commit 修的 `orphan_output` 在一次全新的執行上生效了。
+
+### 其他
+
+612 秒（#9 是 460），context 峰值 12,195（最高）。`765` 與四個 channel 平均
+仍然全對。d3 synth 以 `schema_violation` 結束但 d4 重派成功。
