@@ -32,7 +32,7 @@ from claude_agent_sdk import (
 from myharness.artifacts.ids import ArtifactId
 from myharness.artifacts.store import ArtifactStore
 from myharness.artifacts.types import GrantSet
-from myharness.artifacts.tokens import ASCII_CHARS_PER_TOKEN
+from myharness.lanes.budget import estimate as estimate_budget_tokens, split_chars
 from myharness.backends.gate import BackendGate, ThrottleReport, gates
 from myharness.backends.profile import BackendCapability, BackendProfile
 from myharness.events.log import EventLog
@@ -93,11 +93,16 @@ class Accumulated:
     result: ResultMessage | None = None
     turns: int = 0
     usage: dict[str, int] = field(default_factory=dict)
-    #: Characters of conversation seen so far -- prompts, tool results, replies.
-    conversation_chars: int = 0
-    #: Characters the model itself produced, kept apart from the rest of the
-    #: conversation so input and output can be estimated separately.
-    output_chars: int = 0
+    #: Conversation so far, ascii and non-ascii counted apart. Two numbers
+    #: rather than one because they cost very differently, and because keeping
+    #: them lets the rates be re-derived from a recorded run instead of being
+    #: inferred from a transcript (golden run #15).
+    conversation_ascii: int = 0
+    conversation_cjk: int = 0
+    #: The same split for what the model itself produced, so input and output
+    #: can be estimated separately.
+    output_ascii: int = 0
+    output_cjk: int = 0
     #: API round trips so far. One goes out with the opening prompt and one
     #: more each time tool results come back -- which is NOT the same as the
     #: number of AssistantMessages. Golden #14's d1 streamed 27 of those for
@@ -138,8 +143,12 @@ class Accumulated:
         return _as_int(self.usage.get("output_tokens"))
 
     @property
+    def conversation_tokens(self) -> int:
+        return estimate_budget_tokens(self.conversation_ascii, self.conversation_cjk)
+
+    @property
     def estimated_tokens_out(self) -> int:
-        return math.ceil(self.output_chars / ASCII_CHARS_PER_TOKEN)
+        return estimate_budget_tokens(self.output_ascii, self.output_cjk)
 
     @property
     def token_breakdown(self) -> dict[str, Any]:
@@ -180,8 +189,12 @@ class Accumulated:
         """What the estimate was built from, whether or not it was used."""
         return {
             "requests": self.requests,
-            "conversation_tokens": math.ceil(
-                self.conversation_chars / ASCII_CHARS_PER_TOKEN),
+            "conversation_tokens": self.conversation_tokens,
+            # The raw split too: with it, one run is enough to solve for the
+            # rates. Without it, every calibration is transcript archaeology
+            # against excerpted tool results.
+            "conversation_ascii": self.conversation_ascii,
+            "conversation_cjk": self.conversation_cjk,
             "fixed_per_request": self.fixed_tokens_per_request,
             "tokens_in": self.estimated_tokens_in,
         }
@@ -252,11 +265,12 @@ def _tool_result_text(block: Any) -> str:
 
 
 #: What one SDK request costs before a single word of conversation: the CLI's
-#: own system prompt and the tool definitions. Measured by
-#: spikes/spike14_turn_overhead.py against the self-hosted backend -- 664 tokens
-#: for a two-tool lane, of which the charter (counted separately and exactly)
-#: was 305. Re-run the spike rather than adjusting this by feel.
-FRAMEWORK_TOKENS_PER_REQUEST: Final = 360
+#: own system prompt and the tool definitions. Derived by
+#: spikes/spike15_token_rates.py, whose baseline probe cost 672 tokens for one
+#: request carrying a charter this module prices at 240. Measured with a
+#: two-tool lane, so a lane declaring more tools pays somewhat more than this.
+#: Re-run the spike rather than adjusting it by feel.
+FRAMEWORK_TOKENS_PER_REQUEST: Final = 432
 
 
 def _estimated_request_cost(acc: Accumulated) -> int:
@@ -269,29 +283,34 @@ def _estimated_request_cost(acc: Accumulated) -> int:
     opposite errors, because the ratio of conversation to overhead differs from
     run to run.
     """
-    return (acc.fixed_tokens_per_request
-            + math.ceil(acc.conversation_chars / ASCII_CHARS_PER_TOKEN))
+    return acc.fixed_tokens_per_request + acc.conversation_tokens
 
 
-def _message_chars(message: Any) -> int:
-    """Roughly how much text this message adds to the conversation."""
-    total = 0
+def _message_chars(message: Any) -> tuple[int, int]:
+    """What this message adds to the conversation, ascii and non-ascii apart."""
+    ascii_chars = cjk_chars = 0
     for block in _content_blocks(message):
+        text = ""
         if isinstance(block, TextBlock):
-            total += len(block.text)
+            text = block.text
         elif isinstance(block, ToolUseBlock):
-            total += len(json.dumps(block.input, ensure_ascii=False))
+            text = json.dumps(block.input, ensure_ascii=False)
         elif isinstance(block, ToolResultBlock):
-            total += len(_tool_result_text(block))
-    return total
+            text = _tool_result_text(block)
+        a, c = split_chars(text)
+        ascii_chars += a
+        cjk_chars += c
+    return ascii_chars, cjk_chars
 
 
 def _consume(message: Any, acc: Accumulated) -> None:
     """Fold one streamed message into the accumulator."""
-    chars = _message_chars(message)
-    acc.conversation_chars += chars
+    ascii_chars, cjk_chars = _message_chars(message)
+    acc.conversation_ascii += ascii_chars
+    acc.conversation_cjk += cjk_chars
     if isinstance(message, AssistantMessage):
-        acc.output_chars += chars
+        acc.output_ascii += ascii_chars
+        acc.output_cjk += cjk_chars
         acc.turns += 1
         blocks = [_block_to_dict(b) for b in message.content]
         acc.transcript.append({"role": "assistant", "content": blocks})
@@ -411,12 +430,15 @@ async def _run_once(
     # Seeded rather than empty: the opening request already carries the charter,
     # the tool definitions and the task, and none of that ever appears in the
     # stream. A run that is cut off after two requests was never free.
+    charter_ascii, charter_cjk = split_chars(charter)
+    prompt_ascii, prompt_cjk = split_chars(prompt)
     acc = Accumulated(
         fixed_tokens_per_request=(
             FRAMEWORK_TOKENS_PER_REQUEST
-            + math.ceil(len(charter) / ASCII_CHARS_PER_TOKEN)
+            + estimate_budget_tokens(charter_ascii, charter_cjk)
         ),
-        conversation_chars=len(prompt),
+        conversation_ascii=prompt_ascii,
+        conversation_cjk=prompt_cjk,
     )
     acc.estimated_tokens_in = _estimated_request_cost(acc)
     options = _options(request, profile, toolbox, charter=charter, enforce_schema=enforce_schema)

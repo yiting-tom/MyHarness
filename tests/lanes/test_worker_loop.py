@@ -504,7 +504,7 @@ def test_the_opening_request_is_not_free():
     from myharness.lanes.worker import FRAMEWORK_TOKENS_PER_REQUEST, Accumulated
 
     acc = Accumulated(fixed_tokens_per_request=FRAMEWORK_TOKENS_PER_REQUEST + 300,
-                      conversation_chars=800)
+                      conversation_ascii=800)
     from myharness.lanes.worker import _estimated_request_cost
 
     assert _estimated_request_cost(acc) > FRAMEWORK_TOKENS_PER_REQUEST
@@ -514,8 +514,8 @@ def test_the_estimate_includes_what_every_request_re_sends():
     """Conversation alone estimated golden #14's d1 at 45k against 62k reported."""
     from myharness.lanes.worker import Accumulated
 
-    bare = Accumulated(conversation_chars=40_000)
-    with_overhead = Accumulated(conversation_chars=40_000, fixed_tokens_per_request=664)
+    bare = Accumulated(conversation_ascii=40_000)
+    with_overhead = Accumulated(conversation_ascii=40_000, fixed_tokens_per_request=664)
     for acc in (bare, with_overhead):
         for _ in range(10):
             _exchange(acc, reply="", tool_result="")
@@ -543,7 +543,7 @@ def test_a_tool_result_counts_toward_consumption():
     acc = Accumulated()
     _consume(UserMessage(content=[ToolResultBlock(
         tool_use_id="t1", content="row\n" * 5_000)]), acc)
-    assert acc.conversation_chars > 15_000
+    assert acc.conversation_ascii > 15_000
 
 
 # Golden run #13: the ceiling stopped d1 mid-stream for the first time, and the
@@ -592,7 +592,7 @@ def test_a_reported_figure_is_never_replaced_by_the_estimate():
     """
     from myharness.lanes.worker import Accumulated
 
-    acc = Accumulated(conversation_chars=80_000, estimated_tokens_in=20_000)
+    acc = Accumulated(conversation_ascii=80_000, estimated_tokens_in=20_000)
     acc.usage = {"input_tokens": 7, "output_tokens": 0}
     tokens = acc.token_breakdown
     assert "estimated" not in tokens
@@ -612,7 +612,42 @@ async def test_the_event_carries_the_estimate_alongside_the_reported_figure(benc
     ]))
     (end,) = await bench.events_for(DISPATCH_END)
     estimate = end.get("estimate")
-    assert set(estimate) == {"requests", "conversation_tokens",
-                             "fixed_per_request", "tokens_in"}
+    assert set(estimate) == {"requests", "conversation_tokens", "conversation_ascii",
+                             "conversation_cjk", "fixed_per_request", "tokens_in"}
     assert end.get("tokens")["in"] == 4_000, "reported, not estimated"
     assert estimate["fixed_per_request"] > 0, "and the estimate is recorded anyway"
+
+
+def test_chinese_and_ascii_are_not_charged_at_the_same_rate():
+    """Golden #15: the more Chinese a lane read, the further the estimate fell.
+
+    analyst reading ASCII query output was 31% low; critic and synthesizer
+    reading Chinese findings were 54% and 51% low.
+    """
+    from myharness.lanes.budget import estimate
+
+    assert estimate(1_000, 0) != estimate(0, 1_000)
+
+
+def test_the_budget_estimator_is_not_the_pricelist_estimator():
+    """Deliberately separate: the same error means opposite things.
+
+    Overestimating a section makes a reader think it costs more than it does.
+    Overestimating a run ends work that was going fine. artifacts/tokens.py
+    leans high on purpose; this one must not inherit that.
+    """
+    from myharness.artifacts import tokens as pricelist
+    from myharness.lanes import budget
+
+    assert budget.CJK_TOKENS_PER_CHAR < pricelist.NON_ASCII_TOKENS_PER_CHAR
+
+
+def test_the_split_is_recorded_so_the_rates_stay_derivable():
+    """Without it, calibration means replaying transcripts -- and transcripts
+    excerpt tool results at 2,000 characters, which is the dominant term."""
+    from myharness.lanes.worker import Accumulated
+
+    acc = Accumulated(conversation_ascii=4_000, conversation_cjk=500)
+    breakdown = acc.estimate_breakdown
+    assert breakdown["conversation_ascii"] == 4_000
+    assert breakdown["conversation_cjk"] == 500
