@@ -1,8 +1,8 @@
 ## 1. 可行性驗證（決策閘之前，不寫 production code）
 
-- [ ] 1.1 `spikes/spike13_a2a_artifact_semantics.py`：查明 A2A 的 artifact 能否
+- [x] 1.1 `spikes/spike13_a2a_artifact_semantics.py`：查明 A2A 的 artifact 能否
       自然標示「這是章節價目表，不是章節內容」。**這是 D7 的閘**
-- [ ] 1.2 同一支 spike：查明 agent card 能否宣告兩種輸出模式，讓呼叫方顯式選擇
+- [x] 1.2 同一支 spike：查明 agent card 能否宣告兩種輸出模式，讓呼叫方顯式選擇
       （規格：能力宣告含兩種模式）
 - [ ] 1.3 `spikes/spike14_a2a_stream_cursor.py`：把 `revision` 當串流序號跑一次，
       刻意中斷再重連，確認中斷期間的改變仍可被得知

@@ -687,3 +687,79 @@ D7 說「proxy 每份資料呼叫一次，所以用最便宜的模型」。模�
 
 已把 `model` 加進 `proxy.route` 事件：第一次看到數字不對時，
 「到底跑的是哪個模型」在事件流裡答不出來。
+
+---
+
+## Spike #13 — A2A 能不能說「這是目錄，不是內容」
+
+`expose-over-a2a` 的 D7 把這題設成閘：A2A 若沒有自然的方式標示
+「這份 artifact 是章節價目表，不是章節內容」，選項 B（雙軌）就退化成
+在自由欄位裡塞私有約定，那還不如選 A（單軌價目表）誠實。
+
+**對照的是 canonical `a2a.proto`**（812 行，JSON schema 由它產生），
+不是憑印象。spike 可重跑，A2A 把這個設計依賴的欄位搬走時它會失敗。
+
+```
+Run: python spikes/spike13_a2a_artifact_semantics.py
+```
+
+### 結論：閘通過，但通過的方式跟原本想的不一樣
+
+| 檢查 | 結果 |
+|---|---|
+| **GATE** artifact 能被標示為價目表 | **PASS** |
+| ⋯⋯ 而且這個標示能事先宣告 | **PASS** |
+| `metadata` 單獨用只是私有約定 | PASS（是一個位置，不是一個語意） |
+| `output_modes` 是語意選擇器 | **FAIL** |
+| 兩個 skill 承載模式差異 | PASS |
+| `TaskState` 涵蓋「不在此程序執行中」 | **FAIL** |
+
+### 通過的理由是 extension，不是 metadata
+
+`Artifact.metadata` 是 `google.protobuf.Struct` —— 塞得進去，但**協定沒有賦予它
+任何意義**。只用它，B 就是私有約定，D7 說那種情況要退回 A。
+
+真正的答案是另外兩個欄位：
+
+```proto
+message Artifact {
+  // The URIs of extensions that are present or contributed to this Artifact.
+  repeated string extensions = 6;
+}
+
+message AgentExtension {
+  string uri = 1;
+  // If true, the client must understand and comply with the extension's requirements.
+  bool required = 3;
+}
+```
+
+`AgentExtension.required` 是關鍵那一行。**不懂價目表約定的客戶端會被告知它不懂**，
+而不是默默地把一份目錄當成報告讀。這正是 D1 要的那個「把它變成看得見的動作」。
+
+### 兩個 FAIL 是發現，不是錯誤
+
+**`output_modes` 不能拿來表達模式。** proto 寫得很白：
+`default_output_modes` 與 `AgentSkill.output_modes` 都是 **media types**。
+把「價目表 / 全文」宣告成 output mode 是誤用欄位。
+
+改用 `AgentSkill`：兩個 skill，id / name / description 各自說清楚。
+這其實更貼 —— 它們正好對應已經存在的 `analysis_result` 與 `analysis_drill`。
+
+**`TaskState` 沒有「存在但不在此程序執行中」。** 九個值裡沒有一個是這個意思：
+`completed` / `failed` / `canceled` / `rejected` 是終態，
+`working` 是還在跑，`unspecified` 是不知道。
+
+D5 那個三分（查無此分析／存在但不在此程序執行中／執行中）在協定上**沒有原生位置**。
+`AnalysisService._poll_finished_elsewhere` 的註解說「這兩件事對客戶端的意義不同」，
+而 A2A 逼你把它們壓在一起。這件事丟給 spike #15 決定用什麼形式表達才不會被
+誤讀成失敗。
+
+### 對 change 的影響
+
+- D7 的閘通過 → 走 B，第 4 節之後可以做
+- **D1 要改寫**：模式的宣告載體是 `AgentSkill` 加一個 declared extension，
+  不是 `outputModes`。規格裡「能力宣告含兩種模式」的 scenario 不用改（它沒綁欄位），
+  但 design 的說法要修正
+- **D5 的落差比預期大**：不只是「進行中的 task 接不回來」，而是連
+  「這個 job 存在但不在這裡跑」都沒有原生的表達方式

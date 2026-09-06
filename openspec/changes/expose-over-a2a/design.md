@@ -55,6 +55,25 @@ context 閘門的最外面那一道。A2A 的 artifact 模型預設相反：task
 B 也讓評估本身有結論可言：可以真的量出走價目表模式多花幾次 round-trip，
 再判斷值不值得。A 與 C 都是先射箭再畫靶。
 
+> **spike #13 的修正：宣告的載體不是 `outputModes`。**
+> 原本以為模式宣告會落在 agent card 的輸出模式上。查 canonical `a2a.proto`
+> 才發現 `default_output_modes` 與 `AgentSkill.output_modes` 都是 **media types**
+> —— 把「價目表／全文」宣告成 output mode 是誤用欄位，不是使用欄位。
+>
+> 正確的載體有兩個，而且比原本的想法好：
+>
+> - **`AgentSkill`**：兩個 skill，各自的 id / name / description 說清楚差別。
+>   它們正好對應已經存在的 `analysis_result` 與 `analysis_drill`。
+> - **declared extension**：`AgentCapabilities.extensions` 宣告一個 extension URI，
+>   `Artifact.extensions` 在每份價目表上標記它。關鍵是
+>   `AgentExtension.required` —— proto 的原話是「If true, the client must
+>   understand and comply with the extension's requirements」。
+>   **不懂這個約定的客戶端會被告知它不懂**，而不是默默把目錄當報告讀。
+>
+> 這正是 D1 要的「把它變成看得見的動作」，而且是協定認可的機制，
+> 不是塞在 `metadata` 裡的私有約定 —— `Artifact.metadata` 是一個位置，
+> 不是一個語意。
+
 ### D2. 全文模式仍逐節給，不整份倒出
 
 即使呼叫方顯式要求全文，也**沿用 `drill_section` 逐節取**，而不是新開一條
@@ -120,6 +139,15 @@ A2A 需要一個 HTTP server，但**只用 MCP 的人不該被迫裝它**。
 
 不硬塞自訂約定，理由與 `allowed_paths` 那次一樣：一個看起來能用、實際上
 語意不對的機制，半年後會被當成協定支援的東西來用。
+
+> **閘已通過（spike #13）。** A2A 有協定認可的方式標示「這是目錄不是內容」——
+> `Artifact.extensions` 加上 agent card 宣告的 `AgentExtension(required=true)`。
+> 走 B，第 4 節之後成立。
+>
+> 但同一支 spike 也發現 **`TaskState` 的九個值裡沒有一個表示
+> 「存在但不在此程序執行中」**，所以 D5 的落差比原本寫的更大：
+> 不只是進行中的 task 接不回來，而是連這個狀態本身在協定上都沒有原生位置。
+> 交給 spike #15。
 
 ## Risks / Trade-offs
 
