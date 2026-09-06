@@ -5,6 +5,51 @@ a controllable span so overlap is observable, and hands back whatever handle
 the test wants. Every guard in the runner -- ceilings, no-progress, wrap-up --
 is about *when* work happens rather than what it produces, so the work itself
 is the one part that can be faked outright.
+
+RECONSTRUCTED, NOT ORIGINAL
+===========================
+The original file was destroyed on 2026-09-06 by a careless overwrite, and
+being caught by an unanchored `jobs/` in .gitignore it had never been
+committed, so there was nothing to restore. What follows was rebuilt from what
+test_job_runner.py requires of it. All 41 tests pass against it -- but the
+tests pin the *interface* this module exposes, not its *meaning*, and the four
+places below are where a wrong guess would leave a test passing while checking
+something weaker than its name claims. Read them before trusting this file.
+
+1. DEFAULT_ARTIFACT is a constant, and that has a side effect.
+   JobState.record_progress dedupes on artifact id, so with one constant
+   default every dispatch after the first counts as *no progress*. Three
+   default dispatches leave no_progress_streak at 2 against a limit of 3 --
+   passing, but one step from the threshold. Whether the original varied the
+   artifact per dispatch is not recoverable. The hint pointing at "no, it was
+   constant" is that test_a_productive_job_never_trips_the_futility_guard sets
+   default_artifact explicitly each iteration, which would be redundant
+   otherwise; the hint pointing the other way is that nothing else does.
+
+2. overlapped() decides for itself what it means.
+   test_background_tasks_actually_overlap asserts only `overlapped()`, so this
+   function could return True unconditionally and the test would still pass.
+   It is written here as a real pairwise interval intersection. The original
+   may have counted peak concurrency instead, which would also exercise
+   max_lane_concurrency -- this version does not.
+
+3. delay defaults to 0.01, which sets how strict one test is.
+   test_dispatch_returns_before_the_work_finishes asserts three dispatches
+   return in under `delay`. At 10ms that is strict rather than lax, so it will
+   not hide a regression -- but it may flake on a loaded machine, and a larger
+   original default would have been deliberate headroom now removed.
+
+4. Lane registration happens here, in the fixture.
+   The runner refuses to dispatch to a lane nobody created, so something had
+   to register a/b/c. Doing it directly means these tests no longer touch the
+   plan_update path that tests/orchestrator/conftest.py uses to create lanes.
+
+Everything else is pinned by the tests: JOB, failing()'s signature, FakeLane's
+calls/delay/default_artifact/handles, Bench.stream()/kinds(), and the fixture
+taking indirect params as JobSpec overrides. Getting those wrong fails loudly.
+
+runner_factory was added afterwards for test_cost_ceiling.py and is not part
+of the reconstruction.
 """
 
 from __future__ import annotations
@@ -25,6 +70,8 @@ from myharness.lanes.types import LaneInstance, LaneType
 
 JOB = "j7"
 
+#: See point 1 in the module docstring before changing this: it is constant,
+#: and record_progress dedupes on artifact id.
 DEFAULT_ARTIFACT = f"{JOB}/note/lanes/a/findings/1"
 
 
@@ -74,7 +121,11 @@ class FakeLane:
         )
 
     def overlapped(self) -> bool:
-        """True if any two runs were in flight at the same moment."""
+        """True if any two runs were in flight at the same moment.
+
+        Reconstructed -- see point 2 in the module docstring. The only test
+        using this asserts nothing about *how* overlap is decided.
+        """
         for i, (start_a, end_a) in enumerate(self.spans):
             for start_b, end_b in self.spans[i + 1:]:
                 if start_a < end_b and start_b < end_a:
