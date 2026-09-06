@@ -18,6 +18,8 @@ from typing import Any
 
 from claude_agent_sdk import (
     AssistantMessage,
+    ToolResultBlock,
+    UserMessage,
     ClaudeAgentOptions,
     ResultMessage,
     SystemMessage,
@@ -135,6 +137,25 @@ class Accumulated:
         return any(s in TRANSIENT_STATUSES for s in self.retry_statuses)
 
 
+#: Per tool result kept in the transcript. The transcript is a blob and never
+#: reaches anyone's context, but a run making two dozen queries over a 138KB
+#: table would otherwise write megabytes of duplicated rows.
+MAX_TOOL_RESULT_CHARS: Final = 2_000
+
+
+def _excerpt(text: str, limit: int = MAX_TOOL_RESULT_CHARS) -> str:
+    """Head and tail, never head alone.
+
+    The harness appends its own annotations -- the budget warning, refusal
+    hints -- to the *end* of a tool result, so trimming from the back removes
+    precisely what someone reading the transcript is looking for.
+    """
+    if len(text) <= limit:
+        return text
+    head, tail = limit * 2 // 3, limit // 3
+    return f"{text[:head]}\n…[略過 {len(text) - head - tail} 字元]…\n{text[-tail:]}"
+
+
 def _block_to_dict(block: Any) -> dict[str, Any]:
     if isinstance(block, TextBlock):
         return {"type": "text", "text": block.text}
@@ -142,7 +163,26 @@ def _block_to_dict(block: Any) -> dict[str, Any]:
         return {"type": "thinking"}
     if isinstance(block, ToolUseBlock):
         return {"type": "tool_use", "name": block.name, "input": block.input}
+    if isinstance(block, ToolResultBlock):
+        return {
+            "type": "tool_result", "tool_use_id": block.tool_use_id,
+            "is_error": bool(getattr(block, "is_error", False)),
+            "content": _excerpt(_tool_result_text(block)),
+        }
     return {"type": type(block).__name__}
+
+
+def _tool_result_text(block: Any) -> str:
+    """A tool result's text, whatever shape the SDK hands it back in."""
+    content = getattr(block, "content", None)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            part.get("text", "") if isinstance(part, dict) else str(part)
+            for part in content
+        )
+    return "" if content is None else str(content)
 
 
 def _consume(message: Any, acc: Accumulated) -> None:
@@ -154,6 +194,16 @@ def _consume(message: Any, acc: Accumulated) -> None:
         acc.texts += [b.text for b in message.content if isinstance(b, TextBlock)]
         if getattr(message, "usage", None):
             acc.usage = dict(message.usage)
+    elif isinstance(message, UserMessage):
+        # Tool results arrive here. Recording only the role -- which is what
+        # the catch-all below used to do -- left the transcript with half the
+        # conversation: every question the model asked was present and every
+        # answer it got was gone, so "what did the model actually see" had no
+        # answer after the fact (golden run #10).
+        acc.transcript.append({
+            "role": "user",
+            "content": [_block_to_dict(b) for b in _content_blocks(message)],
+        })
     elif isinstance(message, SystemMessage):
         if message.subtype == "thinking_tokens":
             # Hundreds of these arrive per run; a count is the whole signal.
@@ -179,6 +229,14 @@ def _consume(message: Any, acc: Accumulated) -> None:
         })
     else:
         acc.transcript.append({"role": type(message).__name__})
+
+
+def _content_blocks(message: Any) -> list[Any]:
+    """A message's blocks, tolerating a plain string body."""
+    content = getattr(message, "content", None)
+    if isinstance(content, str):
+        return [TextBlock(text=content)]
+    return list(content or ())
 
 
 def build_prompt(request: WorkerRequest, state: str | None) -> str:

@@ -361,3 +361,66 @@ async def test_token_breakdown_keeps_cache_reads_visible(bench):
     assert tokens == {"in": 2000, "out": 80, "fresh_in": 200,
                       "cache_read": 1800, "cache_write": 0}
     assert cache_hit_ratio(await bench.events.read(JOB)) == 0.9
+
+
+# --- the transcript had half the conversation -----------------------------
+#
+# Golden run #10 was meant to verify a warning the harness appends to tool
+# results. It could not be: _consume recorded only AssistantMessage, so every
+# question the model asked was in the transcript and every answer it got was
+# not. "What did the model actually see" had no answer after the fact.
+
+
+def test_a_tool_result_reaches_the_transcript():
+    from claude_agent_sdk import ToolResultBlock, UserMessage
+
+    from myharness.lanes.worker import Accumulated, _consume
+
+    acc = Accumulated()
+    _consume(
+        UserMessage(content=[ToolResultBlock(
+            tool_use_id="t1", content="rows: 12\n\n[harness] token 預算已用 82%",
+        )]),
+        acc,
+    )
+
+    (entry,) = acc.transcript
+    assert entry["role"] == "user"
+    (block,) = entry["content"]
+    assert block["type"] == "tool_result"
+    assert block["tool_use_id"] == "t1"
+    assert "[harness]" in block["content"], "the harness's own annotations are the point"
+
+
+def test_a_long_tool_result_keeps_its_tail():
+    """The harness appends its annotations to the end of a result.
+
+    Trimming from the back would remove precisely what a reader is looking for,
+    so the excerpt keeps both ends.
+    """
+    from claude_agent_sdk import ToolResultBlock, UserMessage
+
+    from myharness.lanes.worker import MAX_TOOL_RESULT_CHARS, Accumulated, _consume
+
+    body = "x" * (MAX_TOOL_RESULT_CHARS * 3)
+    _consume(
+        UserMessage(content=[ToolResultBlock(
+            tool_use_id="t1", content=body + "\n[harness] 預算已用 90%",
+        )]),
+        acc := Accumulated(),
+    )
+
+    kept = acc.transcript[0]["content"][0]["content"]
+    assert "[harness] 預算已用 90%" in kept
+    assert kept.startswith("xxx")
+    assert "略過" in kept
+    assert len(kept) < len(body)
+
+
+def test_a_string_bodied_user_message_does_not_crash():
+    from claude_agent_sdk import UserMessage
+
+    from myharness.lanes.worker import Accumulated, _consume
+
+    _consume(UserMessage(content="plain text"), acc := Accumulated())
+    assert acc.transcript[0]["content"][0]["text"] == "plain text"
