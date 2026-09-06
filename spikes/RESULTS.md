@@ -1483,3 +1483,104 @@ job 層的成本累計、context 佔用，全部漏掉這一筆。
 - `anomalies=none`，ground truth 全對。
 - `caveats` 多了 `budget_exceeded` —— 這是對的，job 確實有一條 lane
   被預算切掉，讀報告的人應該知道。
+
+## Golden job 第十四次 —— 估計值漏掉了每輪的固定開銷
+
+`jobs-scratch/golden14`。跑的是零回報修好之後的碼。
+
+```
+anomalies=orphan_output ×4
+phase=complete  dispatches=5  failures=3
+cost=$0.9771  caveats=['budget_exceeded', 'no_cost_ceiling']
+ground truth: 2,940 rows, 765 accounts, cheapest channel app
+報告缺少：無
+```
+
+### d1：估計值低估了 46%
+
+```
+transcript 結尾   {"subtype": "error_max_turns", "turns": 13}
+估計值收在        44,937   (75%)
+後端回報          65,511   (109%)
+harness 記的狀態  budget_exceeded
+```
+
+上限**沒有**停下它 —— 停下它的是 SDK 的 max_turns。估計值到最後只爬到
+75%，而真實用量是 109%。差距 20,574 tokens，攤在 12 輪上是每輪約 1,700。
+
+那正是估計值完全沒算的東西：**charter（system prompt）與工具 schema
+每一輪都會重送**，而 `_message_chars` 只數對話裡的文字。
+
+`44,937 + 12 × 1,700 ≈ 65,300`，對得上回報的 65,511。所以這不是「估計本來
+就粗糙」，是漏了一個算得出來的常數項。
+
+golden #13 的 d1 估計值偏高（重放 101k vs 回報 72k），#14 偏低。
+**同一個估計式在兩次執行裡分別高估和低估** —— 因為它算的是對話長度，
+而對話長度與固定開銷的比例每次都不一樣。
+
+### 而且真正的失敗原因又被蓋掉了
+
+d1 是 max_turns 用盡，記錄成 `budget_exceeded`。跟 golden #12 的 d1 一樣，
+原因也一樣：`_run_once` 回傳的例外檢查排在 `acc.max_turns_hit` 前面，而在
+「上限沒有中途停止、只是在最後一則訊息成立」的情況下，那個例外必然
+壓過真正的結束原因。
+
+零回報的修復本身是好的（`in=62,113` 有回報，沒有掛 `estimated` 旗標），
+但它讓這件事更明顯：**一個回報了 109% 的執行，跟一個被中途切斷的執行，
+現在長得一樣。**
+
+### `schema_violation`：8 次執行裡 5 次，而且是同一個原因
+
+翻 golden8 / 9 / 10 / 12 的 transcript，模型最後回的是這個：
+
+```json
+{"type": "object", "properties": {"artifact": "...", "headline": "...", ...}}
+```
+
+**它把 JSON Schema 本身當成答案回傳了。** 四次一模一樣。
+
+原因在 `contract.reprompt_text`：
+
+```python
+"Reply with ONLY a JSON object matching this schema, no prose, no code fence:\n"
+f"{json.dumps(HANDLE_SCHEMA, ensure_ascii=False)}"
+```
+
+給它一份 schema，叫它回一個「符合這份 schema 的物件」，它回了那份 schema。
+
+而第一次嘗試為什麼會失敗，是另一件事：`build_prompt` 只說
+「最後回覆一個 handle」，**從頭到尾沒有說 handle 長什麼樣**。
+enforced 路徑靠 SDK 的 `output_format` 帶 schema；degraded 路徑什麼都沒有。
+偏偏 degraded 路徑正是那個必須用講的告訴模型的路徑。
+
+golden13 的 d3（critic）是另一種：它寫了一整篇散文，從頭到尾沒有產出
+任何 handle。
+
+### 第一次派工幾乎必爆：9 次裡 8 次
+
+```
+golden8   d1 budget_exceeded      golden12  d1 + d2 budget_exceeded
+golden9   d1 budget_exceeded      golden13  d1 budget_exceeded
+golden10  d1 budget_exceeded      golden14  d1 budget_exceeded
+golden11  d1 budget_exceeded
+```
+
+只有 golden7 例外（爆的是 d2/d3）。orchestrator 每次都救得回來，
+ground truth 從沒錯過 —— 但每個 job 都在固定付一次浪費的 analyst 執行。
+以前被「job 完成、數字正確」蓋過去，攤在一起才看得出是常態。
+
+### 四個 orphan finding，這次多了一個成因
+
+```
+analyst-1:distinct_account_count
+analyst-1:txn-2024-analysis
+analyst-1:txn-2024-overview
+analyst-1:txn-2024_distinct_accounts
+```
+
+除了 #9 / #11 那個「同一件事換名字重寫」之外，這次 d2 與 d3 是**同時**
+派給 analyst-1 的兩次平行派工。同一條 lane 的兩個並行實例各自命名，
+互相看不見對方寫了什麼。
+
+`d2` 另外拿到 `state_rejected`：分析寫進去了，lane state 沒更新 ——
+兩個並行實例搶同一份 state。
