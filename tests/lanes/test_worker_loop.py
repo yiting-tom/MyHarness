@@ -651,3 +651,49 @@ def test_the_split_is_recorded_so_the_rates_stay_derivable():
     breakdown = acc.estimate_breakdown
     assert breakdown["conversation_ascii"] == 4_000
     assert breakdown["conversation_cjk"] == 500
+
+
+# --- golden #16: the ceiling and the estimate were measuring different things -
+#
+# d4 finished at 48,705 in+out against a 40,000 budget having never crossed the
+# 75% warning. budget_tokens took max(reported_in + reported_out, estimated_in):
+# the reported side counted output and the estimated side did not, so the signal
+# the lane reads all run long was blind to 37% of what it would be judged on.
+
+
+def test_the_estimate_counts_output_because_the_reported_figure_does():
+    from myharness.lanes.worker import Accumulated
+
+    acc = Accumulated()
+    for _ in range(3):
+        _exchange(acc, reply="y" * 4_000, tool_result="r" * 500)
+
+    assert acc.estimated_tokens_out > 0, "the model plainly produced something"
+    assert acc.budget_tokens == acc.estimated_tokens_in + acc.estimated_tokens_out
+
+
+def test_the_two_sides_of_the_ceiling_cover_the_same_ground():
+    """Whichever side wins, it answers the same question: what has this cost?"""
+    from myharness.lanes.worker import Accumulated
+
+    acc = Accumulated(estimated_tokens_in=1_000, output_ascii=2_180)
+    acc.usage = {"input_tokens": 50_000, "output_tokens": 2_000}
+    assert acc.budget_tokens == 52_000, "a reported figure still wins outright"
+
+    starved = Accumulated(estimated_tokens_in=50_000, output_ascii=2_180)
+    assert starved.budget_tokens > 50_000, "and the estimate is not input-only"
+
+
+async def test_the_ctx_event_can_explain_a_run_the_ceiling_stopped(bench):
+    """pct divided input by a budget that covers input and output.
+
+    Golden #16 recorded critic-1 at 76.8% in the same run that ended it for
+    going over. Nothing in the event stream accounted for the difference.
+    """
+    await run(bench, ScriptedTransport([result(structured=GOOD_HANDLE,
+                                               usage={"input_tokens": 4_000,
+                                                      "output_tokens": 1_500})]))
+    (ctx,) = await bench.events_for(CTX)
+    assert ctx.get("used") == 4_000, "context occupancy is still input"
+    assert ctx.get("spent") == 5_500, "and what the ceiling judges is recorded too"
+    assert ctx.get("pct") == round(5_500 / 5_000, 3), "pct belongs to the budget"

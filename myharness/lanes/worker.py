@@ -207,9 +207,16 @@ class Accumulated:
         because the reported figure is authoritative but arrives too late to
         act on: ``usage`` is populated by the final message, so during the run
         it reads zero no matter how much has been spent.
+
+        Both sides must answer the same question. The reported side has always
+        summed input and output; the estimated side counted input alone, so the
+        signal a lane reads all run long was blind to a term it would be judged
+        on. Golden #16's d4 finished at 48,705 against a 40,000 budget with its
+        estimate showing 56%, having never crossed the 75% warning -- and 37% of
+        what it spent was output.
         """
         reported = self.tokens_in + self.tokens_out
-        return max(reported, self.estimated_tokens_in)
+        return max(reported, self.estimated_tokens_in + self.estimated_tokens_out)
 
     @property
     def saw_transient(self) -> bool:
@@ -576,9 +583,14 @@ async def _run_with_toolbox(
     # The same fallback as the breakdown: an interrupted run reports no usage,
     # and a lane shown at 0% is exactly the lane that ran out.
     used = int(acc.token_breakdown["in"])
+    # Two quantities, and this event used to divide one by the other's
+    # denominator: golden #16 recorded critic-1 at 76.8% in the very run that
+    # ended it for going over. `used` is context occupancy, which is input and
+    # is what context_peak() reads; `spent` is what the ceiling actually judges.
+    spent = acc.budget_tokens
     await event_log.append(
-        request.job_id, CTX, who=f"lane:{lane.id}", used=used,
-        pct=round(used / lane_type.token_budget, 3) if lane_type.token_budget else 0,
+        request.job_id, CTX, who=f"lane:{lane.id}", used=used, spent=spent,
+        pct=round(spent / lane_type.token_budget, 3) if lane_type.token_budget else 0,
     )
     return handle
 
