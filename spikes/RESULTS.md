@@ -1657,3 +1657,108 @@ d1 的 `end=success`：它跑完了，寫了 finding，然後被貼上
 
 **估計值的準度現在是唯一的關鍵。** 警告、上限、成本歸屬三件事的品質，
 完全等於它的品質。
+
+---
+
+## Golden job 第十六次 —— 係數收斂了，然後上限和估計值被發現在量不同的東西
+
+`jobs-scratch/golden16`，自架 `aird-35b`，約 18 分鐘。#15 那組實測係數上線後的
+第一次執行。
+
+```
+id   lane      status            reported  estimate    err  reqs   convo  fixed
+d1   analyst1  budget_exceeded          —    66,970      —    15   7,476    892
+d2   critic1   ok                  12,118     8,521    -30%    3   3,184  1,007
+d3   analyst1  budget_exceeded          —    63,902      —    15   6,469    892
+d4   critic1   budget_exceeded     30,718    22,581    -26%    5   6,962  1,007
+d5   synth1    budget_exceeded     35,158    26,053    -26%    6   6,901    673
+```
+
+```
+phase=complete  dispatches=5  failures=4  cost=$1.1793
+context_peak=18,333（9.2%）  ground truth: 765 戶與四個 channel 均在報告中
+anomalies: WARNING critic-1:critique 被 d2 與 d4 兩次派工寫入，最終版本來自 d4
+```
+
+### 係數修對了，而且修掉的是「散」
+
+#15 的三個誤差是 −31% / −54% / −51%，中文越多偏得越多。#16 是
+−30% / −26% / −26%。ASCII 與 CJK 分開計數確實生效了：critic 讀中文
+finding、analyst 讀 ASCII 查詢結果，兩者現在偏得一樣多。
+
+剩下的是**一個一致的倍率**，不是三個 lane 各自的係數問題：
+
+```
+reported / estimate  =  1.42  /  1.36  /  1.35
+```
+
+三個係數的問題變成一個常數的問題。這是可解的形狀，前一個不是。
+
+### `budget_exceeded` 現在有兩種意思，而它們共用一個標籤
+
+d1 / d3 是**真的被停下**的：`usd=0.0`、`tokens.estimated=true`，估計值在第 15 個
+請求越過 60,000。上限第一次以它被設計的方式運作 —— 不是事後貼標籤。
+
+d4 / d5 完全不是。它們跑完了，拿到真實 usage，然後才被判定超標。
+
+### 而 d4 / d5 之所以超標，是因為上限和估計值量的不是同一個量
+
+`Accumulated.budget_tokens` 取 `max(reported_in + reported_out, estimated_in)`。
+兩邊不對稱：**回報值含輸出，估計值不含。**
+
+d4 的實際 `in + out` 是 48,705，預算 40,000 —— 確實超標。但整場執行中，
+lane 看到的 `budget_used` 讀的是 `estimated_in`：
+
+```
+d4   estimated_in 22,581 / 40,000 = 56%    實際 in+out = 122%
+d5   estimated_in 26,053 / 40,000 = 65%    實際 in+out = 106%
+```
+
+75% 的警告門檻**又是一次都沒響**，而這次的原因不是係數。輸出根本不在
+估計值裡。d4 的 `out` 是 17,987 —— 佔它總花費的 37%，被整個略過。
+
+`estimated_tokens_out` 這個 property 一直都在，只是沒有人把它加進去。
+
+### `ctx` 事件記的是第三個量
+
+worker 寫的 `ctx` 事件是 `used = token_breakdown["in"]`，`pct = used / token_budget`。
+分子是輸入、分母是含輸出的花費預算：
+
+```
+ctx lane:critic-1  used=30,718  pct=0.768   ← 這條 lane 當下已經超標 22%
+ctx lane:synth-1   used=35,158  pct=0.879   ← 這條超標 6%
+```
+
+事後從事件流看，一條 77% 的 lane 被以超標為由殺掉，而記錄裡沒有任何東西
+解釋得了。（`context_peak()` 只讀 `who="orchestrator"`，所以 golden 的 context
+斷言不受影響 —— 受影響的是診斷。）
+
+### 剩下那 1.37 倍：最可能是 thinking，而記錄剛好證明不了
+
+`_message_chars()` 只認 `TextBlock` / `ToolUseBlock` / `ToolResultBlock`。
+**`ThinkingBlock` 落在迴圈外，貢獻 0 字元**，而它會隨對話被重送。
+
+#16 的 transcript 裡 d2 / d4 / d5 各有 3 / 4 / 4 個 thinking block。每一個都以
+零成本計入。
+
+但 `_block_to_dict()` 把 thinking 寫成 `{"type": "thinking"}` —— 內文丟掉了。
+**唯一能驗證這個假設的東西，正好是 transcript 唯一不記的東西。**
+
+這跟下一節是同一個病。
+
+### 上限越準，能用來校準它的樣本越少
+
+d1 / d3 被停下之後沒有 usage，所以 `token_breakdown` 用估計值頂上（#13 的
+決定：回報 0 會讓花最多的執行看起來免費）。代價是：**被估計值停下的執行，
+回報值就是估計值本身，誤差恆為 0。**
+
+#16 的五次派工只有三個校準點，而且全是跑得完的短 lane —— 恰好最不像
+analyst。analyst 是最需要這個上限、也最無法被驗證的那條。
+
+### 結論與順序
+
+1. 先讓上限、警告、`ctx` 三者量同一個東西。d4 / d5 現在被錯誤歸因，成本最低。
+2. 先**記錄** thinking 的字元數，不要直接加進估計值 —— #15 的教訓是先裝儀器
+   再改係數。加進去之前得先有一次執行證明它就是那 1.37 倍。
+3. 校準點的問題留到 1 和 2 之後再看：如果 thinking 補上後誤差收斂，
+   「被停下的執行沒有讀數」的嚴重性會低很多。
