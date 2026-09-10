@@ -1872,3 +1872,81 @@ tokens_in == requests × fixed_per_request + charged_ascii / A + charged_cjk × 
 1. 警告沒有效力。要不要從「附一段字串」升級成「到某個門檻就擋掉查詢類工具，
    直到 lane 寫出 finding」—— 這改變 lane 的語意，不是純修 bug。
 2. 係數等 #18 的 `charged_*` 解出來再動。先解再改，不要先改。
+
+---
+
+## Golden job 第十八次 —— 差額不是每個字的，是每個請求的
+
+`jobs-scratch/golden18`。`charged_ascii` / `charged_cjk` 上線後的第一次執行，
+也是第一次不必重放 transcript 就能解係數 —— 結果是解不出來，而解不出來這件事
+本身就是答案。
+
+```
+id   lane      status            in      out    estIn  estOut  errIn   R    chargedA  chargedC     F
+d1   analyst1  budget_exceeded  56,682  3,499  56,682  3,499      —   15      90,744     5,390   892
+d2   analyst1  budget_exceeded  57,382  3,030  57,382  3,030      —   16      88,814     7,619   892
+d3   critic1   ok               13,207  6,924   8,746  1,776   -34%    3       9,134     4,947 1,007
+d4   synth1    ok               28,302  3,239  19,999  1,932   -29%    5      25,322    16,180   673
+```
+
+```
+phase=complete  dispatches=4  failures=2  cost=$0.4616  context_peak=14,188（7.1%）
+anomalies: WARNING analyst-1:txn-2024-analysis 產出後沒有任何後續派工讀到
+```
+
+### 警告這次有效，而這正是不能靠它的理由
+
+d1 看到 77% 與 87%，然後呼叫了一次 `write_finding`。d2 呼叫了兩次。
+#17 的 d1 看到 82% 與 92%，一次都沒呼叫。
+
+**同一段字串，同一個模型，同一個門檻，兩種結果。** 訊號的送達是可以保證的，
+訊號的服從不行 —— 它是模型在那一刻的選擇。README 說這個 harness 的每一道
+上限都「由構造保證，不是由 prompt 祈禱」，而預算警告目前恰好是後者。
+
+### 用 `charged_*` 解係數：解出負數
+
+`tokens_in == R × F + chargedA / A + chargedC × C`，兩條跑得完的 lane
+就是兩條方程式：
+
+```
+9,134/A  +  4,947·C  =  13,207 − 3×1,007  =  10,186
+25,322/A + 16,180·C  =  28,302 − 5×673    =  24,937
+
+→  A = 0.54   C = −1.34
+```
+
+**C 是負的。** 沒有任何一組「每個字多少 token」能同時滿足這兩條 lane ——
+差額不是每個字的。
+
+而且 d4 的中文密度（39%）比 d3（35%）高，需要的倍率卻比較小。「中文太便宜」
+這個說法到此為止。
+
+### 差額是每個請求的，而且大約 1,500
+
+拿現行係數算殘差，除以請求數：
+
+```
+d3   短少 4,463 / 3 個請求 = 每請求 1,488
+d4   短少 8,306 / 5 個請求 = 每請求 1,661
+```
+
+兩者差 11%，遠比係數模型（無解）一致。`FRAMEWORK_TOKENS_PER_REQUEST = 432`
+是 spike15 量的，而它的 docstring 自己留了伏筆：
+
+> Measured with a two-tool lane, so a lane declaring more tools pays somewhat
+> more than this.
+
+但 d3 與 d4 **都是兩工具的 lane**（`read_note` + `write_finding`）。所以不是
+工具數。每請求還少了約 1,500 token 的某個東西，而它不在串流裡，因此也不在
+估計值裡。
+
+### 兩個校準點是這次執行的上限，而原因是老問題
+
+四次派工只有兩個校準點，兩條 analyst 又都被上限停下、回報值即估計值。
+**analyst 是 ASCII 最重、最需要這個上限、也最拿不到讀數的那一條。**
+#18 的兩個點都是中文偏重的 lane，所以連「ASCII 那一側對不對」都問不了。
+
+再跑一次 golden job 不會改善這件事 —— 會被停下的還是會被停下。要量的是
+每請求的固定成本，那不需要一整個 job：對每條真實 lane 的 charter 與工具集
+各送一個請求，讀回報的 input tokens，減掉已知的對話量，剩下的就是 F。
+下一步是這個，不是第十九次執行。
