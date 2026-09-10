@@ -2038,3 +2038,86 @@ thinking block 的文字在客戶端是空的（#17），但 CLI 內部握有的
 
 要分開這兩個模型，得做一組專門的探針掃描（固定 charter 與工具、只改訊息
 則數與 thinking 有無），而不是再跑一次 job。
+
+---
+
+## Spike #20 —— 同樣的字，切成更多則，貴多少？
+
+#19 之後對話那一項還是解不出來，兩個模型（每則訊息的封裝／thinking）各自都
+對得上僅有的兩個校準點。與其再推，不如直接量：**字元數固定，只改它被切成
+幾則訊息**。有封裝的話，同樣的文字分成越多則就越貴。
+
+`charters/synthesizer.md` 當 system prompt，8,000 個真實 CSV 字元
+（重複的填充字串會量到 BPE 的 merge，不是文本 —— spike #15 的教訓）：
+
+```
+messages  prompt_tokens  over 1 message  per extra msg
+       1          7,958               0            0.0
+       2          7,967               9            9.0
+       4          7,981              23            7.7
+       8          8,010              52            7.4
+      16          8,066             108            7.2
+```
+
+**每則 7.2–9.0 token。** #18 的殘差需要每則·請求 283–306。差了 35 倍。
+**封裝模型死了。**
+
+順帶一個大數字：8,000 個 CSV 字元 = 7,958 − 546 = 7,412 token，
+**每 1.08 個 ASCII 字元一個 token**。`ASCII_CHARS_PER_TOKEN = 2.18` 對原始
+CSV 低了一倍。（lane 的對話是查詢**輸出**與 finding，密度不同，所以這不能直接
+拿來當新係數 —— 但它說明為什麼 analyst 的誤差方向不穩定。）
+
+---
+
+## Spike #21 —— 錄下 CLI 真正送出去的東西
+
+六次 golden run 都在從 token 數推測請求裡有什麼。不必推測：在真實後端前面
+架一個**錄音代理**，把 `HARNESS_PROXY_BASE_URL` 指過去，跑一條 lane，
+每一個請求的 body 就都在手上了。
+
+一條 critic lane，兩工具，`max_turns=6`：
+
+```
+ #  msgs content chars think blk  think chars roles
+ 1     2         1,230         0            0 us
+ 2     5         1,724         1            0 usaus
+ ...
+12    17         6,095         5            0 usausausausausaus
+13     2         2,345         0            0 us          ← 對話重新開始
+14     5         2,902         1            0 usaus
+...
+17    14         5,875         4            0 usausausausaus
+
+the accountant saw   5 requests
+the wire carried    17 requests
+reported tokens in   11,498
+estimated tokens in   9,519
+characters on the wire, whole dispatch 56,213; final request 5,875
+```
+
+### thinking 也死了，而且死得很乾淨
+
+40 個 thinking block 確實被重送回去，**每一個都是空的**：
+
+```json
+{"type": "thinking", "thinking": "", "signature": ""}
+```
+
+一個殼、一個空簽章，53 個字元的 JSON，沒有內容。#17 的「客戶端看不到」
+不等於「伺服器端有」—— 線上送回去的就是空的。兩個候選都死了。
+
+### 但錄音抓到了更大的東西：重試對記帳是隱形的
+
+**線上 17 個請求，記帳只看到 5 個。** 訊息數在第 13 個請求歸零 —— 那是
+schema 重新提示，一個全新的對話。
+
+`_attempt_all` 每一次嘗試都 `acc, exc = await _run_once(...)`，**`acc` 被整個
+換掉**。前面幾次嘗試的 token 跟著消失，而**本地上限對「這次派工花了多少」的
+認知也跟著歸零**。
+
+三次嘗試可以花掉三個預算，而上限一次都不會響。這不是 ±30% 的估計誤差，
+這是預算這件事上**沒有上界**。上限正是這個 harness 存在的理由。
+
+（reported 11,498 也只涵蓋最後一次嘗試 —— 每次嘗試是一個新的 CLI session，
+usage 各自獨立。所以這不解釋 #18 的殘差；殘差仍然開著。但錄音檔在
+`spikes/spike21_captured.json`，下一次不必再推。）

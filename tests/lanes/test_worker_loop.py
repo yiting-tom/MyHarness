@@ -615,6 +615,7 @@ async def test_the_event_carries_the_estimate_alongside_the_reported_figure(benc
     assert set(estimate) == {"requests", "conversation_tokens", "conversation_ascii",
                              "conversation_cjk", "thinking_ascii", "thinking_cjk",
                              "charged_ascii", "charged_cjk",
+                             "carried_tokens", "attempts",
                              "fixed_per_request", "tokens_in", "tokens_out"}
     assert end.get("tokens")["in"] == 4_000, "reported, not estimated"
     assert estimate["fixed_per_request"] > 0, "and the estimate is recorded anyway"
@@ -812,3 +813,75 @@ async def test_the_dispatch_event_says_whether_the_gate_fired(bench):
     await run(bench, ScriptedTransport([result(structured=GOOD_HANDLE)]))
     (end,) = await bench.events_for(DISPATCH_END)
     assert end.get("gated") == 0
+
+
+# --- spike #21: a re-prompt reset the meter ---------------------------------
+#
+# A recording proxy in front of the backend saw 17 requests for one dispatch.
+# The accountant saw 5. _attempt_all rebinds `acc` on every attempt, so a schema
+# re-prompt takes the previous attempt's tokens with it -- and takes the local
+# ceiling's idea of what this dispatch has spent along too. Three attempts spend
+# three budgets and the ceiling never notices.
+
+
+def _with_budget(lane, budget: int):
+    from dataclasses import replace
+    return replace(lane, type=replace(lane.type, backend="test-degraded",
+                                      token_budget=budget))
+
+
+async def test_a_reprompt_does_not_reset_what_the_dispatch_has_spent(bench):
+    transport = ScriptedTransport(
+        [assistant("prose, not a handle"),
+         result(usage={"input_tokens": 4_000, "output_tokens": 500})],
+        [assistant(handle_text()),
+         result(usage={"input_tokens": 3_000, "output_tokens": 200})],
+    )
+    await run_lane_worker(
+        WorkerRequest(job_id=JOB, lane=_with_budget(bench.lane, 100_000),
+                      task="t", dispatch_id="d1"),
+        store=bench.store, event_log=bench.events, transport=transport,
+    )
+    (end,) = await bench.events_for(DISPATCH_END)
+    assert end.get("estimate")["attempts"] == 2
+    assert end.get("estimate")["carried_tokens"] == 4_500, "the first attempt is not free"
+    (ctx,) = await bench.events_for(CTX)
+    assert ctx.get("spent") == 4_500 + 3_200, "the ceiling judges the dispatch, not the attempt"
+
+
+async def test_a_dispatch_that_re_prompts_can_exhaust_its_budget(bench):
+    """The behaviour the old accounting made impossible.
+
+    Attempt one spends 4,500 of a 5,000 budget and is re-prompted. Attempt two
+    used to start from zero, so a dispatch could re-prompt its way through any
+    multiple of its budget without the ceiling ever seeing it.
+    """
+    transport = ScriptedTransport(
+        [assistant("prose, not a handle"),
+         result(usage={"input_tokens": 4_000, "output_tokens": 500})],
+        [assistant(handle_text()),
+         result(usage={"input_tokens": 3_000, "output_tokens": 200})],
+    )
+    handle = await run_lane_worker(
+        WorkerRequest(job_id=JOB, lane=_with_budget(bench.lane, 5_000),
+                      task="t", dispatch_id="d1"),
+        store=bench.store, event_log=bench.events, transport=transport,
+    )
+    assert handle.status is HandleStatus.BUDGET_EXCEEDED
+    assert transport.call_count == 2, "the second attempt started and was cut short"
+
+
+async def test_the_ceiling_counts_every_attempt(bench):
+    """Three attempts under the budget can put a dispatch far over it."""
+    from myharness.lanes.worker import Accumulated
+
+    acc = Accumulated(carried_tokens=4_800)
+    acc.usage = {"input_tokens": 900, "output_tokens": 100}
+    assert acc.budget_tokens == 5_800
+
+
+async def test_a_single_attempt_carries_nothing(bench):
+    await run(bench, ScriptedTransport([result(structured=GOOD_HANDLE)]))
+    (end,) = await bench.events_for(DISPATCH_END)
+    assert end.get("estimate")["attempts"] == 1
+    assert end.get("estimate")["carried_tokens"] == 0

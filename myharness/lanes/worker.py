@@ -117,6 +117,16 @@ class Accumulated:
     #: solve for better ones without replaying transcripts again.
     charged_ascii: int = 0
     charged_cjk: int = 0
+    #: What earlier attempts of this same dispatch already spent. A schema
+    #: re-prompt starts a fresh run against the backend, and the accumulator
+    #: used to start fresh with it: spike #21 recorded 17 requests on the wire
+    #: for a dispatch whose accountant saw 5. Three attempts spent three budgets
+    #: and the ceiling, which is the only thing standing between a lane and an
+    #: unbounded bill, never saw the first two.
+    carried_tokens: int = 0
+    #: Which attempt this is, counted from one. Recorded so a dispatch says it
+    #: was re-prompted instead of leaving it to be inferred.
+    attempt: int = 1
     #: API round trips so far. One goes out with the opening prompt and one
     #: more each time tool results come back -- which is NOT the same as the
     #: number of AssistantMessages. Golden #14's d1 streamed 27 of those for
@@ -219,6 +229,10 @@ class Accumulated:
             #                  + charged_ascii / A + charged_cjk * C
             "charged_ascii": self.charged_ascii,
             "charged_cjk": self.charged_cjk,
+            # What the re-prompts before this attempt cost, and how many there
+            # were. Without these a retried dispatch reads as a cheap one.
+            "carried_tokens": self.carried_tokens,
+            "attempts": self.attempt,
             "fixed_per_request": self.fixed_tokens_per_request,
             "tokens_in": self.estimated_tokens_in,
             # The ceiling judges input and output together; recording only the
@@ -243,7 +257,9 @@ class Accumulated:
         what it spent was output.
         """
         reported = self.tokens_in + self.tokens_out
-        return max(reported, self.estimated_tokens_in + self.estimated_tokens_out)
+        return self.carried_tokens + max(
+            reported, self.estimated_tokens_in + self.estimated_tokens_out
+        )
 
     @property
     def saw_transient(self) -> bool:
@@ -496,6 +512,8 @@ async def _run_once(
     prompt: str,
     charter: str,
     enforce_schema: bool,
+    carried: int = 0,
+    attempt: int = 1,
 ) -> tuple[Accumulated, BaseException | None]:
     # Seeded rather than empty: the opening request already carries the charter,
     # the tool definitions and the task, and none of that ever appears in the
@@ -509,6 +527,8 @@ async def _run_once(
         ),
         conversation_ascii=prompt_ascii,
         conversation_cjk=prompt_cjk,
+        carried_tokens=carried,
+        attempt=attempt,
     )
     _charge_request(acc)
     options = _options(request, profile, toolbox, charter=charter, enforce_schema=enforce_schema)
@@ -714,13 +734,21 @@ async def _attempt_all(
     acc = Accumulated()
     schema_problems: tuple[str, ...] = ()
     current_prompt = prompt
+    # Survives the rebinding of `acc` below, which is the whole point.
+    carried = 0
+    attempt = 0
 
     for transient_attempt in range(MAX_TRANSIENT_RETRIES + 1):
         for schema_attempt in range(MAX_SCHEMA_RETRIES + 1):
+            attempt += 1
             acc, exc = await _run_once(
                 request, profile, toolbox, transport,
                 prompt=current_prompt, charter=charter, enforce_schema=enforce,
+                carried=carried, attempt=attempt,
             )
+            # Whatever happens next -- a return, a re-prompt, a back-off -- this
+            # attempt has been paid for.
+            carried = acc.budget_tokens
 
             if exc is not None:
                 status = _classify(acc, exc, profile)
