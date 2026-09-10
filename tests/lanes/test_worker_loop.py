@@ -613,7 +613,8 @@ async def test_the_event_carries_the_estimate_alongside_the_reported_figure(benc
     (end,) = await bench.events_for(DISPATCH_END)
     estimate = end.get("estimate")
     assert set(estimate) == {"requests", "conversation_tokens", "conversation_ascii",
-                             "conversation_cjk", "fixed_per_request", "tokens_in"}
+                             "conversation_cjk", "thinking_ascii", "thinking_cjk",
+                             "fixed_per_request", "tokens_in"}
     assert end.get("tokens")["in"] == 4_000, "reported, not estimated"
     assert estimate["fixed_per_request"] > 0, "and the estimate is recorded anyway"
 
@@ -697,3 +698,61 @@ async def test_the_ctx_event_can_explain_a_run_the_ceiling_stopped(bench):
     assert ctx.get("used") == 4_000, "context occupancy is still input"
     assert ctx.get("spent") == 5_500, "and what the ceiling judges is recorded too"
     assert ctx.get("pct") == round(5_500 / 5_000, 3), "pct belongs to the budget"
+
+
+# --- golden #16: thinking is re-sent and counted as free ---------------------
+#
+# _message_chars saw TextBlock, ToolUseBlock and ToolResultBlock. ThinkingBlock
+# fell past all three and contributed nothing, while _block_to_dict reduced it
+# to {"type": "thinking"} -- so the one term that could explain the residual
+# 1.37x was also the one term the record did not keep.
+
+
+def test_thinking_is_measured_even_though_it_is_not_kept():
+    from claude_agent_sdk import AssistantMessage, TextBlock, ThinkingBlock
+
+    from myharness.lanes.worker import Accumulated, _consume
+
+    acc = Accumulated()
+    _consume(AssistantMessage(model="m", content=[
+        ThinkingBlock(thinking="想" * 300 + "x" * 700, signature=""),
+        TextBlock(text="answer"),
+    ]), acc)
+
+    assert acc.thinking_cjk == 300
+    assert acc.thinking_ascii == 700
+    assert acc.estimate_breakdown["thinking_cjk"] == 300
+    assert acc.estimate_breakdown["thinking_ascii"] == 700
+
+
+def test_measuring_thinking_does_not_yet_charge_for_it():
+    """Instrument first, then change the number -- golden #15's lesson.
+
+    Whether the backend re-sends thinking as input is exactly what golden #17
+    is meant to answer. Folding it in now would prejudge it.
+    """
+    from claude_agent_sdk import AssistantMessage, ThinkingBlock
+
+    from myharness.lanes.worker import Accumulated, _consume
+
+    acc = Accumulated()
+    before = acc.conversation_tokens
+    _consume(AssistantMessage(model="m", content=[
+        ThinkingBlock(thinking="z" * 10_000, signature="")]), acc)
+
+    assert acc.conversation_tokens == before
+    assert acc.thinking_ascii == 10_000
+
+
+def test_the_transcript_says_how_much_thinking_it_dropped():
+    """Keeping the text would bloat a blob; keeping nothing lost the term."""
+    from claude_agent_sdk import AssistantMessage, ThinkingBlock
+
+    from myharness.lanes.worker import Accumulated, _consume
+
+    acc = Accumulated()
+    _consume(AssistantMessage(model="m", content=[
+        ThinkingBlock(thinking="q" * 1_234, signature="")]), acc)
+
+    (entry,) = acc.transcript
+    assert entry["content"] == [{"type": "thinking", "chars": 1_234}]

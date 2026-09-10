@@ -103,6 +103,12 @@ class Accumulated:
     #: can be estimated separately.
     output_ascii: int = 0
     output_cjk: int = 0
+    #: Thinking, measured but deliberately not charged. Golden #16's estimate
+    #: ran a uniform 1.37x low across three lanes that each streamed three or
+    #: four ThinkingBlocks, every one of them free -- but whether this backend
+    #: re-sends them as input is unknown, and folding them in would prejudge it.
+    thinking_ascii: int = 0
+    thinking_cjk: int = 0
     #: API round trips so far. One goes out with the opening prompt and one
     #: more each time tool results come back -- which is NOT the same as the
     #: number of AssistantMessages. Golden #14's d1 streamed 27 of those for
@@ -195,6 +201,10 @@ class Accumulated:
             # against excerpted tool results.
             "conversation_ascii": self.conversation_ascii,
             "conversation_cjk": self.conversation_cjk,
+            # Measured, not charged. Recorded so that one run can say whether
+            # this is the residual the estimate keeps missing.
+            "thinking_ascii": self.thinking_ascii,
+            "thinking_cjk": self.thinking_cjk,
             "fixed_per_request": self.fixed_tokens_per_request,
             "tokens_in": self.estimated_tokens_in,
         }
@@ -246,7 +256,10 @@ def _block_to_dict(block: Any) -> dict[str, Any]:
     if isinstance(block, TextBlock):
         return {"type": "text", "text": block.text}
     if isinstance(block, ThinkingBlock):
-        return {"type": "thinking"}
+        # The text is dropped -- a run streams a great deal of it and none of it
+        # is analysis. The length is not: golden #16 could not test its own
+        # leading hypothesis because this was the term the record did not keep.
+        return {"type": "thinking", "chars": len(block.thinking)}
     if isinstance(block, ToolUseBlock):
         return {"type": "tool_use", "name": block.name, "input": block.input}
     if isinstance(block, ToolResultBlock):
@@ -310,6 +323,23 @@ def _message_chars(message: Any) -> tuple[int, int]:
     return ascii_chars, cjk_chars
 
 
+def _thinking_chars(message: Any) -> tuple[int, int]:
+    """Thinking, counted apart from the conversation it is not charged to.
+
+    ``_message_chars`` recognises text, tool calls and tool results; a
+    ThinkingBlock fell past all three and so cost nothing. Whether the backend
+    re-sends it as input is what golden #17 is meant to settle, so this measures
+    without yet deciding.
+    """
+    ascii_chars = cjk_chars = 0
+    for block in _content_blocks(message):
+        if isinstance(block, ThinkingBlock):
+            a, c = split_chars(block.thinking)
+            ascii_chars += a
+            cjk_chars += c
+    return ascii_chars, cjk_chars
+
+
 def _consume(message: Any, acc: Accumulated) -> None:
     """Fold one streamed message into the accumulator."""
     ascii_chars, cjk_chars = _message_chars(message)
@@ -318,6 +348,9 @@ def _consume(message: Any, acc: Accumulated) -> None:
     if isinstance(message, AssistantMessage):
         acc.output_ascii += ascii_chars
         acc.output_cjk += cjk_chars
+        thinking_ascii, thinking_cjk = _thinking_chars(message)
+        acc.thinking_ascii += thinking_ascii
+        acc.thinking_cjk += thinking_cjk
         acc.turns += 1
         blocks = [_block_to_dict(b) for b in message.content]
         acc.transcript.append({"role": "assistant", "content": blocks})
