@@ -41,21 +41,26 @@
 
 ## 4. 邊界骨架（僅在 3.3 成立時）
 
-- [ ] 4.1 `pyproject.toml` 新增 `[project.optional-dependencies]` 的 `a2a`，
-      HTTP server 不進核心依賴（D6）
-- [ ] 4.2 `myharness/a2a/server.py`：與 `myharness/mcp/server.py` 同層的薄殼，
-      建構時接受同一個 `AnalysisService`，不改 service（D3）
-- [ ] 4.3 agent card：宣告兩種輸出模式與各自的取得方式
-      （規格：能力宣告含兩種模式）
-- [ ] 4.4 僅綁 loopback，且不進預設啟動路徑
-      （規格：預設不啟用、僅接受本機連線）
+- [x] 4.1 `pyproject.toml` 新增 `[project.optional-dependencies]` 的 `a2a`，
+      HTTP server 不進核心依賴（D6）—— `a2a-sdk[http-server]` + `uvicorn`。
+      `http-server` 是窄的那個 extra：沒有 grpc、sqlalchemy、fastapi
+- [x] 4.2 `myharness/a2a/server.py`：與 `myharness/mcp/server.py` 同層的薄殼，
+      建構時接受同一個 `AnalysisService`，不改 service（D3）—— service 一行沒動，
+      兩種 skill 的差別只活在 `myharness/a2a/executor.py` 裡
+- [x] 4.3 agent card：宣告兩種輸出模式與各自的取得方式
+      （規格：能力宣告含兩種模式）—— 兩個 skill + `required=true` 的 extension。
+      `default_output_modes` 維持 media type，沒有被誤用
+- [x] 4.4 僅綁 loopback，且不進預設啟動路徑
+      （規格：預設不啟用、僅接受本機連線）—— 沒有 console script，沒有別的模組
+      import 它；`require_loopback` 對 hostname 不留情面（只有 `localhost` 這個
+      名字本身例外，其餘必須**是**一個 loopback 位址）
 
 ## 5. 輸出模式
 
-- [ ] 5.1 未指定模式時以 `service.result()` 的摘要與章節價目表作答
+- [x] 5.1 未指定模式時以 `service.result()` 的摘要與章節價目表作答
       （規格：未指定模式）
-- [ ] 5.2 價目表回應帶上「如何取得章節全文」的指引，不只是 id 清單
-      （規格：價目表自帶取用指引）
+- [x] 5.2 價目表回應帶上「如何取得章節全文」的指引，不只是 id 清單
+      （規格：價目表自帶取用指引）—— artifact 上帶 extension URI，data 裡帶 hint
 - [ ] 5.3 全文模式以 `service.drill_section()` 逐節取得，不新增第二套內容上限
       （規格：全文由逐節組成）
 - [ ] 5.4 超過上限的章節裁切並標示，其餘章節仍產出

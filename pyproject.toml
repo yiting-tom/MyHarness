@@ -15,6 +15,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-asyncio>=0.24", "pytest-cov>=6", "psutil>=6"]
+# The A2A boundary is the second way in, and it is the only one that needs an
+# HTTP server. Someone who only speaks MCP over stdio should not have to install
+# starlette to get it (expose-over-a2a D6). The http-server extra is the narrow
+# one: no grpc, no sqlalchemy, no fastapi.
+a2a = ["a2a-sdk[http-server]>=1.1.2", "uvicorn>=0.30"]
 
 [project.scripts]
 myharness = "myharness.monitor.cli:main"
