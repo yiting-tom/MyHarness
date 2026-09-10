@@ -109,6 +109,14 @@ class Accumulated:
     #: re-sends them as input is unknown, and folding them in would prejudge it.
     thinking_ascii: int = 0
     thinking_cjk: int = 0
+    #: The conversation as the estimate actually charges it: summed once per
+    #: request, the way estimated_tokens_in is. The plain split says what the
+    #: last request carried; this says what every request carried, which is the
+    #: quantity the coefficients have to satisfy. Golden #17 had three completed
+    #: lanes disagreeing with the rates in both directions at once and no way to
+    #: solve for better ones without replaying transcripts again.
+    charged_ascii: int = 0
+    charged_cjk: int = 0
     #: API round trips so far. One goes out with the opening prompt and one
     #: more each time tool results come back -- which is NOT the same as the
     #: number of AssistantMessages. Golden #14's d1 streamed 27 of those for
@@ -205,8 +213,17 @@ class Accumulated:
             # this is the residual the estimate keeps missing.
             "thinking_ascii": self.thinking_ascii,
             "thinking_cjk": self.thinking_cjk,
+            # Summed the way the estimate sums it, so the rates are solvable
+            # from one recorded run:
+            #     tokens_in == requests * fixed_per_request
+            #                  + charged_ascii / A + charged_cjk * C
+            "charged_ascii": self.charged_ascii,
+            "charged_cjk": self.charged_cjk,
             "fixed_per_request": self.fixed_tokens_per_request,
             "tokens_in": self.estimated_tokens_in,
+            # The ceiling judges input and output together; recording only the
+            # input half left half of what it acts on unaccounted for.
+            "tokens_out": self.estimated_tokens_out,
         }
 
     @property
@@ -306,6 +323,19 @@ def _estimated_request_cost(acc: Accumulated) -> int:
     return acc.fixed_tokens_per_request + acc.conversation_tokens
 
 
+def _charge_request(acc: Accumulated) -> None:
+    """Charge one request to the estimate, and record what it was charged for.
+
+    Recording the running sum rather than only the conversation's current split
+    is what makes the rates solvable from a single run. The estimate sums the
+    conversation once per request, so a calibration has to be able to see that
+    same sum -- the final split alone leaves one equation in two unknowns.
+    """
+    acc.charged_ascii += acc.conversation_ascii
+    acc.charged_cjk += acc.conversation_cjk
+    acc.estimated_tokens_in += _estimated_request_cost(acc)
+
+
 def _message_chars(message: Any) -> tuple[int, int]:
     """What this message adds to the conversation, ascii and non-ascii apart."""
     ascii_chars = cjk_chars = 0
@@ -361,7 +391,7 @@ def _consume(message: Any, acc: Accumulated) -> None:
         # Tool results arriving means another request is about to go out
         # carrying everything so far, which is the moment the estimate grows.
         acc.requests += 1
-        acc.estimated_tokens_in += _estimated_request_cost(acc)
+        _charge_request(acc)
         # Recording only the role -- which is what the catch-all below used to
         # do -- left the transcript with half the conversation: every question
         # the model asked was present and every answer it got was gone, so
@@ -480,7 +510,7 @@ async def _run_once(
         conversation_ascii=prompt_ascii,
         conversation_cjk=prompt_cjk,
     )
-    acc.estimated_tokens_in = _estimated_request_cost(acc)
+    _charge_request(acc)
     options = _options(request, profile, toolbox, charter=charter, enforce_schema=enforce_schema)
     try:
         budget = request.lane.type.token_budget

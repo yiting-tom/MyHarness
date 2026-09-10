@@ -614,7 +614,8 @@ async def test_the_event_carries_the_estimate_alongside_the_reported_figure(benc
     estimate = end.get("estimate")
     assert set(estimate) == {"requests", "conversation_tokens", "conversation_ascii",
                              "conversation_cjk", "thinking_ascii", "thinking_cjk",
-                             "fixed_per_request", "tokens_in"}
+                             "charged_ascii", "charged_cjk",
+                             "fixed_per_request", "tokens_in", "tokens_out"}
     assert end.get("tokens")["in"] == 4_000, "reported, not estimated"
     assert estimate["fixed_per_request"] > 0, "and the estimate is recorded anyway"
 
@@ -756,3 +757,50 @@ def test_the_transcript_says_how_much_thinking_it_dropped():
 
     (entry,) = acc.transcript
     assert entry["content"] == [{"type": "thinking", "chars": 1_234}]
+
+
+# --- golden #17: the rates still are not solvable from a run -----------------
+#
+# Three lanes ran to completion and disagreed with the coefficients in both
+# directions at once -- analyst 21% high, critic 29% low. The breakdown records
+# the conversation's final split, but the estimate charges the conversation once
+# per request, so the number the coefficients have to satisfy is the sum over
+# requests. Without it, calibration is transcript archaeology again.
+
+
+def test_the_estimate_records_the_sum_it_actually_charged():
+    from myharness.lanes.budget import estimate
+    from myharness.lanes.worker import Accumulated, _charge_request
+
+    acc = Accumulated(fixed_tokens_per_request=500)
+    _charge_request(acc)  # the opening request, as _run_once does
+    for _ in range(4):
+        _exchange(acc, reply="y" * 1_000, tool_result="租" * 200)
+
+    b = acc.estimate_breakdown
+    assert b["charged_ascii"] > b["conversation_ascii"], "four requests, not one"
+    assert b["charged_cjk"] > b["conversation_cjk"]
+
+    # With this, one run is a solvable system rather than a single equation in
+    # two unknowns. ceil() runs per request, so the sum may round up that often.
+    solved = b["requests"] * b["fixed_per_request"] + estimate(b["charged_ascii"],
+                                                               b["charged_cjk"])
+    assert abs(b["tokens_in"] - solved) <= b["requests"]
+
+
+def test_the_breakdown_covers_both_halves_of_the_ceiling():
+    """The ceiling judges input and output; the record showed only input."""
+    from myharness.lanes.worker import Accumulated
+
+    acc = Accumulated(output_ascii=2_180)
+    assert acc.estimate_breakdown["tokens_out"] == acc.estimated_tokens_out > 0
+
+
+def test_the_opening_request_is_charged_and_recorded_too():
+    """A run cut off after two requests was never free -- nor unaccounted for."""
+    from myharness.lanes.worker import Accumulated, _charge_request
+
+    acc = Accumulated(fixed_tokens_per_request=600, conversation_ascii=2_180)
+    _charge_request(acc)
+    assert acc.charged_ascii == 2_180
+    assert acc.estimated_tokens_in == 1_600
