@@ -1762,3 +1762,113 @@ analyst。analyst 是最需要這個上限、也最無法被驗證的那條。
    再改係數。加進去之前得先有一次執行證明它就是那 1.37 倍。
 3. 校準點的問題留到 1 和 2 之後再看：如果 thinking 補上後誤差收斂，
    「被停下的執行沒有讀數」的嚴重性會低很多。
+
+---
+
+## Golden job 第十七次 —— 訊號終於在還有時間的時候送到，然後 lane 沒有理它
+
+`jobs-scratch/golden17`，自架 `aird-35b`。單位對齊（上限／警告／`ctx` 量同一件事）
+與 thinking 儀器上線後的第一次執行。
+
+```
+id   lane      status            in       out    in+out   est_in   err   reqs  think
+d1   analyst1  budget_exceeded  58,597   2,442   61,039   58,597     —    17    9 × 0 字
+d2   analyst1  ok               27,549   3,218   30,767   33,238  +21%    11    7 × 0 字
+d3   critic1   ok               10,077   8,857   18,934    7,157  -29%     3    3 × 0 字
+d4   synth1    ok               18,709   1,982   20,691   14,887  -20%     5    4 × 0 字
+```
+
+```
+phase=complete  dispatches=4  failures=1  cost=$0.6331  context_peak=8,205（4.1%）
+（#16 是 dispatches=5  failures=4  cost=$1.1793  context_peak=18,333）
+```
+
+### 警告響了
+
+d1 的 transcript 裡，工具結果上掛著：
+
+```
+預算已用 82%，而你還沒有寫任何 finding。現在就用 write_finding 寫下目前為止的結論
+預算已用 92%，而你還沒有寫任何 finding。現在就用 write_finding 寫下目前為止的結論
+```
+
+**這是 #10 以來第一次，預算訊號在還來得及的時候送到 lane 手上。** 之前每一次
+不是估計值太低（#15）就是輸出不在估計值裡（#16），門檻永遠在最後一次工具
+呼叫之後才被跨過。d1 這次在 82% 就看到了，然後在 92% 又看到一次，最後在
+101.7% 被停下。
+
+### 但 d1 一次 `write_finding` 都沒有呼叫
+
+```
+15 × mcp__lane__duckdb_query
+ 1 × mcp__lane__inspect_blob
+ 0 × mcp__lane__write_finding
+```
+
+看到警告，繼續下查詢，被停下，什麼都沒寫。這正是 #9 的情境
+（「一整個預算花在 24 次查詢上，從未呼叫 write_finding」），差別在於
+**這次 lane 是被告知了的**。
+
+問題因此換了一個：訊號的**送達**已經解決，訊號的**效力**沒有。
+一個只是附在工具結果後面的字串，模型可以讀完然後接著做它本來要做的事。
+
+（job 仍然完成了：orchestrator 重派了 d2，analyst 第二次跑完並寫出 finding。
+成本與 context 峰值都比 #16 好一半。）
+
+### thinking 的假設死了，而死法比「沒有 thinking」有用
+
+儀器回報 `thinking_ascii = thinking_cjk = 0`，四條 lane 全部。但 transcript 說
+thinking block 確實來了：
+
+```
+d1 9 個   d2 7 個   d3 3 個   d4 4 個
+{"type": "thinking", "chars": 0}
+```
+
+**block 到了，內文是空的。** 這個後端（或中間的 proxy）不把 thinking 的文字
+交給客戶端。所以它不可能被計數 —— 而既然客戶端手上沒有這段文字，它也就
+不會被客戶端當成對話的一部分重送回去。#16 那 1.37 倍不是 thinking。
+
+### 而剩下的誤差現在同時往兩個方向跑
+
+`est_in` 對 `reported_in`：
+
+```
+d2  analyst  +21%   ascii 7,955 / cjk 920     ← ASCII 為主，高估
+d3  critic   -29%   ascii 3,564 / cjk 2,268   ← 中文為主，低估
+d4  synth    -20%   ascii 5,484 / cjk 3,415   ← 混合，低估
+```
+
+d2 是**第一個跑得完的 analyst**，也就是第一個 ASCII 重的校準點 —— 之前每一次
+analyst 都被上限停下，回報值就是估計值本身。它說 `ASCII_CHARS_PER_TOKEN = 2.18`
+（spike15 對 CSV 量的）在真實 lane 上收得太緊，而 `CJK_TOKENS_PER_CHAR = 0.31`
+仍然太便宜。兩個方向相反的誤差在混合 lane 上互相抵消掉一部分，這就是 #16
+看起來像「一個一致的 1.37 倍」的原因。
+
+### 但這一組數字還是解不出新係數
+
+`estimate_breakdown` 記的是對話**當下**的 ascii / cjk 分割。而估計值是
+**每個請求各charge一次**對話：
+
+```
+tokens_in = Σᵢ (fixed + conversationᵢ)
+```
+
+只有最後一項的分割，就只有一條方程式、兩個未知數。要解，得記下估計值真正
+加總過的那個量。#15 記了原始分割「讓係數可被反解」，但記錯了層級 —— 記的是
+對話，不是被charge的對話。
+
+所以這次補上 `charged_ascii` / `charged_cjk`（Σ over requests），以及
+`tokens_out`（上限現在判定輸入加輸出，記錄卻只有輸入那一半）。有了它：
+
+```
+tokens_in == requests × fixed_per_request + charged_ascii / A + charged_cjk × C
+```
+
+兩條 lane 就是兩條方程式。**下一次執行不必再重放任何 transcript。**
+
+### 待決
+
+1. 警告沒有效力。要不要從「附一段字串」升級成「到某個門檻就擋掉查詢類工具，
+   直到 lane 寫出 finding」—— 這改變 lane 的語意，不是純修 bug。
+2. 係數等 #18 的 `charged_*` 解出來再動。先解再改，不要先改。
