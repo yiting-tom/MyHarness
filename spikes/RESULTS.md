@@ -1950,3 +1950,91 @@ d4   短少 8,306 / 5 個請求 = 每請求 1,661
 每請求的固定成本，那不需要一整個 job：對每條真實 lane 的 charter 與工具集
 各送一個請求，讀回報的 input tokens，減掉已知的對話量，剩下的就是 F。
 下一步是這個，不是第十九次執行。
+
+---
+
+## Spike #19 —— 每請求的固定成本，量給每一條真實 lane
+
+#18 說差額是每請求的。`FRAMEWORK_TOKENS_PER_REQUEST = 432` 來自 spike #15，
+而 spike #15 是**把探針的總 input 除以請求數**得到的 —— 總 input 是「一個會長大的
+對話被加總很多次」，這個除法只有在探針恰好只送一個請求時才成立，而它的輸出
+從來沒有顯示這件事。
+
+現在 `charged_ascii` / `charged_cjk` 記下了估計值真正charge過的對話，所以
+
+```
+fixed_per_request = (reported_in − estimate(charged)) / requests
+```
+
+不論探針送了幾個請求都成立。一條真實 lane 一個探針，因為 charter 與工具宣告
+正是每個請求重送的東西，而兩者都隨 lane 不同。
+
+```
+lane               tools reqs  reported  charged  measured F  assumed F  short by
+tabular-analyst        6    1     2,175      546       1,629        892       737
+critic                 2    1     1,910      546       1,364      1,007       357
+synthesizer            2    1     1,362      557         805        673       132
+```
+
+### 工具宣告確實沒有被計價，而 spike #15 的 docstring 早就寫了
+
+> Measured with a two-tool lane, so a lane declaring more tools pays somewhat
+> more than this.
+
+六工具的 analyst 短少 737，兩工具的 lane 短少 357 與 132。扣掉各自 charter 的
+計價之後，反推的 framework 常數：
+
+```
+tabular-analyst  1,169      （6 工具）
+critic             789      （2 工具）
+synthesizer        564      （2 工具）
+```
+
+analyst 高出兩工具 lane 約 400–600，四個額外工具定義，每個約 100–150 token。
+合理。
+
+但 **critic 與 synthesizer 工具數相同，卻差 225**。差別在 charter：
+
+```
+charter            ascii   cjk   repo 計價
+tabular-analyst      544   677        460
+critic               570 1,009        575
+synthesizer          301   329        241
+```
+
+`(measured F − 432) / repo 計價` = critic 1.62、synth 1.55、analyst 2.60。
+兩工具的兩條 lane 一致在 ~1.6 —— **charter 被低估約 1.6 倍**，而 charter 是中文，
+所以又是 CJK 係數。analyst 的 2.60 高出的部分就是那四個工具。
+
+### 然而把 F 換成實測值之後，對話那一項還是解不出來
+
+拿 spike19 的 measured F 重解 #18：
+
+```
+9,134/A  +  4,947·C  =  13,207 − 3×1,364 = 9,115
+25,322/A + 16,180·C  =  28,302 − 5×805   = 24,277
+
+→ A = 0.82   C = −0.40
+```
+
+**C 還是負的。** 對話的成本不與被計數的字元成正比 —— 對話裡有某個東西完全
+沒有被計數，而且它隨對話長大。
+
+兩個候選，各自都能對上這兩個點：
+
+```
+每則訊息的封裝（累積重送）  d3 283/則·請求   d4 306/則·請求   差 8%
+thinking（累積重送）        d3 1,130/塊      d4 1,274/塊      差 11%
+```
+
+thinking block 的文字在客戶端是空的（#17），但 CLI 內部握有的原文可能仍被
+重送 —— 客戶端看不到不等於沒送。
+
+**兩個點分不開兩個模型。** 這正是 #18 已經指出的結構問題：能校準的樣本
+只有跑得完的 lane，而 analyst 每次都被上限吃掉。再跑一次 golden job 不會
+增加點數。
+
+### 下一步需要決定的是精度值多少錢
+
+要分開這兩個模型，得做一組專門的探針掃描（固定 charter 與工具、只改訊息
+則數與 thinking 有無），而不是再跑一次 job。
