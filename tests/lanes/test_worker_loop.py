@@ -804,3 +804,11 @@ def test_the_opening_request_is_charged_and_recorded_too():
     _charge_request(acc)
     assert acc.charged_ascii == 2_180
     assert acc.estimated_tokens_in == 1_600
+
+
+async def test_the_dispatch_event_says_whether_the_gate_fired(bench):
+    """Golden #17 and #18 differed on whether the lane obeyed the warning, and
+    that had to be counted out of a transcript by hand."""
+    await run(bench, ScriptedTransport([result(structured=GOOD_HANDLE)]))
+    (end,) = await bench.events_for(DISPATCH_END)
+    assert end.get("gated") == 0

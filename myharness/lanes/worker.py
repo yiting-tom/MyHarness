@@ -640,6 +640,9 @@ async def _run_with_toolbox(
         # by replaying transcripts, and transcripts excerpt tool results --
         # which is exactly the term that dominates.
         estimate=acc.estimate_breakdown,
+        # Whether the budget gate refused anything, rather than leaving it to be
+        # inferred from a transcript.
+        gated=toolbox.gated,
         usd=acc.usd, transcript=transcript_id, contract_path=str(path),
         headline=handle.headline, partial=handle.partial, suggest=handle.suggest,
     )

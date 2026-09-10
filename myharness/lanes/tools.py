@@ -92,6 +92,25 @@ DEFAULT_TOOLS: tuple[str, ...] = (
 #: careless -- it had no way to know how much was left.
 BUDGET_WARN_AT = 0.75
 
+#: Share of the budget after which the tools that pull content into a lane's
+#: context stop answering. The warning above is a request, and golden runs #17
+#: and #18 are the same request answered two different ways: #17's d1 read
+#: "預算已用 82%", then 92%, made fifteen more queries and never called
+#: write_finding; #18's d1 read it at 77% and called it. Same string, same
+#: model, same threshold. Delivery can be guaranteed and compliance cannot, and
+#: every other ceiling in this harness holds by construction rather than by
+#: asking (README: 由構造保證，不是由 prompt 祈禱).
+BUDGET_GATE_AT = 0.90
+
+#: What the gate closes: the tools that put content the lane does not already
+#: have into its context. write_finding and update_state stay open, because
+#: closing the others is only worth doing if there is somewhere left to put the
+#: work. localize_blob stays open too -- it returns a path, not content, so
+#: refusing it would cost a lane its working file and save nothing.
+GATED_ABOVE_BUDGET: frozenset[str] = frozenset({
+    "read_note", "inspect_blob", "duckdb_query",
+})
+
 #: Longest a finding's name may be. Names appear in artifact ids, grant lists
 #: and the flow graph; a sentence there is unreadable everywhere at once.
 MAX_FINDING_NAME_CHARS = 60
@@ -153,6 +172,9 @@ class WorkerToolbox:
     state_rejected: bool = False
     reads: int = 0
     queries: int = 0
+    #: How many calls the budget gate refused. Recorded on the dispatch event so
+    #: a run says whether the gate fired rather than leaving it to be inferred.
+    gated: int = 0
     #: Share of the lane's token budget consumed so far, updated by the worker
     #: loop after every streamed message. The worker knows this and the lane
     #: does not, which is the whole reason it gets attached to tool results.
@@ -186,6 +208,36 @@ class WorkerToolbox:
     @property
     def last_finding(self) -> str | None:
         return self.findings[-1] if self.findings else None
+
+    def _gate(self, tool_name: str) -> dict[str, Any] | None:
+        """Refuse a content tool once the gate is crossed, or None to proceed.
+
+        A refusal rather than a truncation: the lane is not being kept from
+        finishing, it is being kept from starting something it cannot afford to
+        finish. What is left open is exactly what it needs to land the work it
+        already has.
+        """
+        if tool_name not in GATED_ABOVE_BUDGET or self.budget_used < BUDGET_GATE_AT:
+            return None
+        self.gated += 1
+        pct = int(self.budget_used * 100)
+        gate = int(BUDGET_GATE_AT * 100)
+        if self.findings:
+            message = (
+                f"token 預算已用 {pct}%。超過 {gate}% 之後不再受理取用類工具。"
+                "你已經寫過 finding —— 用 write_finding 把新結論補進去，"
+                "然後回傳 handle 結束。"
+            )
+        else:
+            message = (
+                f"token 預算已用 {pct}%。超過 {gate}% 之後不再受理取用類工具。"
+                "現在就用 write_finding 寫下目前為止的結論 —— "
+                "預算用盡時未落檔的分析會全部消失。"
+            )
+        return _err({
+            "code": "budget_gate", "message": message, "budget_used": pct,
+            "still_available": ["write_finding", "update_state"],
+        })
 
     def _result(self, text: str) -> dict[str, Any]:
         """A tool result, plus a budget warning once one is warranted.
@@ -228,6 +280,8 @@ class WorkerToolbox:
             annotations=read_only,
         )
         async def read_note(args):
+            if refusal := self._gate("read_note"):
+                return refusal
             raw = str(args.get("artifact", "")).strip()
             section = (args.get("section") or "").strip() or None
             try:
@@ -347,6 +401,8 @@ class WorkerToolbox:
             annotations=serial,
         )
         async def inspect_blob(args):
+            if refusal := self._gate("inspect_blob"):
+                return refusal
             result = await self._query_runner().inspect(
                 str(args.get("artifact", "")).strip()
             )
@@ -367,6 +423,8 @@ class WorkerToolbox:
             annotations=serial,
         )
         async def duckdb_query(args):
+            if refusal := self._gate("duckdb_query"):
+                return refusal
             raw = args.get("artifacts")
             if isinstance(raw, str):
                 raw = [raw]

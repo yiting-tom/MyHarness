@@ -266,3 +266,71 @@ async def test_an_ordinary_name_still_works(bench):
     }))
     assert not result.startswith("ERROR")
     assert toolbox.findings and toolbox.findings[-1].endswith("/findings/txn-stats")
+
+
+# --- the gate, because the warning is a request and not a construction -------
+#
+# Golden #17's d1 read "預算已用 82%" and then 92%, made fifteen queries after
+# the first one, and never called write_finding. #18's d1 read the same string
+# at 77% and did call it. Same model, same threshold, two outcomes. Every other
+# ceiling in this harness holds by construction; this one asked nicely.
+
+
+async def test_below_the_gate_a_content_tool_still_answers(bench):
+    from myharness.lanes.tools import BUDGET_GATE_AT
+
+    toolbox, ids = bench
+    toolbox.budget_used = BUDGET_GATE_AT - 0.01
+    result = await toolbox.handlers["read_note"]({"artifact": str(ids["granted"].id)})
+    assert "已授權的內容" in _text(result)
+
+
+async def test_above_the_gate_a_content_tool_is_refused(bench):
+    toolbox, ids = bench
+    toolbox.budget_used = 0.93
+    body = error_of(await toolbox.handlers["read_note"]({"artifact": str(ids["granted"].id)}))
+
+    assert body["code"] == "budget_gate"
+    assert body["budget_used"] == 93
+    assert "write_finding" in body["message"]
+    assert "全部消失" in body["message"], "the consequence, not just the instruction"
+
+
+async def test_the_gate_leaves_somewhere_to_put_the_work(bench):
+    """Closing everything would only change what the lane loses its work to."""
+    toolbox, _ = bench
+    toolbox.budget_used = 0.95
+
+    wrote = await toolbox.handlers["write_finding"]({"name": "partial", "text": "結論"})
+    assert "wrote" in _text(wrote)
+    state = await toolbox.handlers["update_state"]({"text": "還沒查完"})
+    assert "state updated" in _text(state)
+
+
+async def test_a_lane_that_already_wrote_is_told_to_finish_not_to_write_again(bench):
+    toolbox, ids = bench
+    toolbox.budget_used = 0.95
+    toolbox.findings.append("j/note/lanes/a/findings/1")
+    body = error_of(await toolbox.handlers["read_note"]({"artifact": str(ids["granted"].id)}))
+
+    assert "handle" in body["message"]
+    assert "write_finding" in body["message"], "補上新結論仍然要靠它"
+
+
+async def test_localize_stays_open_because_it_returns_a_path_not_content(bench):
+    """Refusing it would cost a lane its working file and save nothing."""
+    toolbox, ids = bench
+    toolbox.budget_used = 0.97
+    result = await toolbox.handlers["localize_blob"]({"artifact": str(ids["blob"].id)})
+    # The warning rides along on the same result, so the document is the first line.
+    body, _, warning = _text(result).partition("\n\n[harness]")
+    assert json.loads(body)["path"]
+    assert warning, "and the lane is still being told where it stands"
+
+
+async def test_the_gate_is_counted_so_a_run_shows_it_fired(bench):
+    toolbox, ids = bench
+    toolbox.budget_used = 0.95
+    for _ in range(3):
+        await toolbox.handlers["read_note"]({"artifact": str(ids["granted"].id)})
+    assert toolbox.gated == 3
