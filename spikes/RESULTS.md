@@ -2121,3 +2121,136 @@ schema 重新提示，一個全新的對話。
 （reported 11,498 也只涵蓋最後一次嘗試 —— 每次嘗試是一個新的 CLI session，
 usage 各自獨立。所以這不解釋 #18 的殘差；殘差仍然開著。但錄音檔在
 `spikes/spike21_captured.json`，下一次不必再推。）
+
+---
+
+## Spike #22 —— `revision` 撐不撐得住斷掉的 A2A 串流
+
+（change `expose-over-a2a` 任務 1.3 / 1.4。編號 22 不是 14 ——
+`spike14_turn_overhead.py` 已經存在，tasks.md 是在 14 還空著的時候寫的。）
+
+D4 說每一則串流事件帶 `revision`，重連的呼叫方把最後看到的值帶回來。
+這不是新機制，`JobHandle.wait_for_change(since=)` 的 docstring 早就寫著同一件事。
+兩個半邊，各自可能壞在不同地方。
+
+### A2A 這半邊：位置有，續傳沒有
+
+```
+PASS  a streamed status event can carry a cursor
+      TaskStatusUpdateEvent.metadata
+PASS  so can an artifact update
+      TaskArtifactUpdateEvent.metadata
+PASS  resubscribe is a protocol operation
+      A2AService.SubscribeToTask returns a stream
+PASS  resubscribe does NOT resume from a point
+      SubscribeToTaskRequest carries ['id', 'tenant'] 和其他什麼都沒有
+PASS  but the task's history is fetchable
+      Task.history + GetTaskRequest.history_length
+```
+
+**重連不會重播。** `SubscribeToTask` 開的是一條從「現在」開始的新串流，
+斷線期間發生的事不會補送。所以「重連時不漏事件」**不能只靠 resubscribe 達成**：
+
+1. 串流事件在 `metadata` 帶 `revision`（我們的語意，客戶端只要存不必懂 ——
+   與價目表那個必須被理解的 extension 不同）
+2. 重連時客戶端把最後看到的 `revision` 帶回來
+3. 落後的話，缺掉的東西從 `Task.history` 拿，不是從新串流拿
+
+> 第一版這支 spike 有兩個檢查是**因為錯的理由通過的**：查的是
+> `TaskSubscription` 與 `TaskSubscriptionRequest`，而 proto 裡叫
+> `SubscribeToTask` / `SubscribeToTaskRequest`。找不到的 message 讓
+> 「沒有 cursor 欄位」這個反向檢查以空集合通過。已修成找不到就 FAIL。
+
+### harness 這半邊：跑一次給它看
+
+```
+subscriber disconnects having seen revision 2
+job moves on to revision 5 with nobody listening
+reconnect with since=2 returns True immediately
+reconnect with since=5 returns False after the timeout
+```
+
+落後的客戶端**立刻**被告知它落後，而不是被押去等下一次改變（那會把剛剛
+發生的那次藏起來）。已經跟上的客戶端才會等 —— 這正是它還算 long poll 的原因。
+
+### 1.4：逐輪的內部事件
+
+已經是真的，不必改。`MEANINGFUL` 有 10 種事件，`ctx` 不在裡面 ——
+它每個 orchestrator turn 都發，當成 news 會把 30 秒的等待變成週期性空轉。
+
+---
+
+## Spike #23 —— 三種狀態映射到 A2A，哪一種沒有家
+
+（任務 1.5。編號 23 不是 15 —— `spike15_token_rates.py` 已經存在。）
+
+`TaskState` 九個值，六個是 terminal 或 interrupted。spike #13 說
+「存在但不在此程序執行中」沒有對應。**認真映射之後，它會裂成兩半，
+而只有一半真的無家可歸。**
+
+```
+no such analysis                 -> （根本不是一個 state）
+running in this process          -> TASK_STATE_WORKING
+                                    （有待答問題時 TASK_STATE_INPUT_REQUIRED）
+finished, this process or another-> TASK_STATE_COMPLETED
+abandoned in flight              -> （沒有一個合適）
+```
+
+**「在別的程序跑完的」沒有落差。** 事件流以 `job.finish` 收尾就是 COMPLETED，
+而 harness 本來就從磁碟作答 —— 讀一個跑完的 job 從來不需要當初跑它的那個程序。
+（jobs-scratch 裡 14 份事件流全部以 `job.finish` 收尾。）
+
+**「跑到一半被丟下的」才是洞。** 不是 WORKING，因為沒有任何東西在處理它；
+不是 COMPLETED，因為它沒跑完；不是 FAILED 或 REJECTED，因為 agent 從來沒有
+下過任何判斷 —— 是程序不見了；不是 CANCELED，因為沒有人要求。
+
+誠實的編碼是 **`TASK_STATE_FAILED` 加上一段說明程序已消失、部分結果仍可讀取的
+status message**：種類上是錯的，但它是 terminal，而 terminal 正是客戶端需要的 ——
+它得以停止等待。標成 WORKING 會是一個**客戶端偵測不到的謊**：它會永遠等一條
+不會再有人寫入的串流。
+
+「查無此分析」不是 state，是傳輸層的 not-found。
+
+### 沒驗過的部分與原因
+
+**JSON-RPC binding 的錯誤碼沒有驗。** canonical proto 裡沒有錯誤列舉，而
+`specification/json/a2a.json` 不在這個 repo 其他 A2A spike 抓的路徑上（404）。
+所以「not-found 在線上叫什麼」是**未驗證**，不是猜測。實作 §7.1
+（拒絕以可讀結果表達）之前要補。
+
+---
+
+## Spike #24 —— A2A 的信封替價目表加了多少
+
+（任務 1.6。）
+
+spike #12 量到一次分類 8,991 個 input token，其中 8,372 是 CLI 自己的
+system prompt —— 93%，而那個數字就是 `myharness/proxy/direct.py` 存在的理由。
+同一個問題問到新邊界上，而且這裡更要緊：`analysis_result` 的全部意義就是
+不回報告，只回摘要與每節的價錢。**一個比它包的東西還貴的包裝會一步毀掉這件事。**
+
+拿真的 job 量，不是拿 mock：`jobs-scratch/golden18`，`AnalysisService.result`
+只讀事件流與 store，所以它答得了一個這個程序沒跑過的 job。A2A 那邊用 proto
+自己的欄位名組（`Task` / `TaskStatus` / `Artifact.extensions`），包在 JSON-RPC
+信封裡。兩邊 part 裡放的是**同一份完整 body**（spike 裡有 assert 釘住這件事 ——
+少放一點會讓信封看起來很便宜）。
+
+```
+                                          chars  est tokens
+the price list itself                     1,731         957
+MCP: what analysis_result returns         1,741         959
+A2A: the same, as a JSON-RPC Task         2,179       1,113
+
+sections priced: 5; 全部讀完要 2,430 tokens
+
+MCP envelope: +2 tokens   (0% of its response)
+A2A envelope: +156 tokens (14% of its response)
+A2A over MCP: +154 tokens (1.16x)
+```
+
+**沒有重演 93%。** 而且那 156 個 token 裡大部分是 artifact 的 `description` ——
+那段「這是價目表不是內容，用 drill 取需要的那幾節」的指引，正是規格 5.2
+本來就要求的東西。信封是固定的，不隨報告長大 —— 報告本來就不在裡面。
+
+對照組值得記著：這份價目表 957 token，而把五節全部讀完要 2,430 token。
+**閘門省下的是 2.5 倍，信封多花的是 1.16 倍。**

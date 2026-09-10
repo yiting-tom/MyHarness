@@ -4,29 +4,40 @@
       自然標示「這是章節價目表，不是章節內容」。**這是 D7 的閘**
 - [x] 1.2 同一支 spike：查明 agent card 能否宣告兩種輸出模式，讓呼叫方顯式選擇
       （規格：能力宣告含兩種模式）
-- [ ] 1.3 `spikes/spike14_a2a_stream_cursor.py`：把 `revision` 當串流序號跑一次，
+- [x] 1.3 `spikes/spike22_a2a_stream_cursor.py`：把 `revision` 當串流序號跑一次，
       刻意中斷再重連，確認中斷期間的改變仍可被得知
-      （規格：重連時不漏事件）
-- [ ] 1.4 同一支 spike：確認不構成實質改變的內部事件不會觸發推送
-      （規格：逐輪的內部事件不觸發推送）
-- [ ] 1.5 `spikes/spike15_a2a_task_states.py`：把「查無此分析／存在但不在此程序
+      （規格：重連時不漏事件）**可滿足，但不能只靠 resubscribe** ——
+      `SubscribeToTaskRequest` 只有 `id` / `tenant`，重連開的是從現在開始的
+      新串流。cursor 走 `TaskStatusUpdateEvent.metadata`，缺掉的從
+      `Task.history` 補
+- [x] 1.4 同一支 spike：確認不構成實質改變的內部事件不會觸發推送
+      （規格：逐輪的內部事件不觸發推送）**已經成立** —— `ctx` 不在 `MEANINGFUL`
+- [x] 1.5 `spikes/spike23_a2a_task_states.py`：把「查無此分析／存在但不在此程序
       執行中／執行中」三種狀態映射到 A2A 的 task 狀態，記錄哪一種沒有合適的對應
-      （規格：存在但不在此程序執行中）
-- [ ] 1.6 `spikes/spike16_a2a_overhead.py`：量一次 A2A 請求的固定開銷，
+      （規格：存在但不在此程序執行中）**那一種會裂成兩半**：在別的程序跑完的
+      → COMPLETED，沒有落差；跑到一半被丟下的 → 九個值沒有一個合適
+- [x] 1.6 `spikes/spike24_a2a_overhead.py`：量一次 A2A 請求的固定開銷，
       與 spike #12 在 proxy 上量到的 8,372 tokens（93%）對照
+      **+156 token，佔回應 14%，沒有重演**
+
+> spike 編號與 tasks.md 原本寫的 14 / 15 / 16 不同：那三個號碼在這份文件寫成之後
+> 被 token 相關的 spike 用掉了。spike 編號是全域遞增的，所以改用 22 / 23 / 24。
 
 ## 2. 記錄結論
 
-- [ ] 2.1 四支 spike 的結論寫進 `spikes/RESULTS.md`，含**沒驗過的部分與原因**
-- [ ] 2.2 若 1.1 驗不過：寫下「A2A artifact 語意不足以表達雙軌」為否決理由，
-      並在 design.md 標注退回單軌價目表（D7）
+- [x] 2.1 四支 spike 的結論寫進 `spikes/RESULTS.md`，含**沒驗過的部分與原因**
+      —— 未驗證的是 JSON-RPC binding 的錯誤碼：canonical proto 沒有錯誤列舉，
+      而 `specification/json/a2a.json` 在這個 repo 其他 spike 抓的路徑上是 404。
+      §7.1 實作前要補
+- [x] 2.2 不適用 —— 1.1 通過了（spike #13），沒有否決理由要寫
 
 ## 3. 決策閘
 
-- [ ] 3.1 依 1.1 的結果決定走 B（雙軌）或退回 A（單軌價目表）
-- [ ] 3.2 若退回 A：更新 `specs/a2a-server/spec.md`，移除「兩種輸出模式」相關需求，
-      其餘需求不變。**此 change 到此為有效產出，以下不執行**
-- [ ] 3.3 若確認走 B：繼續第 4 節
+- [x] 3.1 **走 B（雙軌）。** `Artifact.extensions` 加上 agent card 上
+      `AgentExtension(required=true)` 是協定認可的標示方式，不是塞在 metadata
+      裡的私有約定（spike #13）。#24 又證實這條路的信封成本是 1.16x，不是 93%
+- [x] 3.2 不適用 —— 沒有退回 A
+- [x] 3.3 繼續第 4 節
 
 ## 4. 邊界骨架（僅在 3.3 成立時）
 
