@@ -1,6 +1,7 @@
 # MyHarness
 
-以 `claude-agent-sdk` 建構的多 agent 資料分析 harness，以 **MCP server** 形式對外提供。
+以 `claude-agent-sdk` 建構的多 agent 資料分析 harness，對外有兩條路：
+**MCP over stdio**（同機）與 **A2A over HTTP**（遠端，共用同一個 service）。
 
 **要解決的問題**：單一 agent 的 196k context 在資料分析任務中極易耗盡。
 
@@ -9,7 +10,7 @@
 
 | 層級 | 被保護者 | 手法 |
 |---|---|---|
-| MCP 邊界 | 客戶端 agent 的 context | job-based API，只回摘要 + 章節價目表 |
+| 對外邊界（MCP／A2A） | 客戶端 agent 的 context | job-based API，只回摘要 + 章節價目表 |
 | Orchestrator | 全局規劃者的 context | subagent 只回 ~120 token 的 handle |
 | Lane worker | 執行者的 context | ephemeral agent + durable lane state |
 | Artifact 讀取 | 任何讀取者 | blob 拒絕讀入 context，note 有 est_tokens 預檢 |
@@ -57,6 +58,37 @@ analysis_drill(job_id=..., section_id="方法") # 需要哪節才讀哪節
 
 六個工具與其上限見 [`myharness/mcp/README.md`](myharness/mcp/README.md)，
 完整教學見 [`docs/introduction.md`](docs/introduction.md)。
+
+## 從遠端的 agent 連接（A2A）
+
+MCP over stdio 要求客戶端把 `myharness-mcp` spawn 成子程序，所以只有同一台
+機器上的 agent 用得到。A2A 是第二條路，**不取代第一條**——兩條共用同一個
+`AnalysisService`。
+
+```bash
+uv pip install -e ".[a2a]"
+python -m myharness.a2a.server --root ./myharness-jobs --backend openrouter
+```
+
+沒有 console script，而且**只綁 loopback**：這條邊界目前沒有認證、沒有多租戶、
+沒有速率限制，所以它拒絕聽在任何非 loopback 的位址上。要對外開之前，那三題
+得先有答案。
+
+agent card 在 `/.well-known/agent-card.json`，宣告兩個 skill：
+
+| skill | 給什麼 |
+|---|---|
+| `analysis.result` | 摘要與章節價目表（**預設**，不含報告全文） |
+| `analysis.sections` | 指定章節的全文，逐節取 |
+
+價目表的 artifact 帶一個 `required=true` 的 extension URI —— 不認得這個約定的
+客戶端會被協定告知它不認得，而不是默默把目錄當成報告讀。
+
+**已知的牆**：job 只活在啟動它的那個 process 裡。`analysis_result` 與
+`analysis_drill` 只讀事件流與 store，換 process 照樣答；但**進行中的 task 接不
+回來**。A2A 的 `TaskState` 九個值裡沒有一個表示「存在但不在此程序執行中」，
+所以被丟下的 job 回報 `FAILED` 加一段說明——種類上是錯的，但它是終局狀態，
+呼叫方應該停止等待（spikes/RESULTS.md，spike #23）。
 
 ## 不用 MCP 直接跑
 
@@ -109,7 +141,7 @@ Golden job 每次跑都斷言這些（`tests/golden/`，`pytest -m live tests/go
 ## 開發
 
 ```bash
-pytest                  # 離線，不花錢（750 tests）
+pytest                  # 離線，不花錢（855 tests）
 pytest -m live          # 打真實 API，要金鑰，會花錢
 openspec list           # 進行中的規格變更
 ```

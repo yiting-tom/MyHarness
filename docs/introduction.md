@@ -17,6 +17,7 @@
 - [核心原則](#核心原則外部化狀態--短命執行者)
 - [快速開始](#快速開始)
 - [六個 MCP 工具](#六個-mcp-工具)
+- [第二條邊界：A2A](#第二條邊界a2a)
 - [Lane 能做什麼](#lane-能做什麼)
 - [資料進來時發生什麼](#資料進來時發生什麼)
 - [每一道上限](#每一道上限)
@@ -221,6 +222,91 @@ poll(job, since=3)   → 立刻返回                // 不會為了「下一次
 只有 `analysis_poll` 與 `analysis_answer` 需要活著的 job。對已經結束的 job，
 它們回「**不在執行中**」而不是「查無此 job」—— 那是兩件不同的事，
 客戶端的下一步也不同：一個還能讀結果，一個是打錯了。
+
+---
+
+## 第二條邊界：A2A
+
+MCP over stdio 要求客戶端把 `myharness-mcp` spawn 成子程序，所以只有同一台
+機器上的 agent 用得到。要讓**遠端**的 agent 用這套 harness，A2A 是現成的協定。
+
+兩條邊界**共用同一個 `AnalysisService`**，`myharness/a2a/server.py` 與
+`myharness/mcp/server.py` 同層同寬。service 沒有為了 A2A 多一個參數 —— 一旦那層
+protocol-free 的程式碼知道有兩種協定，讓第二條邊界變便宜的分層就沒了。
+有一組契約測試釘住這件事：同一個 job 經兩條邊界，摘要相同、章節 id 清單相同、
+在一邊看到的價錢在另一邊花得掉。
+
+```bash
+uv pip install -e ".[a2a]"
+python -m myharness.a2a.server --root ./myharness-jobs --backend openrouter
+```
+
+### 預設回價目表，全文要明說
+
+A2A 的 artifact 模型預設「task 做完，artifact 就是成品」，而這個 harness 對最
+外層的承諾正好相反。所以 agent card 宣告兩個 skill：
+
+| skill | 給什麼 |
+|---|---|
+| `analysis.result` | 摘要與章節價目表（**預設**，不含報告全文） |
+| `analysis.sections` | 章節全文，逐節取 |
+
+宣告的載體不是 `outputModes` —— 那是 media type，把「價目表」宣告成一種
+output mode 是誤用欄位而不是使用欄位。價目表的 artifact 帶一個
+`required=true` 的 extension URI，協定的原話是「client must understand and
+comply」：**不認得這個約定的客戶端會被告知它不認得**，而不是默默把目錄
+當報告讀。
+
+「全文」也不是第二條把整份報告倒出來的路徑。`analysis_drill` 已經有 token
+上限，第二條路等於第二道上限 —— 所以全文模式是**端點代呼叫方把價目表走完**，
+一節一個 artifact。被裁切的那一節會在它被裁切的地方說明自己被裁切了，
+某一節取不到也不會拖垮其餘。
+
+### 這筆交易的數字
+
+閘門每讓你讀一節就多一次來回，換掉你沒讀的那些節。拿 golden18 量（五節）：
+
+```
+ 讀幾節    價目表模式             全文模式
+          來回    token        來回    token
+     0      1      979          1     2,572
+     1      2    1,889          1     2,572
+     2      3    2,633          1     2,572
+     5      6    3,551          1     2,572
+```
+
+**讀到第二節就不再省 token 了。** 這不是閘門的缺點，是它的適用範圍：
+只需要一個數字的 agent 花 1,889 拿到它（省 27%），每節都要讀的 agent 多付 38%。
+所以是雙軌而不是單軌 —— 單軌會讓後面那個呼叫方沒有出路。
+
+### 兩面牆，都寫在這裡而不是等你撞
+
+**沒有認證。** 這條邊界是網路可達的，MCP stdio 不是。認證、多租戶、速率限制
+一律還沒有，所以它**只綁 loopback**，而且對非 loopback 的位址是拒絕而不是警告。
+沒有 console script，也沒有別的模組 import 它 —— 它只在有人親自打那行指令時才起來。
+
+**進行中的 task 接不回來。** job 只活在啟動它的那個 process 裡。讀結果換 process
+照樣答（只碰事件流與 store），但 A2A 的 `TaskState` 九個值裡沒有一個表示
+「存在但不在此程序執行中」。認真映射之後這個狀態會裂成兩半，只有一半真的沒家：
+
+| harness 的狀態 | A2A | |
+|---|---|---|
+| 在這個 process 執行中 | `WORKING`（有待答問題時 `INPUT_REQUIRED`） | 沒問題 |
+| 在別的 process 跑完了 | `COMPLETED` | 沒問題 —— 事件流以 `job.finish` 收尾 |
+| 跑到一半被丟下 | `FAILED` + 一段說明 | **種類上是錯的** |
+
+用 `FAILED` 是因為它是終局狀態，而終局才能讓呼叫方停止等待。標成 `WORKING`
+會是一個客戶端偵測不到的謊：它會永遠等一條不會再有人寫入的串流。
+
+### 斷線重連
+
+`SubscribeToTask` **不重播**。它的 request 只有 `id` 和 `tenant`，沒有 cursor 欄位，
+所以重連開的是一條從「現在」開始的新串流，斷線期間的事不會補送。
+
+補救靠兩件事：每一個進度事件在 metadata 裡帶 job 的 `revision`（就是 long-poll
+那個 `revision`，不是另造的序號），而同一個 tick 也以 message 的形式進到
+`Task.history` —— 重連的客戶端帶著最後看到的 revision 去讀 history，就知道
+自己漏了什麼。
 
 ---
 
@@ -646,6 +732,16 @@ system prompt。
 
 自架端點上這一項是 0 秒（#7、#8），所以限流只在託管後端上是問題。
 
+### A2A 邊界：沒有認證，所以只綁 loopback
+
+認證、多租戶、速率限制一律還沒有。這條邊界跟 MCP stdio 不同，是**網路可達**的，
+所以它拒絕聽在任何非 loopback 的位址上，也不進任何預設啟動路徑。
+要對外開之前那三題得先有答案 —— 目前它們連被設計都還沒有。
+
+另外 JSON-RPC binding 的錯誤碼**沒有驗過**：canonical proto 裡沒有錯誤列舉，
+而 `specification/json/a2a.json` 在其他 A2A spike 抓的路徑上是 404。
+拒絕目前以 failed task 表達，不靠錯誤碼。
+
 ### Lane 內部的大型 tool result
 
 分類器只在 `analysis_provide` 這一個入口作用。如果一條 lane 自己用工具撈回一大塊資料，
@@ -656,14 +752,15 @@ system prompt。
 ## 開發
 
 ```bash
-pytest                  # 離線，不花錢（750 tests）
+pytest                  # 離線，不花錢（855 tests）
 pytest -m live          # 打真實 API，要金鑰，會花錢
 openspec list           # 進行中的規格變更
 ```
 
 專案用規格驅動流程（OpenSpec）：每個改動先寫 proposal 與 design，
 再把需求寫成可斷言的 scenario，實作完才歸檔進 `openspec/specs/`。
-目前 10 個 capability、83 條需求、750 個測試、94% coverage。
+目前 10 個 capability、83 條需求、855 個測試。`a2a-server` 還在 change 裡，
+尚未歸檔成 spec。
 
 ### 可行性驗證都留著
 
