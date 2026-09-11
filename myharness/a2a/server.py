@@ -72,13 +72,16 @@ def build_app(service: AnalysisService, *, url: str):
     from a2a.server.request_handlers import DefaultRequestHandler
     from a2a.server.routes.agent_card_routes import create_agent_card_routes
     from a2a.server.routes.jsonrpc_routes import create_jsonrpc_routes
-    from a2a.server.tasks import InMemoryTaskStore
     from starlette.applications import Starlette
+
+    from myharness.a2a.store import EventLogTaskStore
 
     card = build_agent_card(url)
     handler = DefaultRequestHandler(
         agent_executor=AnalysisExecutor(service),
-        task_store=InMemoryTaskStore(),
+        # Not the SDK's in-memory store: a GetTask for a job this process did
+        # not run would 404 on something that is on disk and readable (D5).
+        task_store=EventLogTaskStore(service),
         agent_card=card,
     )
     routes = [

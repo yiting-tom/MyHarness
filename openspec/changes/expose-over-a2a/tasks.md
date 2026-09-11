@@ -70,21 +70,40 @@
 
 ## 6. 生命週期與串流
 
-- [ ] 6.1 啟動：非阻塞，回傳可供後續查詢的識別碼，共用 `service.start()`
-- [ ] 6.2 進度事件帶 `revision`（規格：事件帶版本序號）
+- [x] 6.1 啟動：非阻塞，回傳可供後續查詢的識別碼，共用 `service.start()`
+- [x] 6.2 進度事件帶 `revision`（規格：事件帶版本序號）
 - [ ] 6.3 重連帶回最後看到的 `revision`，沿用 `wait_for_change(since=)` 的判斷
       （規格：重連時不漏事件）
-- [ ] 6.4 三種狀態分別映射，不壓成同一個回應
+- [x] 6.4 三種狀態分別映射，不壓成同一個回應
       （規格：查無此分析、存在但不在此程序執行中）
-- [ ] 6.5 結果查詢只讀事件流與 store，跨程序仍可作答
+- [x] 6.5 結果查詢只讀事件流與 store，跨程序仍可作答
       （規格：結果查詢不依賴分析仍在執行）
+
+> **6.1–6.2、6.4–6.5 的做法**
+> 非阻塞走協定自己的 `configuration.return_immediately`，不是外接的機制。
+> **A2A 的 task id 就是 job id**，所以之後每一次 GetTask／SubscribeToTask／
+> 讀結果都在講同一個東西。`revision` 放在 status update 的 metadata 裡；
+> `ctx` 不 bump revision，所以逐輪事件不會產生推送。
+> 三種狀態在 `myharness/a2a/store.py`：在別的程序跑完的 → COMPLETED，
+> 跑到一半被丟下的 → FAILED 加說明（spike #23：九個值沒有一個對，而 terminal
+> 才能讓呼叫方停止等待）。用的不是 SDK 的 in-memory store，否則一個在磁碟上
+> 讀得到的 job 會回 404。
+>
+> **6.3 只做了一半。** executor 的每一次 poll 都帶 cursor，事件也帶著它出去。
+> 但 `SubscribeToTaskRequest` 沒有 cursor 欄位（spike #22），客戶端沒有地方把它
+> 送回來 —— 補救路徑是 `Task.history`，而 history 目前沒有被填。
+> 這一項要連 history 一起做。
 
 ## 7. 拒絕與上限
 
-- [ ] 7.1 拒絕以可讀結果表達，不外洩內部錯誤細節
+- [x] 7.1 拒絕以可讀結果表達，不外洩內部錯誤細節
       （規格：不合法的請求）
-- [ ] 7.2 併行上限的拒絕帶上限值與執行中數量
+- [x] 7.2 併行上限的拒絕帶上限值與執行中數量
       （規格：併行上限）
+
+> 拒絕以 failed task 送出，因為 terminal 才能讓呼叫方停止等待；內容是 service
+> 自己那套面向客戶端的 code/message，不外洩內部細節。`at_capacity` 的
+> running/limit 原樣帶過去 —— 「太多了」而不給數字沒有辦法據以行動。
 
 ## 8. 驗證
 

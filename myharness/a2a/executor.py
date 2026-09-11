@@ -8,10 +8,18 @@ touch the service (expose-over-a2a D3). No `mode=` parameter went into
 the moment the service knows there are two protocols, the layering that made
 this possible is gone.
 
-What is here is the read path. Starting an analysis is a lifecycle question --
-non-blocking start, progress events carrying `revision`, reconnect without
-missed events -- and it is section 6 of the change, not this one. A request to
-start is refused with something a caller can act on rather than half-served.
+Starting an analysis does not block. A2A has a word for that -- a client sets
+`configuration.return_immediately` and the framework hands back the task while
+the executor keeps running -- so non-blocking start is the protocol's own
+mechanism rather than something bolted on. A client that does not ask for it
+gets the finished task, which is also a reasonable thing to want.
+
+Progress events carry `revision` in their metadata, because reconnecting to an
+A2A stream does not replay: `SubscribeToTaskRequest` carries only `id` and
+`tenant`, so a new stream starts from now and whatever happened while the client
+was away is simply gone (spike #22). The cursor is what closes that -- a client
+that comes back with the revision it last saw can be told it is behind, and
+`Task.history` is where it catches up.
 """
 
 from __future__ import annotations
@@ -34,6 +42,11 @@ PRICE_LIST_GUIDANCE = (
     "這是章節價目表，不是章節內容。每一節的 est_tokens 是把它讀進 context 要花的"
     f"token。要全文請用 skill `{SKILL_FULL_TEXT}` 逐節取，指名 section id。"
 )
+
+#: How long each progress poll waits for the job to do something. Long enough
+#: that a quiet job does not produce a stream of identical updates, short enough
+#: that a cancelled request is noticed. `AnalysisService.poll` clamps it anyway.
+PROGRESS_WAIT_S = 20.0
 
 
 class AnalysisExecutor(AgentExecutor):
@@ -58,17 +71,59 @@ class AnalysisExecutor(AgentExecutor):
 
         request = _read_request(context)
         job_id = request.get("job_id")
-        if not job_id:
-            await _refuse(updater, "missing_job_id",
-                          "請在 message 裡指名 job_id。啟動新分析尚未開放 —— "
-                          "目前 A2A 邊界只讀已存在的分析。")
+        goal = request.get("task") or request.get("goal")
+
+        if job_id:
+            section_id = request.get("section_id")
+            if section_id:
+                await self._answer_section(updater, str(job_id), str(section_id))
+            else:
+                await self._answer_price_list(updater, str(job_id))
             return
 
-        section_id = request.get("section_id")
-        if section_id:
-            await self._answer_section(updater, str(job_id), str(section_id))
-        else:
-            await self._answer_price_list(updater, str(job_id))
+        if goal:
+            # The A2A task id becomes the job id, so every later GetTask,
+            # SubscribeToTask and result read addresses the same thing by the
+            # same name -- including from a process that never ran it.
+            await self._run(updater, str(goal), job_id=context.task_id)
+            return
+
+        await _refuse(updater, "empty_request",
+                      "請指名 job_id 來讀一份已完成的分析，"
+                      "或給 task 來啟動一個新的。")
+
+    async def _run(self, updater: TaskUpdater, goal: str, *, job_id: str) -> None:
+        started = await self._service.start(goal, job_id=job_id)
+        if not started.get("ok"):
+            # at_capacity carries its own limit and running count, and the
+            # refusal keeps them: "too many" without the numbers is not
+            # actionable (change spec 7.2).
+            await _refuse(updater, started.get("code", "error"),
+                          started.get("message", ""),
+                          **{k: v for k, v in started.items()
+                             if k not in ("ok", "code", "message")})
+            return
+
+        revision = int(started.get("revision", 0))
+        await updater.update_status(
+            TaskState.TASK_STATE_WORKING, metadata=_cursor(revision, job_id)
+        )
+        while True:
+            progress = await self._service.poll(
+                job_id, wait=PROGRESS_WAIT_S, since=revision
+            )
+            if not progress.get("ok"):
+                await _refuse(updater, progress.get("code", "error"),
+                              progress.get("message", ""), job_id=job_id)
+                return
+            revision = int(progress.get("revision", revision))
+            if progress.get("state") != "running":
+                break
+            await updater.update_status(
+                TaskState.TASK_STATE_WORKING,
+                metadata=_cursor(revision, job_id, progress),
+            )
+        await self._answer_price_list(updater, job_id)
 
     async def _answer_price_list(self, updater: TaskUpdater, job_id: str) -> None:
         answer = await self._service.result(job_id)
@@ -108,6 +163,22 @@ class AnalysisExecutor(AgentExecutor):
         # Reading is not long enough to be worth interrupting, and a cancel that
         # silently did nothing would be worse than one that says so.
         await updater.cancel()
+
+
+def _cursor(revision: int, job_id: str, progress: dict[str, Any] | None = None):
+    """What a reconnecting client needs, on every event that says anything.
+
+    `revision` rather than an event count: it is the number the harness already
+    bumps on every meaningful change and already accepts back through
+    `wait_for_change(since=)`. A second sequence would be a second thing to keep
+    correct. `ctx` does not bump it, so an orchestrator turn produces no push.
+    """
+    cursor: dict[str, Any] = {"revision": revision, "job_id": job_id}
+    if progress:
+        for key in ("phase", "dispatches", "state"):
+            if key in progress:
+                cursor[key] = progress[key]
+    return cursor
 
 
 def _read_request(context: RequestContext) -> dict[str, Any]:
