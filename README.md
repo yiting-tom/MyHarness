@@ -84,6 +84,12 @@ agent card 在 `/.well-known/agent-card.json`，宣告兩個 skill：
 價目表的 artifact 帶一個 `required=true` 的 extension URI —— 不認得這個約定的
 客戶端會被協定告知它不認得，而不是默默把目錄當成報告讀。
 
+**啟動一定要非阻塞**：一次分析跑幾十分鐘，而 `SendMessage` 預設會等到終局狀態
+才回應。呼叫方必須設 `configuration.return_immediately`，然後用 `GetTask` 回來看。
+
+**資料還是得從另一條路進去**：A2A 上還沒有 `analysis_provide` 的對應
+（那在 design 的 Open Questions 裡，刻意沒答）。
+
 **已知的牆**：job 只活在啟動它的那個 process 裡。`analysis_result` 與
 `analysis_drill` 只讀事件流與 store，換 process 照樣答；但**進行中的 task 接不
 回來**。A2A 的 `TaskState` 九個值裡沒有一個表示「存在但不在此程序執行中」，

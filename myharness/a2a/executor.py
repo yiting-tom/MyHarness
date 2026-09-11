@@ -57,6 +57,19 @@ class AnalysisExecutor(AgentExecutor):
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         updater = TaskUpdater(event_queue, context.task_id, context.context_id)
+        request = _read_request(context)
+        job_id = request.get("job_id")
+        goal = request.get("task") or request.get("goal")
+
+        # Started before the task is announced, not after. A client that asked
+        # for `return_immediately` gets the task id the moment the Task event
+        # goes out, and anything it does with that id -- providing data, polling
+        # -- would otherwise race the job into existence and be told there is no
+        # such job.
+        started = None
+        if not job_id and goal:
+            started = await self._service.start(str(goal), job_id=context.task_id)
+
         # The task itself goes on the queue before any update to it. The
         # framework refuses a status event for a task it has never seen --
         # "Agent should enqueue Task before TaskStatusUpdateEvent event" -- and
@@ -69,10 +82,6 @@ class AnalysisExecutor(AgentExecutor):
             ))
         await updater.start_work()
 
-        request = _read_request(context)
-        job_id = request.get("job_id")
-        goal = request.get("task") or request.get("goal")
-
         if job_id:
             section_id = request.get("section_id")
             if section_id:
@@ -83,19 +92,20 @@ class AnalysisExecutor(AgentExecutor):
                 await self._answer_price_list(updater, str(job_id))
             return
 
-        if goal:
+        if started is not None:
             # The A2A task id becomes the job id, so every later GetTask,
             # SubscribeToTask and result read addresses the same thing by the
             # same name -- including from a process that never ran it.
-            await self._run(updater, str(goal), job_id=context.task_id)
+            await self._watch(updater, started, job_id=context.task_id)
             return
 
         await _refuse(updater, "empty_request",
                       "請指名 job_id 來讀一份已完成的分析，"
                       "或給 task 來啟動一個新的。")
 
-    async def _run(self, updater: TaskUpdater, goal: str, *, job_id: str) -> None:
-        started = await self._service.start(goal, job_id=job_id)
+    async def _watch(
+        self, updater: TaskUpdater, started: dict[str, Any], *, job_id: str
+    ) -> None:
         if not started.get("ok"):
             # at_capacity carries its own limit and running count, and the
             # refusal keeps them: "too many" without the numbers is not

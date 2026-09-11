@@ -61,6 +61,7 @@ class ChainResult:
 
     skills: list[str] = field(default_factory=list)
     extensions: list[str] = field(default_factory=list)
+    started_state: int = 0
     state: int = 0
     price_list: dict[str, Any] = field(default_factory=dict)
     marked_artifacts: int = 0
@@ -70,8 +71,15 @@ class ChainResult:
     section_marked: bool = False
 
 
-async def drive(port: int, task_text: str, *, timeout_s: float = 1_800.0) -> ChainResult:
-    """Start an analysis, watch it, price it, then buy one section of it."""
+async def drive(port: int, task_text: str, *, timeout_s: float = 1_800.0,
+                after_start=None) -> ChainResult:
+    """Start an analysis, watch it, price it, then buy one section of it.
+
+    `after_start` is called with the new job id before the wait begins. Giving a
+    job its data is not an A2A operation -- whether `analysis_provide` becomes a
+    second message or a task input is still an open question in the change -- so
+    a caller that needs to seed one does it through the service it already owns.
+    """
     import httpx
     from a2a.client import A2ACardResolver, ClientConfig, ClientFactory
     from a2a.types import GetTaskRequest, Message, Part, Role, SendMessageRequest
@@ -79,7 +87,10 @@ async def drive(port: int, task_text: str, *, timeout_s: float = 1_800.0) -> Cha
     from myharness.a2a.card import PRICE_LIST_EXTENSION
 
     out = ChainResult()
-    async with httpx.AsyncClient(timeout=timeout_s) as http:
+    # Per-request, not per-analysis: nothing is long-lived now that the start
+    # returns immediately, and a client timeout measured in analyses is how the
+    # first live run spent thirty minutes finding out it was misconfigured.
+    async with httpx.AsyncClient(timeout=120.0) as http:
         # Resolving the card over HTTP is half the point: a remote agent
         # discovers the two skills before it asks for anything. The resolver is
         # separate from the client because the client does not hand its card
@@ -91,7 +102,16 @@ async def drive(port: int, task_text: str, *, timeout_s: float = 1_800.0) -> Cha
         factory = ClientFactory(ClientConfig(httpx_client=http, streaming=False))
         client = factory.create(card)
 
-        task = await _send(client, {"task": task_text}, "m1")
+        # Non-blocking, because an analysis runs for tens of minutes and a
+        # blocking send holds the HTTP request open for all of it. The first
+        # live run died on exactly that: a read timeout at 30 minutes, with the
+        # analysis still going. `return_immediately` is the protocol's answer
+        # and the executor keeps running behind it.
+        task = await _send(client, {"task": task_text}, "m1", immediate=True)
+        out.started_state = task.status.state
+        if after_start is not None:
+            await after_start(task.id)
+        task = await _await_terminal(client, task.id, timeout_s=timeout_s)
         out.state = task.status.state
         marked = [a for a in task.artifacts if PRICE_LIST_EXTENSION in a.extensions]
         out.marked_artifacts = len(marked)
@@ -118,13 +138,44 @@ async def drive(port: int, task_text: str, *, timeout_s: float = 1_800.0) -> Cha
     return out
 
 
-async def _send(client, payload: dict, message_id: str):
-    from a2a.types import Message, Part, Role, SendMessageRequest
+async def _await_terminal(client, task_id: str, *, timeout_s: float):
+    """Poll GetTask until the task stops moving, the way a remote agent would.
+
+    Not a stream: this is the path that survives a client restart, and it is the
+    same one an agent uses to check back on an analysis somebody else started.
+    """
+    from a2a.types import GetTaskRequest, TaskState
+
+    terminal = {
+        TaskState.TASK_STATE_COMPLETED, TaskState.TASK_STATE_FAILED,
+        TaskState.TASK_STATE_CANCELED, TaskState.TASK_STATE_REJECTED,
+    }
+    deadline = asyncio.get_running_loop().time() + timeout_s
+    while True:
+        task = await client.get_task(GetTaskRequest(id=task_id))
+        if task.status.state in terminal:
+            return task
+        if asyncio.get_running_loop().time() > deadline:
+            raise AssertionError(
+                f"task {task_id} still in state {task.status.state} after "
+                f"{timeout_s:.0f}s"
+            )
+        await asyncio.sleep(5.0)
+
+
+async def _send(client, payload: dict, message_id: str, *, immediate: bool = False):
+    from a2a.types import (
+        Message, Part, Role, SendMessageConfiguration, SendMessageRequest,
+    )
 
     request = SendMessageRequest(message=Message(
         message_id=message_id, role=Role.ROLE_USER,
         parts=[Part(text=json.dumps(payload, ensure_ascii=False))],
     ))
+    if immediate:
+        request.configuration.CopyFrom(
+            SendMessageConfiguration(return_immediately=True)
+        )
     task = None
     async for event in client.send_message(request):
         if event.WhichOneof("payload") == "task":

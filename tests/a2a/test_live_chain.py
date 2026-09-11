@@ -47,13 +47,27 @@ async def test_a_remote_agent_can_run_and_read_an_analysis(tmp_path: Path):
         lanes=default_lanes(Path("charters"), backend=profile.name),
         backend=profile.name,
     )
+    csv = next(Path("jobs-scratch").rglob("blobs/raw/txn-2024"), None)
+    if csv is None:
+        pytest.skip("no txn-2024 fixture in jobs-scratch; run a golden job first")
+
+    async def seed(job_id: str) -> None:
+        provided = await service.provide(
+            job_id, csv.read_text(encoding="utf-8"), name="txn-2024"
+        )
+        assert provided.get("ok"), provided
+
     port = free_port()
     app = build_app(service, url=endpoint_url("127.0.0.1", port))
     try:
         async with running(app, port):
-            result = await drive(port, TASK)
+            result = await drive(port, TASK, after_start=seed)
     finally:
         await service.aclose()
+
+    assert result.started_state in (TaskState.TASK_STATE_SUBMITTED,
+                                    TaskState.TASK_STATE_WORKING), \
+        "the start must return before the analysis does"
 
     assert result.skills == [SKILL_PRICE_LIST, SKILL_FULL_TEXT]
     assert result.extensions == [PRICE_LIST_EXTENSION]

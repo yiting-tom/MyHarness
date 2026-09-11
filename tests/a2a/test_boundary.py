@@ -70,6 +70,15 @@ class FakeService:
         self.started.append((task, job_id or "generated"))
         return {"ok": True, "job_id": job_id, "state": "running", "revision": 0}
 
+    async def provide(self, job_id: str, payload: str, *, name: str = "", **kw):
+        """Refuses for a job it has not been told about, exactly as the real one
+        does -- which is what makes seeding a useful check of start ordering."""
+        self.calls.append(("provide", job_id, name))
+        if job_id not in (j for _, j in self.started):
+            return {"ok": False, "error": "no_such_job",
+                    "message": f"no analysis with id {job_id}"}
+        return {"ok": True, "artifact": f"{job_id}/blob/raw/{name}"}
+
     async def poll(self, job_id: str, *, wait: float = 0.0, since: int | None = None):
         self.calls.append(("poll", job_id, str(since)))
         # Only a poll that carries a cursor is watching progress. The task

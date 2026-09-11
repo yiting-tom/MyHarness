@@ -298,6 +298,28 @@ comply」：**不認得這個約定的客戶端會被告知它不認得**，而�
 用 `FAILED` 是因為它是終局狀態，而終局才能讓呼叫方停止等待。標成 `WORKING`
 會是一個客戶端偵測不到的謊：它會永遠等一條不會再有人寫入的串流。
 
+### 啟動一定要非阻塞
+
+一次分析跑幾十分鐘。`SendMessage` 預設會等到 task 進入終局狀態才回應，
+也就是**整趟分析期間 HTTP 請求都開著** —— 任何有理智的 client timeout 都會先斷。
+
+所以啟動分析的呼叫方必須設 `configuration.return_immediately`（或改用串流）。
+協定本來就為這件事準備了這個欄位，executor 會在背景繼續跑，呼叫方拿著 task id
+用 `GetTask` 回來看。
+
+這不是建議，是實測：第一次 live 測試沒設這個欄位，在第 30 分鐘以
+`ReadTimeout` 死掉，而分析還在跑。
+
+### 資料還是得從另一條路進去
+
+A2A 這條邊界目前**沒有 `analysis_provide` 的對應**。中途補資料在 A2A 上應該是
+一則新 message 還是 task 的後續輸入，是這個 change 刻意沒有回答的問題
+（見 `openspec/changes/expose-over-a2a/design.md` 的 Open Questions）。
+
+所以要餵資料給一個經 A2A 啟動的 job，目前得透過同一個 process 裡的
+`AnalysisService`。live 測試就是這麼做的，而它那樣做這件事本身就是這個缺口的
+證據。
+
 ### 斷線重連
 
 `SubscribeToTask` **不重播**。它的 request 只有 `id` 和 `tenant`，沒有 cursor 欄位，
