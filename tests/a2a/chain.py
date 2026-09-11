@@ -72,13 +72,16 @@ class ChainResult:
 
 
 async def drive(port: int, task_text: str, *, timeout_s: float = 1_800.0,
-                after_start=None) -> ChainResult:
+                after_start=None, during=None) -> ChainResult:
     """Start an analysis, watch it, price it, then buy one section of it.
 
-    `after_start` is called with the new job id before the wait begins. Giving a
-    job its data is not an A2A operation -- whether `analysis_provide` becomes a
-    second message or a task input is still an open question in the change -- so
-    a caller that needs to seed one does it through the service it already owns.
+    `after_start` is called once with the new job id before the wait begins, and
+    `during` runs alongside the wait until the task reaches a terminal state.
+    Both exist for the same reason: neither providing data nor answering a
+    question is an A2A operation yet -- whether they become second messages or
+    task inputs is an open question the change deliberately left open -- so a
+    caller that needs either reaches around the boundary to the service it
+    already owns. Having to pass them in is the shape of that gap.
     """
     import httpx
     from a2a.client import A2ACardResolver, ClientConfig, ClientFactory
@@ -111,7 +114,14 @@ async def drive(port: int, task_text: str, *, timeout_s: float = 1_800.0,
         out.started_state = task.status.state
         if after_start is not None:
             await after_start(task.id)
-        task = await _await_terminal(client, task.id, timeout_s=timeout_s)
+        helper = asyncio.create_task(during(task.id)) if during else None
+        try:
+            task = await _await_terminal(client, task.id, timeout_s=timeout_s)
+        finally:
+            if helper is not None:
+                helper.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await helper
         out.state = task.status.state
         marked = [a for a in task.artifacts if PRICE_LIST_EXTENSION in a.extensions]
         out.marked_artifacts = len(marked)
@@ -156,9 +166,17 @@ async def _await_terminal(client, task_id: str, *, timeout_s: float):
         if task.status.state in terminal:
             return task
         if asyncio.get_running_loop().time() > deadline:
+            # What it was doing matters more than that it stopped: a job waiting
+            # on an unanswered question and one grinding through dispatches look
+            # identical from out here, and only one of them is a bug in the
+            # boundary.
+            detail = await client.get_task(
+                GetTaskRequest(id=task_id, history_length=5)
+            )
+            trail = [p for m in detail.history for p in data_parts(m)]
             raise AssertionError(
                 f"task {task_id} still in state {task.status.state} after "
-                f"{timeout_s:.0f}s"
+                f"{timeout_s:.0f}s; last ticks: {trail[-3:]}"
             )
         await asyncio.sleep(5.0)
 

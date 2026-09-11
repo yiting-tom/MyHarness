@@ -57,11 +57,32 @@ async def test_a_remote_agent_can_run_and_read_an_analysis(tmp_path: Path):
         )
         assert provided.get("ok"), provided
 
+    answered: list[str] = []
+
+    async def keep_answering(job_id: str) -> None:
+        """Answer whatever the orchestrator asks, the way an MCP client would.
+
+        There is no `analysis_answer` over A2A either, and a question nobody
+        answers is a job that sits in place until the question times out -- the
+        third live run spent its whole thirty minutes in WORKING, which is what
+        that looks like from outside.
+        """
+        while True:
+            progress = await service.poll(job_id, wait=20.0)
+            if not progress.get("ok"):
+                return
+            for question in progress.get("pending_questions") or []:
+                answered.append(question["id"])
+                await service.answer(job_id, question["id"], "否")
+            if progress.get("state") != "running":
+                return
+
     port = free_port()
     app = build_app(service, url=endpoint_url("127.0.0.1", port))
     try:
         async with running(app, port):
-            result = await drive(port, TASK, after_start=seed)
+            result = await drive(port, TASK, after_start=seed,
+                                 during=keep_answering)
     finally:
         await service.aclose()
 
