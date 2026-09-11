@@ -69,6 +69,9 @@ class ChainResult:
     section_id: str = ""
     section: dict[str, Any] = field(default_factory=dict)
     section_marked: bool = False
+    #: Whatever a failed task said about itself, so a live failure explains
+    #: itself instead of being a state number.
+    refusal: dict[str, Any] = field(default_factory=dict)
 
 
 async def drive(port: int, task_text: str, *, timeout_s: float = 1_800.0,
@@ -123,6 +126,9 @@ async def drive(port: int, task_text: str, *, timeout_s: float = 1_800.0,
                 with contextlib.suppress(asyncio.CancelledError):
                     await helper
         out.state = task.status.state
+        if task.status.HasField("message"):
+            parts = data_parts(task.status.message)
+            out.refusal = parts[0] if parts else {}
         marked = [a for a in task.artifacts if PRICE_LIST_EXTENSION in a.extensions]
         out.marked_artifacts = len(marked)
         if marked:

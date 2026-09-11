@@ -28,6 +28,12 @@ from tests.a2a.chain import drive, free_port, running
 
 pytestmark = pytest.mark.live
 
+#: Longer than the job's own `max_wall_clock_s` (1,800s) on purpose. A client
+#: that gives up at the same moment the harness would can never tell "the
+#: analysis was stopped" from "I stopped waiting" -- the third live run ended at
+#: exactly 1,800s in WORKING, which is both of those at once.
+DEADLINE_S = 2_100.0
+
 TASK = (
     "分析這份交易資料，找出異常樣態。報告中必須給出不重複帳戶的總數，"
     "以及平均交易金額最低的 channel。"
@@ -82,7 +88,7 @@ async def test_a_remote_agent_can_run_and_read_an_analysis(tmp_path: Path):
     try:
         async with running(app, port):
             result = await drive(port, TASK, after_start=seed,
-                                 during=keep_answering)
+                                 during=keep_answering, timeout_s=DEADLINE_S)
     finally:
         await service.aclose()
 
@@ -92,8 +98,9 @@ async def test_a_remote_agent_can_run_and_read_an_analysis(tmp_path: Path):
 
     assert result.skills == [SKILL_PRICE_LIST, SKILL_FULL_TEXT]
     assert result.extensions == [PRICE_LIST_EXTENSION]
-    assert result.state == TaskState.TASK_STATE_COMPLETED, result.state
-
+    assert result.state == TaskState.TASK_STATE_COMPLETED, (
+        f"state={result.state} refusal={result.refusal} answered={answered}"
+    )
     assert result.marked_artifacts == 1, "the price list, marked as one"
     assert result.price_list.get("sections"), "a finished report has sections to price"
     assert "text" not in result.price_list, "the report body must not ride along"
