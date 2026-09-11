@@ -77,6 +77,8 @@ class AnalysisExecutor(AgentExecutor):
             section_id = request.get("section_id")
             if section_id:
                 await self._answer_section(updater, str(job_id), str(section_id))
+            elif request.get("sections") or request.get("full_text"):
+                await self._answer_every_section(updater, str(job_id))
             else:
                 await self._answer_price_list(updater, str(job_id))
             return
@@ -98,37 +100,49 @@ class AnalysisExecutor(AgentExecutor):
             # at_capacity carries its own limit and running count, and the
             # refusal keeps them: "too many" without the numbers is not
             # actionable (change spec 7.2).
-            await _refuse(updater, started.get("code", "error"),
+            await _refuse(updater, _code(started),
                           started.get("message", ""),
                           **{k: v for k, v in started.items()
-                             if k not in ("ok", "code", "message")})
+                             if k not in ("ok", "error", "message")})
             return
 
         revision = int(started.get("revision", 0))
-        await updater.update_status(
-            TaskState.TASK_STATE_WORKING, metadata=_cursor(revision, job_id)
-        )
+        await self._progress(updater, _cursor(revision, job_id))
         while True:
             progress = await self._service.poll(
                 job_id, wait=PROGRESS_WAIT_S, since=revision
             )
             if not progress.get("ok"):
-                await _refuse(updater, progress.get("code", "error"),
+                await _refuse(updater, _code(progress),
                               progress.get("message", ""), job_id=job_id)
                 return
             revision = int(progress.get("revision", revision))
             if progress.get("state") != "running":
                 break
-            await updater.update_status(
-                TaskState.TASK_STATE_WORKING,
-                metadata=_cursor(revision, job_id, progress),
-            )
+            await self._progress(updater, _cursor(revision, job_id, progress))
         await self._answer_price_list(updater, job_id)
+
+    async def _progress(self, updater: TaskUpdater, cursor: dict[str, Any]) -> None:
+        """One progress tick, said twice on purpose.
+
+        The metadata is for whoever is listening right now. The message is for
+        whoever is not: the SDK moves a status message into `Task.history` when
+        the next status arrives, and history is the only way back for a client
+        that dropped its stream -- `SubscribeToTask` replays nothing, and its
+        request has nowhere to put a cursor (spike #22). Saying it once, in
+        metadata, would leave a reconnecting client with no way to find out what
+        it missed.
+        """
+        await updater.update_status(
+            TaskState.TASK_STATE_WORKING,
+            message=updater.new_agent_message([_data_part(cursor)]),
+            metadata=cursor,
+        )
 
     async def _answer_price_list(self, updater: TaskUpdater, job_id: str) -> None:
         answer = await self._service.result(job_id)
         if not answer.get("ok"):
-            await _refuse(updater, answer.get("code", "error"),
+            await _refuse(updater, _code(answer),
                           answer.get("message", ""), job_id=job_id)
             return
         body = {k: v for k, v in answer.items() if k != "ok"}
@@ -142,12 +156,60 @@ class AnalysisExecutor(AgentExecutor):
         )
         await updater.complete()
 
+    async def _answer_every_section(self, updater: TaskUpdater, job_id: str) -> None:
+        """Full text, assembled from the same per-section reads.
+
+        Not a second route that returns the whole report: `drill_section`
+        already carries a token limit, and a second path would mean a second
+        limit -- and the limits in this project are the ones that actually run,
+        not the ones that are declared (D2). "Full text" therefore means the
+        endpoint walks the price list on the caller's behalf.
+
+        One artifact per section rather than one concatenation, so a caller can
+        stop reading partway and so a section that had to be cut says so where
+        it was cut.
+        """
+        listing = await self._service.result(job_id)
+        if not listing.get("ok"):
+            await _refuse(updater, _code(listing),
+                          listing.get("message", ""), job_id=job_id)
+            return
+
+        sections = listing.get("sections") or []
+        if not sections:
+            await _refuse(updater, "no_sections",
+                          "這份報告沒有可逐節取得的章節。", job_id=job_id)
+            return
+
+        for section in sections:
+            section_id = str(section.get("id", ""))
+            answer = await self._service.drill_section(job_id, section_id)
+            if answer.get("ok"):
+                await updater.add_artifact(
+                    [_data_part({k: v for k, v in answer.items() if k != "ok"})],
+                    name=f"section {section_id}",
+                )
+                continue
+            # One bad section does not take the rest with it: the caller asked
+            # for the report, and the readable part of it is still worth having.
+            # Outward, a refusal's kind is `code`: `error` is what JSON-RPC
+            # calls its own envelope failure, and two meanings for one word on
+            # the same wire is how a caller ends up handling neither.
+            await updater.add_artifact(
+                [_data_part({
+                    "section_id": section_id, "code": _code(answer),
+                    **{k: v for k, v in answer.items() if k not in ("ok", "error")},
+                })],
+                name=f"section {section_id} (unavailable)",
+            )
+        await updater.complete()
+
     async def _answer_section(
         self, updater: TaskUpdater, job_id: str, section_id: str
     ) -> None:
         answer = await self._service.drill_section(job_id, section_id)
         if not answer.get("ok"):
-            await _refuse(updater, answer.get("code", "error"),
+            await _refuse(updater, _code(answer),
                           answer.get("message", ""), job_id=job_id, section=section_id)
             return
         # No extension mark here: this artifact IS the content, and marking it
@@ -163,6 +225,16 @@ class AnalysisExecutor(AgentExecutor):
         # Reading is not long enough to be worth interrupting, and a cancel that
         # silently did nothing would be worse than one that says so.
         await updater.cancel()
+
+
+def _code(answer: dict[str, Any]) -> str:
+    """The service spells a refusal's kind `error`, not `code`.
+
+    Reading the wrong key does not raise -- it quietly yields a default, so
+    every refusal came out labelled "error" and the task store could not tell a
+    job that never existed from one that was abandoned.
+    """
+    return str(answer.get("error") or "error")
 
 
 def _cursor(revision: int, job_id: str, progress: dict[str, Any] | None = None):

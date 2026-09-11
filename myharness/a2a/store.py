@@ -58,13 +58,13 @@ async def state_of(service: AnalysisService, job_id: str) -> tuple[Any, str] | N
     progress = await service.poll(job_id, wait=0.0)
     if progress.get("ok"):
         return None
-    if progress.get("code") == "no_such_job":
+    if progress.get("error") == "no_such_job":
         return None
 
     answer = await service.result(job_id)
     if answer.get("ok"):
         return TaskState.TASK_STATE_COMPLETED, ""
-    if answer.get("code") == "no_such_job":
+    if answer.get("error") == "no_such_job":
         # Both halves have to agree before this store invents a task. Deciding
         # on poll alone would fabricate a terminal task for an id nobody has
         # ever used -- and a task id is a client-supplied string.

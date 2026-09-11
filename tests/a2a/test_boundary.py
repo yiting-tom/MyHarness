@@ -43,24 +43,29 @@ class FakeService:
         self.at_capacity = False
         #: Finished analyses on disk that this process did not run.
         self.known_elsewhere = {"j1"}
+        #: Section ids the fake reports as truncated, and as unreadable.
+        self.truncate: set[str] = set()
+        self.broken: set[str] = set()
 
     async def result(self, job_id: str):
         self.calls.append(("result", job_id))
         if job_id not in ("j1", *(j for _, j in self.started)):
-            return {"ok": False, "code": "no_such_job",
+            return {"ok": False, "error": "no_such_job",
                     "message": f"no analysis with id {job_id}"}
         return dict(PRICE_LIST, job_id=job_id)
 
     async def drill_section(self, job_id: str, section_id: str, **kw):
         self.calls.append(("drill", job_id, section_id))
-        if section_id != "方法":
-            return {"ok": False, "code": "no_such_section", "message": "不在這份報告裡"}
-        return {"ok": True, "section_id": section_id, "text": "以 duckdb 對原始 CSV..."}
+        if section_id in self.broken or section_id not in ("方法", "限制"):
+            return {"ok": False, "error": "no_such_section", "message": "不在這份報告裡"}
+        return {"ok": True, "section_id": section_id,
+                "text": "以 duckdb 對原始 CSV...",
+                "truncated": section_id in self.truncate}
 
     async def start(self, task: str, *, job_id: str | None = None, **kw):
         self.calls.append(("start", task))
         if self.at_capacity:
-            return {"ok": False, "code": "at_capacity",
+            return {"ok": False, "error": "at_capacity",
                     "message": "太多分析在跑", "running": ["a", "b"], "limit": 2}
         self.started.append((task, job_id or "generated"))
         return {"ok": True, "job_id": job_id, "state": "running", "revision": 0}
@@ -75,11 +80,11 @@ class FakeService:
         if job_id in (j for _, j in self.started):
             return {"ok": True, "state": "finished", "revision": 99}
         if job_id in self.known_elsewhere:
-            return {"ok": False, "code": "not_running", "message": "不在這個程序裡",
+            return {"ok": False, "error": "not_running", "message": "不在這個程序裡",
                     "job_id": job_id}
         # The real service answers no_such_job for an id it has never seen, and
         # the store leans on that to avoid inventing tasks for made-up ids.
-        return {"ok": False, "code": "no_such_job",
+        return {"ok": False, "error": "no_such_job",
                 "message": f"no analysis with id {job_id}"}
 
 
@@ -363,7 +368,7 @@ async def test_an_abandoned_job_is_terminal_and_says_why():
 
     async def unfinished(job_id):
         service.calls.append(("result", job_id))
-        return {"ok": False, "code": "not_finished", "message": "還沒有報告"}
+        return {"ok": False, "error": "not_finished", "message": "還沒有報告"}
 
     service.result = unfinished  # type: ignore[method-assign]
     task = await EventLogTaskStore(service).get("j9")
@@ -379,3 +384,86 @@ async def test_an_id_nobody_has_used_is_not_invented_into_a_task():
     from myharness.a2a.store import EventLogTaskStore
 
     assert await EventLogTaskStore(FakeService()).get("never-existed") is None
+
+
+# --- the full-text mode -----------------------------------------------------
+
+
+def test_full_text_walks_the_price_list_section_by_section(client):
+    """Not a second route that returns the report: drill_section already has a
+    token limit, and a second path would mean a second limit (D2)."""
+    answer = send(client, {"job_id": "j1", "full_text": True})
+    names = [a["name"] for a in artifacts_of(answer)]
+    assert names == ["section 方法", "section 限制"]
+    reads = [c for c in client.service.calls if c[0] == "drill"]
+    assert reads == [("drill", "j1", "方法"), ("drill", "j1", "限制")]
+
+
+def test_full_text_uses_the_same_section_ids_as_the_price_list(client):
+    priced = data_of(artifacts_of(send(client, {"job_id": "j1"}))[0])["sections"]
+    walked = artifacts_of(send(client, {"job_id": "j1", "full_text": True}))
+    assert [f"section {s['id']}" for s in priced] == [a["name"] for a in walked]
+
+
+def test_a_section_that_had_to_be_cut_says_so_where_it_was_cut(client):
+    """bound_section already reports it; losing the flag on the way out would
+    make a truncated answer indistinguishable from a short one."""
+    client.service.truncate = {"限制"}
+    artifacts = artifacts_of(send(client, {"job_id": "j1", "full_text": True}))
+    by_name = {a["name"]: data_of(a) for a in artifacts}
+    assert by_name["section 方法"]["truncated"] is False
+    assert by_name["section 限制"]["truncated"] is True
+
+
+def test_one_unavailable_section_does_not_take_the_rest_with_it(client):
+    """The caller asked for the report; the readable part is still worth having."""
+    client.service.broken = {"方法"}
+    artifacts = artifacts_of(send(client, {"job_id": "j1", "full_text": True}))
+    names = [a["name"] for a in artifacts]
+    assert names == ["section 方法 (unavailable)", "section 限制"]
+    assert data_of(artifacts[0])["code"] == "no_such_section"
+
+
+# --- catching up after a dropped stream -------------------------------------
+
+
+def get_task(client, task_id: str) -> dict:
+    """GetTask's result IS the task; SendMessage's nests it under `task`.
+
+    Pinned because it is asymmetric and nothing warns you: reading result.task
+    here comes back empty rather than wrong, which is the kind of mistake a
+    test written to pass would keep.
+    """
+    body = {"jsonrpc": "2.0", "id": 2, "method": "GetTask",
+            "params": {"id": task_id, "historyLength": 50}}
+    response = client.post(RPC_PATH, json=body, headers=VERSION_HEADERS)
+    assert response.status_code == 200, response.text
+    task = response.json().get("result") or {}
+    assert "task" not in task, "the shape moved; the helper needs to know"
+    return task
+
+
+def test_what_a_dropped_stream_missed_is_in_the_history(client):
+    """SubscribeToTask replays nothing and its request has nowhere to put a
+    cursor (spike #22), so history is the only way back."""
+    client.service.progress = [
+        {"ok": True, "state": "running", "revision": 3, "phase": "dispatching"},
+        {"ok": True, "state": "running", "revision": 7, "phase": "synthesising"},
+        {"ok": True, "state": "finished", "revision": 9},
+    ]
+    task_id = task_of(send(client, {"task": "t"}))["id"]
+
+    history = get_task(client, task_id).get("history", [])
+    revisions = [
+        p["data"]["revision"] for m in history for p in m.get("parts", [])
+        if "data" in p and "revision" in p["data"]
+    ]
+    assert revisions == [0, 3, 7], "every tick a reconnecting client could have missed"
+
+
+def test_the_history_says_which_job_each_tick_belongs_to(client):
+    task_id = task_of(send(client, {"task": "t"}))["id"]
+    history = get_task(client, task_id).get("history", [])
+    job_ids = {p["data"].get("job_id") for m in history for p in m.get("parts", [])
+               if "data" in p}
+    assert job_ids == {task_id}, "the task id is the job id, everywhere"
