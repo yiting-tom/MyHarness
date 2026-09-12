@@ -16,9 +16,10 @@ import asyncio
 import contextlib
 import sys
 from pathlib import Path
+from typing import Any
 
 import mcp.types as types
-from mcp.server import Server
+from mcp.server import NotificationOptions, Server
 from mcp.server.models import InitializationOptions
 from mcp.server.stdio import stdio_server
 
@@ -36,7 +37,9 @@ DEFAULT_ROOT = Path("myharness-jobs")
 DEFAULT_CHARTERS = Path("charters")
 
 
-def default_lanes(charters: Path = DEFAULT_CHARTERS, backend: str = "openrouter"):
+def default_lanes(
+    charters: Path = DEFAULT_CHARTERS, backend: str = "openrouter"
+) -> LaneRegistry:
     """The lane types shipped with the harness.
 
     A deployment with its own charters passes its own registry; this is the
@@ -84,7 +87,8 @@ def build_server(service: AnalysisService) -> Server:
     server = Server(SERVER_NAME, version=SERVER_VERSION)
     handlers = build_handlers(service)
 
-    @server.list_tools()
+    # The SDK's decorators are untyped, so mypy cannot see through them.
+    @server.list_tools()  # type: ignore[no-untyped-call, untyped-decorator]
     async def list_tools() -> list[types.Tool]:
         return [
             types.Tool(
@@ -95,8 +99,10 @@ def build_server(service: AnalysisService) -> Server:
             for name in TOOL_SCHEMAS
         ]
 
-    @server.call_tool()
-    async def call_tool(name: str, arguments: dict | None) -> list[types.TextContent]:
+    @server.call_tool()  # type: ignore[untyped-decorator]
+    async def call_tool(
+        name: str, arguments: dict[str, Any] | None
+    ) -> list[types.TextContent]:
         text = await call(handlers, name, arguments or {})
         return [types.TextContent(type="text", text=text)]
 
@@ -113,18 +119,12 @@ async def serve(service: AnalysisService) -> None:
                 server_name=SERVER_NAME,
                 server_version=SERVER_VERSION,
                 capabilities=server.get_capabilities(
-                    notification_options=_NoNotifications(), experimental_capabilities={}
+                    # Nothing is pushed; clients poll, and long-poll is the push.
+                    notification_options=NotificationOptions(),
+                    experimental_capabilities={},
                 ),
             ),
         )
-
-
-class _NoNotifications:
-    """The server pushes nothing; clients poll. Long-poll is the push."""
-
-    prompts_changed = False
-    resources_changed = False
-    tools_changed = False
 
 
 def main(argv: list[str] | None = None) -> int:

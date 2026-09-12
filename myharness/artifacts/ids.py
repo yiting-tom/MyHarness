@@ -11,6 +11,7 @@ job -- see DESIGN.md decision #10 and design.md D2.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Final
 
@@ -113,7 +114,13 @@ def coerce_artifact_ids(raw: object) -> tuple[list[str], list[object]]:
     """
     ids: list[str] = []
     rejected: list[object] = []
-    for entry in raw or ():  # type: ignore[union-attr]
+    if not raw:
+        return ids, rejected
+    if not isinstance(raw, Iterable):
+        # A number or a bool is not a list of ids. Say so instead of raising:
+        # the promise above is that what could not be read comes back named.
+        return ids, [raw]
+    for entry in raw:
         candidate: object = entry
         if isinstance(entry, dict):
             for key in _ID_KEYS:

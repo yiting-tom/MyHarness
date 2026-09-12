@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from claude_agent_sdk import ToolAnnotations, create_sdk_mcp_server, tool
+from claude_agent_sdk.types import McpSdkServerConfig
 
 from myharness.artifacts.errors import ArtifactError
 from myharness.artifacts.ids import ArtifactId, coerce_artifact_ids
@@ -263,7 +264,7 @@ class WorkerToolbox:
             )
         return _ok(text + warning)
 
-    def build_server(self):
+    def build_server(self) -> McpSdkServerConfig:
         """An SDK in-process MCP server exposing this toolbox."""
 
         read_only = ToolAnnotations(readOnlyHint=True)
@@ -280,7 +281,7 @@ class WorkerToolbox:
             _READ_NOTE_SCHEMA,
             annotations=read_only,
         )
-        async def read_note(args):
+        async def read_note(args: dict[str, Any]) -> dict[str, Any]:
             if refusal := self._gate("read_note"):
                 return refusal
             raw = str(args.get("artifact", "")).strip()
@@ -304,7 +305,7 @@ class WorkerToolbox:
             {"name": str, "text": str},
             annotations=mutating,
         )
-        async def write_finding(args):
+        async def write_finding(args: dict[str, Any]) -> dict[str, Any]:
             name = str(args.get("name", "")).strip() or str(len(self.findings) + 1)
             text = str(args.get("text", ""))
             if not text.strip():
@@ -336,7 +337,7 @@ class WorkerToolbox:
             {"text": str},
             annotations=mutating,
         )
-        async def update_state(args):
+        async def update_state(args: dict[str, Any]) -> dict[str, Any]:
             text = str(args.get("text", ""))
             limit = self.lane.type.state_max_tokens
             est = estimate_tokens(text)
@@ -372,7 +373,7 @@ class WorkerToolbox:
             {"artifact": str},
             annotations=read_only,
         )
-        async def localize_blob(args):
+        async def localize_blob(args: dict[str, Any]) -> dict[str, Any]:
             try:
                 aid = ArtifactId.parse(str(args.get("artifact", "")).strip())
             except ValueError as exc:
@@ -401,7 +402,7 @@ class WorkerToolbox:
             _INSPECT_SCHEMA,
             annotations=serial,
         )
-        async def inspect_blob(args):
+        async def inspect_blob(args: dict[str, Any]) -> dict[str, Any]:
             if refusal := self._gate("inspect_blob"):
                 return refusal
             result = await self._query_runner().inspect(
@@ -423,7 +424,7 @@ class WorkerToolbox:
             _QUERY_SCHEMA,
             annotations=serial,
         )
-        async def duckdb_query(args):
+        async def duckdb_query(args: dict[str, Any]) -> dict[str, Any]:
             if refusal := self._gate("duckdb_query"):
                 return refusal
             raw = args.get("artifacts")

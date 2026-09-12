@@ -181,7 +181,8 @@ class AnalysisService:
     # ---- provide ---------------------------------------------------------
 
     async def provide(
-        self, job_id: str, payload: str, *, name: str = "", schema: dict | None = None
+        self, job_id: str, payload: str, *, name: str = "",
+        schema: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if job_id not in self._known_job_ids() and self._manager.get(job_id) is None:
             return _err("no_such_job", f"no analysis with id {job_id}")
@@ -323,7 +324,7 @@ class AnalysisService:
                 "truncated": truncated}
 
 
-_UNROUTED_NOTE = {
+_UNROUTED_NOTE: dict[Unrouted | None, str] = {
     Unrouted.NO_TABLE: "沒有 routing table，所以沒有分流",
     Unrouted.NO_MATCH: "分流器判斷不出歸屬",
     Unrouted.FAILED: "分流器失敗",

@@ -13,6 +13,7 @@ live tests, and the event log records which path each run actually took.
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Final
@@ -146,7 +147,7 @@ class BackendProfile:
         return env
 
     @staticmethod
-    def disallowed_for(declared_tools: object) -> list[str]:
+    def disallowed_for(declared_tools: Iterable[object]) -> list[str]:
         """Built-ins to strip so a worker pays only for what it declared."""
         keep = {str(t) for t in declared_tools}
         return [t for t in BUILTIN_TOOLS if t not in keep]

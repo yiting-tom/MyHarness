@@ -24,10 +24,14 @@ import argparse
 import ipaddress
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from myharness.a2a.card import build_agent_card
 from myharness.a2a.executor import AnalysisExecutor
 from myharness.mcp.service import AnalysisService
+
+if TYPE_CHECKING:  # the a2a extra is optional; only the annotation needs it
+    from starlette.applications import Starlette
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8973
@@ -62,7 +66,7 @@ def require_loopback(host: str) -> str:
     raise NotLoopback(host)
 
 
-def build_app(service: AnalysisService, *, url: str):
+def build_app(service: AnalysisService, *, url: str) -> Starlette:
     """A Starlette app serving the agent card and the JSON-RPC routes.
 
     Imported here rather than at module scope: the a2a extra is optional, and

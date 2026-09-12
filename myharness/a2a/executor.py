@@ -49,6 +49,18 @@ PRICE_LIST_GUIDANCE = (
 PROGRESS_WAIT_S = 20.0
 
 
+def _ids(context: RequestContext) -> tuple[str, str]:
+    """The task id and context id, which the request handler always assigns.
+
+    The SDK types both as optional because a RequestContext can be built by
+    hand. Everything below addresses the job by its task id, so a None here
+    would produce events nobody could look up -- fail loudly instead.
+    """
+    if context.task_id is None or context.context_id is None:
+        raise ValueError("the request handler must assign a task id and a context id")
+    return context.task_id, context.context_id
+
+
 class AnalysisExecutor(AgentExecutor):
     """Reads a finished analysis out to an A2A caller."""
 
@@ -56,7 +68,8 @@ class AnalysisExecutor(AgentExecutor):
         self._service = service
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
-        updater = TaskUpdater(event_queue, context.task_id, context.context_id)
+        task_id, context_id = _ids(context)
+        updater = TaskUpdater(event_queue, task_id, context_id)
         request = _read_request(context)
         job_id = request.get("job_id")
         goal = request.get("task") or request.get("goal")
@@ -96,7 +109,7 @@ class AnalysisExecutor(AgentExecutor):
             # The A2A task id becomes the job id, so every later GetTask,
             # SubscribeToTask and result read addresses the same thing by the
             # same name -- including from a process that never ran it.
-            await self._watch(updater, started, job_id=context.task_id)
+            await self._watch(updater, started, job_id=task_id)
             return
 
         await _refuse(updater, "empty_request",
@@ -231,7 +244,7 @@ class AnalysisExecutor(AgentExecutor):
         await updater.complete()
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
-        updater = TaskUpdater(event_queue, context.task_id, context.context_id)
+        updater = TaskUpdater(event_queue, *_ids(context))
         # Reading is not long enough to be worth interrupting, and a cancel that
         # silently did nothing would be worse than one that says so.
         await updater.cancel()
@@ -247,7 +260,9 @@ def _code(answer: dict[str, Any]) -> str:
     return str(answer.get("error") or "error")
 
 
-def _cursor(revision: int, job_id: str, progress: dict[str, Any] | None = None):
+def _cursor(
+    revision: int, job_id: str, progress: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """What a reconnecting client needs, on every event that says anything.
 
     `revision` rather than an event count: it is the number the harness already

@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from claude_agent_sdk import ToolAnnotations, create_sdk_mcp_server, tool
+from claude_agent_sdk.types import McpSdkServerConfig
 
 from myharness.artifacts.errors import ArtifactError
 from myharness.artifacts.ids import ArtifactId, coerce_artifact_ids
@@ -90,7 +91,7 @@ class OrchestratorTools:
     def job_id(self) -> str:
         return self.runner.spec.job_id
 
-    def build_server(self):
+    def build_server(self) -> McpSdkServerConfig:
         read_only = ToolAnnotations(readOnlyHint=True)
         mutating = ToolAnnotations(readOnlyHint=False)
 
@@ -106,7 +107,7 @@ class OrchestratorTools:
             _PLAN_SCHEMA,
             annotations=mutating,
         )
-        async def plan_update(args):
+        async def plan_update(args: dict[str, Any]) -> dict[str, Any]:
             text = str(args.get("plan", "")).strip()
             if not text:
                 return _err("empty_plan", "plan must not be empty")
@@ -174,7 +175,7 @@ class OrchestratorTools:
             {"lane": str, "task": str, "inputs": list},
             annotations=mutating,
         )
-        async def dispatch(args):
+        async def dispatch(args: dict[str, Any]) -> dict[str, Any]:
             lane = str(args.get("lane", "")).strip()
             task = str(args.get("task", "")).strip()
             if not lane or not task:
@@ -203,7 +204,7 @@ class OrchestratorTools:
             {"task_ids": list, "mode": str, "timeout": float},
             annotations=mutating,
         )
-        async def await_tasks(args):
+        async def await_tasks(args: dict[str, Any]) -> dict[str, Any]:
             ids = [str(i) for i in (args.get("task_ids") or [])]
             if not ids:
                 return _err("bad_request", "task_ids must not be empty")
@@ -227,7 +228,7 @@ class OrchestratorTools:
             {"artifact": str, "section": str, "max_tokens": int},
             annotations=read_only,
         )
-        async def peek(args):
+        async def peek(args: dict[str, Any]) -> dict[str, Any]:
             raw = str(args.get("artifact", "")).strip()
             section = (args.get("section") or "").strip() or None
             asked = int(args.get("max_tokens") or 2000)
@@ -273,7 +274,7 @@ class OrchestratorTools:
             {"question": str, "default": str, "kind": str, "options": list},
             annotations=mutating,
         )
-        async def ask_user(args):
+        async def ask_user(args: dict[str, Any]) -> dict[str, Any]:
             text = str(args.get("question", "")).strip()
             if not text:
                 return _err("bad_request", "question must not be empty")
@@ -301,7 +302,7 @@ class OrchestratorTools:
             {"report_artifact": str, "summary": str},
             annotations=mutating,
         )
-        async def finish(args):
+        async def finish(args: dict[str, Any]) -> dict[str, Any]:
             report = str(args.get("report_artifact", "")).strip()
             if not report:
                 return _err("bad_request", "report_artifact is required")

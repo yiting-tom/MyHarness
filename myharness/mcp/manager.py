@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -171,7 +171,7 @@ class JobManager:
         return handle
 
     def launch(
-        self, handle: JobHandle, run: Callable[[], Awaitable[LoopOutcome]]
+        self, handle: JobHandle, run: Callable[[], Coroutine[Any, Any, LoopOutcome]]
     ) -> JobHandle:
         """Set a registered job running in the background."""
         if self._jobs.get(handle.job_id) is not handle:
@@ -188,7 +188,7 @@ class JobManager:
         *,
         runner: JobRunner,
         channel: QueueChannel,
-        run: Callable[[], Awaitable[LoopOutcome]],
+        run: Callable[[], Coroutine[Any, Any, LoopOutcome]],
     ) -> JobHandle:
         """Register and launch in one step, for callers with nothing to wire."""
         return self.launch(self.register(job_id, runner=runner, channel=channel), run)

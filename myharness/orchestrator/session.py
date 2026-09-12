@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import abc
 from collections.abc import AsyncIterator, Sequence
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -66,13 +66,17 @@ class SdkSession(OrchestratorSession):
 
 class SessionFactory(abc.ABC):
     @abc.abstractmethod
-    def open(self, options: ClaudeAgentOptions, *, limit: int):
+    def open(
+        self, options: ClaudeAgentOptions, *, limit: int
+    ) -> AbstractAsyncContextManager[OrchestratorSession]:
         """Async context manager yielding a session."""
 
 
 class SdkSessionFactory(SessionFactory):
     @asynccontextmanager
-    async def open(self, options: ClaudeAgentOptions, *, limit: int):
+    async def open(
+        self, options: ClaudeAgentOptions, *, limit: int
+    ) -> AsyncIterator[OrchestratorSession]:
         async with ClaudeSDKClient(options=options) as client:
             yield SdkSession(client, limit)
 
@@ -118,7 +122,9 @@ class ScriptedSessionFactory(SessionFactory):
     opened: list[ScriptedSession] = field(default_factory=list)
 
     @asynccontextmanager
-    async def open(self, options: ClaudeAgentOptions, *, limit: int):
+    async def open(
+        self, options: ClaudeAgentOptions, *, limit: int
+    ) -> AsyncIterator[OrchestratorSession]:
         session = self.sessions.pop(0) if self.sessions else ScriptedSession([])
         session.limit = limit
         self.opened.append(session)

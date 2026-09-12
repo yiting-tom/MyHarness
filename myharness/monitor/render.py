@@ -13,7 +13,7 @@ from __future__ import annotations
 import os
 import sys
 import unicodedata
-from typing import Final
+from typing import Final, TextIO
 
 RESET: Final = "\033[0m"
 STYLES: Final = {
@@ -23,7 +23,7 @@ STYLES: Final = {
 }
 
 
-def colour_enabled(stream=None) -> bool:
+def colour_enabled(stream: TextIO | None = None) -> bool:
     """Colour only when someone is watching, and never when told not to."""
     stream = stream or sys.stdout
     if os.environ.get("NO_COLOR"):

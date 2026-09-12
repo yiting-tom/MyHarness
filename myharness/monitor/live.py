@@ -16,8 +16,9 @@ import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
-from myharness.dataflow import DataFlow, build_dataflow, detect
-from myharness.events.query import summarize
+from myharness.artifacts.types import ArtifactMeta
+from myharness.dataflow import DataFlow, DispatchInfo, build_dataflow, detect
+from myharness.events.query import JobSummary, summarize
 from myharness.events.types import (
     ASK_USER,
     HANDOFF_RESTART,
@@ -90,7 +91,7 @@ class LiveView:
     frame: int = 0
 
     def render(
-        self, events: Sequence[Event], artifacts=(), *,
+        self, events: Sequence[Event], artifacts: Sequence[ArtifactMeta] = (), *,
         colour: bool = True, width: int = 78,
     ) -> str:
         self.frame += 1
@@ -128,7 +129,7 @@ class LiveView:
             lines += ["", self._final(flow, summary, colour, width)]
         return "\n".join(lines)
 
-    def _dispatch_row(self, dispatch, colour: bool, width: int) -> str:
+    def _dispatch_row(self, dispatch: DispatchInfo, colour: bool, width: int) -> str:
         if dispatch.running:
             mark, colours = "▸", ("cyan",)
         elif dispatch.ok:
@@ -143,7 +144,9 @@ class LiveView:
         one_line = truncate(detail.replace(chr(10), " "), width - 22)
         return f"  {status}{style(one_line, 'dim', enabled=colour)}"
 
-    def _final(self, flow: DataFlow, summary, colour: bool, width: int) -> str:
+    def _final(
+        self, flow: DataFlow, summary: JobSummary, colour: bool, width: int
+    ) -> str:
         bits = [
             style(rule("完成", width), "bold", enabled=colour),
             f"  報告   {flow.report_artifact or '（無）'}",

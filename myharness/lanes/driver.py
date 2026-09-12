@@ -19,7 +19,8 @@ from pathlib import Path
 
 from myharness.artifacts.local import LocalArtifactStore
 from myharness.events.log import LocalEventLog
-from myharness.events.query import summarize
+from myharness.events.query import JobSummary, summarize
+from myharness.lanes.handle import LaneHandle
 from myharness.lanes.types import LaneRegistry, LaneType
 from myharness.lanes.worker import WorkerRequest, run_lane_worker
 
@@ -37,7 +38,7 @@ async def run_one(
     dispatch_id: str = "d1",
     inputs: tuple[str, ...] = (),
     scope: str = "",
-):
+) -> tuple[LaneHandle, JobSummary]:
     store = LocalArtifactStore(root)
     await store.init_job(job_id)
     events = LocalEventLog(root)

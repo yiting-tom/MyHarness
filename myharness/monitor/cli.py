@@ -79,7 +79,7 @@ def term_width(default: int = 78) -> int:
 # --- commands -------------------------------------------------------------
 
 
-def cmd_jobs(args) -> int:
+def cmd_jobs(args: argparse.Namespace) -> int:
     jobs = discover(args.root)
     if not jobs:
         print(f"{args.root} 下沒有 job")
@@ -100,7 +100,7 @@ def cmd_jobs(args) -> int:
     return 0
 
 
-def cmd_inspect(args) -> int:
+def cmd_inspect(args: argparse.Namespace) -> int:
     root = resolve_root(args.root, args.job)
     events, artifacts = asyncio.run(load(root, args.job))
     if not events:
@@ -120,7 +120,7 @@ def cmd_inspect(args) -> int:
     return 0 if not any(a.severity == "critical" for a in detect(flow)) else 2
 
 
-def cmd_monitor(args) -> int:
+def cmd_monitor(args: argparse.Namespace) -> int:
     """Redraw until the job finishes, then leave the final frame on screen."""
     root = resolve_root(args.root, args.job)
     view = LiveView(args.job)
@@ -174,7 +174,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    return args.func(args)
+    exit_code: int = args.func(args)
+    return exit_code
 
 
 if __name__ == "__main__":

@@ -16,7 +16,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8", "pytest-asyncio>=0.24", "pytest-cov>=6", "psutil>=6",
-    "ruff>=0.16", "mypy>=1.11",
+    "ruff>=0.16", "mypy>=1.11", "types-jsonschema", "types-protobuf",
 ]
 # The A2A boundary is the second way in, and it is the only one that needs an
 # HTTP server. Someone who only speaks MCP over stdio should not have to install
@@ -57,4 +57,9 @@ ignore = ["RUF001", "RUF002", "RUF003"]
 
 [tool.mypy]
 python_version = "3.13"
+# 只查 myharness/。tests/ 在 strict 下有 1158 個錯，幾乎全是 pytest 慣用的無註記
+# 測試函式；把它們標完不會抓到任何東西，只會讓測試更難寫。
 files = ["myharness"]
+# strict 從一開始就是可以做到的：這個 repo 本來就標得很完整，全開只差 41 個地方。
+# 放著不開，每個新函式都可以悄悄不帶註記進來。
+strict = true

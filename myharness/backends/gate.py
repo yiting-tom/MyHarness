@@ -21,7 +21,7 @@ import random
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Final
+from typing import Any, Final
 
 #: Total wall-clock a single worker may spend waiting on one backend before it
 #: gives up and returns a handle. Rate limits outlast short retry counts.
@@ -100,7 +100,7 @@ class BackendGate:
 
     # ---- retry -----------------------------------------------------------
 
-    def acquire(self):
+    def acquire(self) -> asyncio.Semaphore:
         """Limit how many workers hit this backend at once."""
         return self._semaphore
 
@@ -127,7 +127,7 @@ class BackendGate:
 class GateRegistry:
     """One gate per backend name, created on first use."""
 
-    def __init__(self, **defaults) -> None:
+    def __init__(self, **defaults: Any) -> None:
         self._gates: dict[str, BackendGate] = {}
         self._defaults = defaults
 

@@ -401,8 +401,9 @@ def _consume(message: Any, acc: Accumulated) -> None:
         blocks = [_block_to_dict(b) for b in message.content]
         acc.transcript.append({"role": "assistant", "content": blocks})
         acc.texts += [b.text for b in message.content if isinstance(b, TextBlock)]
-        if getattr(message, "usage", None):
-            acc.usage = dict(message.usage)
+        usage = getattr(message, "usage", None)
+        if usage:
+            acc.usage = dict(usage)
     elif isinstance(message, UserMessage):
         # Tool results arriving means another request is about to go out
         # carrying everything so far, which is the moment the estimate grows.
@@ -775,7 +776,7 @@ async def _attempt_all(
                 )
 
             outcome = _outcome_from(acc, enforce)
-            if outcome.ok:
+            if outcome.handle is not None:
                 return acc, outcome.handle
 
             schema_problems = outcome.problems

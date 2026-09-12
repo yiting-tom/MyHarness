@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TypedDict
 
 from myharness.artifacts.errors import ArtifactError
 from myharness.artifacts.ids import ArtifactId
@@ -94,6 +94,22 @@ def _bullets(text: str, limit: int) -> tuple[str, ...]:
     return tuple(f for f in found if f)[:limit]
 
 
+class _Common(TypedDict):
+    """The fields every exit from build_delivery fills in the same way.
+
+    Splatting a plain dict would collapse these into one union and hand the
+    Delivery constructor `float | tuple[Caveat, ...] | str | None` for each.
+    """
+
+    job_id: str
+    status: str
+    report_artifact: str | None
+    caveats: tuple[Caveat, ...]
+    cost_usd: float
+    dispatches: int
+    throttle_seconds: float
+
+
 async def build_delivery(
     *,
     store: ArtifactStore,
@@ -104,9 +120,12 @@ async def build_delivery(
     confidence: str = "medium",
 ) -> Delivery:
     summary_stats = summarize(events)
-    base = {
-        "job_id": job_id, "status": status, "report_artifact": report_artifact,
-        "caveats": tuple(summary_stats.caveats), "cost_usd": summary_stats.total_usd,
+    base: _Common = {
+        "job_id": job_id,
+        "status": status,
+        "report_artifact": report_artifact,
+        "caveats": tuple(summary_stats.caveats),
+        "cost_usd": summary_stats.total_usd,
         "dispatches": summary_stats.dispatches,
         "throttle_seconds": summary_stats.throttle_seconds,
     }

@@ -46,7 +46,11 @@ from myharness.jobs.spec import JobPhase
 from myharness.lanes.types import LaneRegistry
 from myharness.lanes.worker import TRANSIENT_STATUSES
 from myharness.orchestrator.plan import initial_plan, read_plan, write_plan
-from myharness.orchestrator.session import SdkSessionFactory, SessionFactory
+from myharness.orchestrator.session import (
+    OrchestratorSession,
+    SdkSessionFactory,
+    SessionFactory,
+)
 from myharness.orchestrator.tools import OrchestratorTools
 
 #: Hard stop on conversation turns, independent of the job's own ceilings.
@@ -350,7 +354,7 @@ class OrchestratorLoop:
                 prompt = self._next_prompt(idle=not turn.acted, turn=turn)
         return False
 
-    async def _consume(self, session, prompt: str) -> TurnResult:
+    async def _consume(self, session: OrchestratorSession, prompt: str) -> TurnResult:
         """Read a turn's messages instead of discarding them.
 
         Discarding them made the loop blind: a turn that failed, or one that
