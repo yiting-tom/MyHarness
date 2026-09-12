@@ -115,7 +115,10 @@ class SectionNotFound(ArtifactError):
             f"{artifact_id} has no section {section!r}",
             artifact=str(artifact_id),
             section=section,
-            sections=[{"id": s.id, "title": s.title, "est_tokens": s.est_tokens} for s in available],
+            sections=[
+                {"id": s.id, "title": s.title, "est_tokens": s.est_tokens}
+                for s in available
+            ],
         )
 
 

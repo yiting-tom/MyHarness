@@ -4,12 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from myharness.artifacts.ids import ArtifactId
-from myharness.artifacts.types import GrantSet
 from myharness.events.types import (
     ASK_USER,
     DISPATCH_END,
-    JOB_FINISH,
     JOB_START,
     LIMIT_REACHED,
     STATUS_BUDGET_EXCEEDED,

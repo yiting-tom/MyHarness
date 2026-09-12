@@ -71,7 +71,7 @@ def data_rows(rendered: str) -> list[str]:
 
 
 async def test_the_full_chain_a_charter_describes(worker):
-    toolbox, blob, store = worker
+    toolbox, blob, _store = worker
     truth = ground_truth(GOLDEN_CSV)
 
     # 1. inspect first -- this is where the worker learns the column names.

@@ -211,15 +211,15 @@ class TestTheAggregateBoundIsEnforced:
     """
 
     def _pathological(self, **over):
-        base = dict(
-            job_id="j", state="running", revision=9,
-            status=status(pending_questions=[
+        base = {
+            "job_id": "j", "state": "running", "revision": 9,
+            "status": status(pending_questions=[
                 {"id": f"q{i}", "text": "為什麼要這樣做？" * 200, "kind": "clarify"}
                 for i in range(50)
             ]),
-            recent_events=[event("dispatch.end", id=f"d{i}", headline="很長的標題" * 200)
+            "recent_events": [event("dispatch.end", id=f"d{i}", headline="很長的標題" * 200)
                            for i in range(50)],
-        )
+        }
         base.update(over)
         return build_progress(**base)
 

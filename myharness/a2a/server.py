@@ -25,7 +25,7 @@ import ipaddress
 import sys
 from pathlib import Path
 
-from myharness.a2a.card import PROTOCOL_BINDING, build_agent_card
+from myharness.a2a.card import build_agent_card
 from myharness.a2a.executor import AnalysisExecutor
 from myharness.mcp.service import AnalysisService
 

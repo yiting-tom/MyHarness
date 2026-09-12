@@ -9,7 +9,6 @@ import pytest
 from myharness.backends.profile import ModelTier
 from myharness.lanes.types import (
     LaneConfigError,
-    LaneInstance,
     LaneRegistry,
     LaneType,
     UnknownLaneType,

@@ -374,4 +374,4 @@ class LocalArtifactStore(ArtifactStore):
             return tuple(self._row_to_meta(r) for r in conn.execute(sql, params))
 
 
-__all__ = ["LocalArtifactStore", "KIND_BLOB", "KIND_NOTE"]
+__all__ = ["KIND_BLOB", "KIND_NOTE", "LocalArtifactStore"]

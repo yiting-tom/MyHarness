@@ -15,15 +15,12 @@ from __future__ import annotations
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any
 
 from myharness.dataflow import DataFlow, build_dataflow, detect
 from myharness.events.query import summarize
 from myharness.events.types import (
     ASK_USER,
-    CTX,
     HANDOFF_RESTART,
-    JOB_FINISH,
     LIMIT_REACHED,
     NO_PROGRESS,
     THROTTLE_COOLDOWN,
@@ -104,7 +101,8 @@ class LiveView:
 
         lines = [
             style(rule(f"job {self.job_id}", width), "bold", enabled=colour),
-            f"  {spin} {style(str(activity), 'cyan' if not flow.finished else 'green', enabled=colour)}",
+            f"  {spin} {style(str(activity), 'green' if flow.finished else 'cyan',
+                              enabled=colour)}",
             "",
             f"  派工 {len(flow.dispatches)}"
             f"（執行中 {len(flow.running())}）"
@@ -142,7 +140,8 @@ class LiveView:
         detail = (dispatch.task if dispatch.running
                   else (dispatch.produced[0].split("/")[-1] if dispatch.produced
                         else dispatch.status))
-        return f"  {status}{style(truncate(detail.replace(chr(10), ' '), width - 22), 'dim', enabled=colour)}"
+        one_line = truncate(detail.replace(chr(10), " "), width - 22)
+        return f"  {status}{style(one_line, 'dim', enabled=colour)}"
 
     def _final(self, flow: DataFlow, summary, colour: bool, width: int) -> str:
         bits = [

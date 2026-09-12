@@ -25,7 +25,7 @@ from myharness.events.types import THROTTLE_GAVE_UP, THROTTLE_WAIT
 from myharness.lanes.handle import HandleStatus
 from myharness.lanes.transport import ScriptedTransport
 
-from .conftest import FakeClock, api_retry, result, GOOD_HANDLE
+from .conftest import GOOD_HANDLE, FakeClock, api_retry, result
 
 
 def make_gate(clock: FakeClock, **kw) -> BackendGate:

@@ -147,7 +147,8 @@ def _bad_finding_name(name: str) -> str | None:
 
 def _err(payload: dict[str, Any]) -> dict[str, Any]:
     """Refusals are data the worker can act on, not crashes."""
-    return {"content": [{"type": "text", "text": "ERROR " + json.dumps(payload, ensure_ascii=False)}]}
+    body = "ERROR " + json.dumps(payload, ensure_ascii=False)
+    return {"content": [{"type": "text", "text": body}]}
 
 
 @dataclass
@@ -470,5 +471,5 @@ class WorkerToolbox:
         )
 
     def tool_names(self) -> list[str]:
-        declared = [t for t in self.lane.type.tools] or list(DEFAULT_TOOLS)
+        declared = list(self.lane.type.tools) or list(DEFAULT_TOOLS)
         return [f"mcp__{SERVER_NAME}__{name}" for name in declared]

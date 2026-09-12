@@ -10,15 +10,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from myharness.artifacts.types import ArtifactMeta
-from myharness.events.types import (
-    ARTIFACT_READ,
-    DISPATCH_END,
-    DISPATCH_START,
-    INGRESS,
-    PROXY_ROUTE,
-    JOB_FINISH,
-    Event,
-)
 from myharness.dataflow.model import (
     DataFlow,
     DispatchInfo,
@@ -26,6 +17,15 @@ from myharness.dataflow.model import (
     EdgeKind,
     Node,
     NodeKind,
+)
+from myharness.events.types import (
+    ARTIFACT_READ,
+    DISPATCH_END,
+    DISPATCH_START,
+    INGRESS,
+    JOB_FINISH,
+    PROXY_ROUTE,
+    Event,
 )
 
 

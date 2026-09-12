@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
@@ -54,7 +54,7 @@ class FakeTransport:
 
 
 class FakeLoop:
-    instances: list["FakeLoop"] = []
+    instances: ClassVar[list[FakeLoop]] = []
 
     def __init__(self, *, runner, lanes, backend):
         self.runner = runner

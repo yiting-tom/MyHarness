@@ -5,13 +5,21 @@ spike01 顯示 readOnlyHint 疑似是開關。這裡做矩陣隔離，並測併�
 只看時間軸重疊。
 """
 import os
+
 os.environ.pop("ANTHROPIC_API_KEY", None)
 
-import anyio, json, time
-from mcp.types import ToolAnnotations
+import json
+import time
+
+import anyio
 from claude_agent_sdk import (
-    query, tool, create_sdk_mcp_server, ClaudeAgentOptions, ResultMessage,
+    ClaudeAgentOptions,
+    ResultMessage,
+    create_sdk_mcp_server,
+    query,
+    tool,
 )
+from mcp.types import ToolAnnotations
 
 SLEEP_S = 4.0
 calls: list[dict] = []

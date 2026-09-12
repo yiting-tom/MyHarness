@@ -88,7 +88,7 @@ async def drive(port: int, task_text: str, *, timeout_s: float = 1_800.0,
     """
     import httpx
     from a2a.client import A2ACardResolver, ClientConfig, ClientFactory
-    from a2a.types import GetTaskRequest, Message, Part, Role, SendMessageRequest
+    from a2a.types import GetTaskRequest
 
     from myharness.a2a.card import PRICE_LIST_EXTENSION
 
@@ -189,7 +189,11 @@ async def _await_terminal(client, task_id: str, *, timeout_s: float):
 
 async def _send(client, payload: dict, message_id: str, *, immediate: bool = False):
     from a2a.types import (
-        Message, Part, Role, SendMessageConfiguration, SendMessageRequest,
+        Message,
+        Part,
+        Role,
+        SendMessageConfiguration,
+        SendMessageRequest,
     )
 
     request = SendMessageRequest(message=Message(

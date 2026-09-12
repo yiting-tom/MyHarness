@@ -17,13 +17,14 @@ import pytest
 pytest.importorskip("a2a", reason="the a2a extra is optional (D6)")
 
 from myharness.a2a.card import (
-    PRICE_LIST_EXTENSION, SKILL_FULL_TEXT, SKILL_PRICE_LIST,
+    PRICE_LIST_EXTENSION,
+    SKILL_FULL_TEXT,
+    SKILL_PRICE_LIST,
 )
 from myharness.a2a.server import build_app, endpoint_url
 from myharness.backends.profile import registry, self_hosted_from_env
 from myharness.mcp.server import default_lanes
 from myharness.mcp.service import AnalysisService
-
 from tests.a2a.chain import drive, free_port, running
 
 pytestmark = pytest.mark.live

@@ -13,10 +13,11 @@ import pytest
 pytest.importorskip("a2a", reason="the a2a extra is optional (D6)")
 
 from myharness.a2a.card import (
-    PRICE_LIST_EXTENSION, SKILL_FULL_TEXT, SKILL_PRICE_LIST,
+    PRICE_LIST_EXTENSION,
+    SKILL_FULL_TEXT,
+    SKILL_PRICE_LIST,
 )
 from myharness.a2a.server import build_app, endpoint_url
-
 from tests.a2a.chain import drive, free_port, running
 from tests.a2a.test_boundary import FakeService
 

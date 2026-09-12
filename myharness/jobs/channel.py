@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import abc
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
@@ -108,7 +108,7 @@ class QueueChannel(UserChannel):
         self.questions[question.id] = question
         try:
             text = await asyncio.wait_for(future, timeout=question.timeout_s)
-        except (TimeoutError, asyncio.TimeoutError):
+        except TimeoutError:
             self._pending.pop(question.id, None)
             return Answer(question.id, question.default, defaulted=True,
                           reason=f"no answer within {question.timeout_s:.0f}s")

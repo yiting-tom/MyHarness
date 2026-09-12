@@ -20,9 +20,9 @@ from myharness.artifacts.ids import ArtifactId
 from myharness.artifacts.local import LocalArtifactStore
 from myharness.artifacts.store import ArtifactStore
 from myharness.artifacts.types import GrantSet
+from myharness.backends.profile import registry as backends
 from myharness.events.log import EventLog, LocalEventLog
 from myharness.events.query import summarize
-from myharness.backends.profile import registry as backends
 from myharness.events.types import INGRESS, PROXY_ROUTE
 from myharness.jobs.channel import QueueChannel
 from myharness.jobs.runner import JobRunner
@@ -30,9 +30,6 @@ from myharness.jobs.spec import JobSpec
 from myharness.lanes.types import LaneRegistry
 from myharness.local_layout import find_jobs
 from myharness.mcp.manager import JobHandle, JobManager, NotifyingEventLog, RunState
-from myharness.orchestrator.routing import read_routing
-from myharness.proxy.classify import Routing, Unrouted, classify
-from myharness.proxy.sample import describe_meta, read_sample
 from myharness.mcp.payload import (
     MAX_SECTION_TOKENS,
     bound_section,
@@ -41,6 +38,9 @@ from myharness.mcp.payload import (
 )
 from myharness.orchestrator.delivery import build_delivery, drill
 from myharness.orchestrator.loop import OrchestratorLoop
+from myharness.orchestrator.routing import read_routing
+from myharness.proxy.classify import Routing, Unrouted, classify
+from myharness.proxy.sample import describe_meta, read_sample
 
 #: Long-poll ceiling. In-process tool calls blocking 180s and 600s both passed
 #: (DESIGN §8 Q5) and MCP_TOOL_TIMEOUT defaults to ~27.8h, so this sits well

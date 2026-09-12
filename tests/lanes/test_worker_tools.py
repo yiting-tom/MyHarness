@@ -54,7 +54,8 @@ async def bench(tmp_path: Path):
 async def test_reads_explicitly_granted_artifact(bench):
     """Scenario: 讀取被授權的 input"""
     toolbox, ids = bench
-    assert "已授權" in text_of(await toolbox.handlers["read_note"]({"artifact": str(ids["granted"].id)}))
+    out = await toolbox.handlers["read_note"]({"artifact": str(ids["granted"].id)})
+    assert "已授權" in text_of(out)
 
 
 async def test_refusal_is_visible_to_the_worker(bench):
@@ -74,7 +75,8 @@ async def test_blob_cannot_be_read_as_a_note(bench):
 
 async def test_malformed_artifact_id_is_a_refusal_not_a_crash(bench):
     toolbox, _ = bench
-    assert error_of(await toolbox.handlers["read_note"]({"artifact": "garbage"}))["code"] == "bad_artifact_id"
+    out = await toolbox.handlers["read_note"]({"artifact": "garbage"})
+    assert error_of(out)["code"] == "bad_artifact_id"
 
 
 async def test_write_finding_records_what_was_produced(bench):
@@ -86,7 +88,8 @@ async def test_write_finding_records_what_was_produced(bench):
 
 async def test_empty_finding_is_refused(bench):
     toolbox, _ = bench
-    assert error_of(await toolbox.handlers["write_finding"]({"name": "x", "text": "  "}))["code"] == "empty_finding"
+    out = await toolbox.handlers["write_finding"]({"name": "x", "text": "  "})
+    assert error_of(out)["code"] == "empty_finding"
 
 
 async def test_state_update_advances_revision(bench):
@@ -137,14 +140,16 @@ async def test_concurrent_state_write_is_detected(bench):
 
 async def test_localize_blob_returns_a_usable_path(bench):
     toolbox, ids = bench
-    payload = json.loads(text_of(await toolbox.handlers["localize_blob"]({"artifact": str(ids["blob"].id)})))
+    out = await toolbox.handlers["localize_blob"]({"artifact": str(ids["blob"].id)})
+    payload = json.loads(text_of(out))
     assert Path(payload["path"]).read_bytes() == b"ts,amt\n1,2\n"
     assert payload["schema"] == {"columns": ["ts", "amt"]}
 
 
 async def test_localize_respects_grants(bench):
     toolbox, ids = bench
-    assert error_of(await toolbox.handlers["localize_blob"]({"artifact": str(ids["secret"].id)}))["code"] in {
+    out = await toolbox.handlers["localize_blob"]({"artifact": str(ids["secret"].id)})
+    assert error_of(out)["code"] in {
         "not_granted", "not_a_blob",
     }
 
@@ -203,7 +208,8 @@ async def test_a_lane_that_has_written_is_told_to_finish_instead(bench):
     text = _text(toolbox._result("rows: 12"))
 
     assert "不要再開新的查詢" in text
-    assert "write_finding" not in text, "it already has one; telling it to write again invites a duplicate"
+    assert "write_finding" not in text, \
+        "it already has one; telling it to write again invites a duplicate"
 
 
 async def test_the_warning_repeats_on_every_call(bench):
@@ -225,7 +231,7 @@ async def test_a_finding_name_that_is_an_artifact_id_is_refused(bench):
     lanes/critic/findings/<job>/note/lanes/analyst/findings/critique -- a path
     nothing looks for, which the flow graph then reported as an orphan.
     """
-    toolbox, ids = bench
+    toolbox, _ids = bench
     result = text_of(await toolbox.handlers["write_finding"]({
         "name": "j/note/lanes/analyst/findings/critique", "text": "## 結論\nok\n",
     }))

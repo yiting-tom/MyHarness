@@ -6,11 +6,15 @@ CLI 內有 MCP_TOOL_TIMEOUT（預設 1e8 ms ≈ 27.8h，實質無限）
 能不能阻塞好幾分鐘等 lane worker。
 """
 import os
+
 os.environ.pop("ANTHROPIC_API_KEY", None)
 
-import anyio, sys, time
+import sys
+import time
+
+import anyio
+from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, create_sdk_mcp_server, query, tool
 from mcp.types import ToolAnnotations
-from claude_agent_sdk import query, tool, create_sdk_mcp_server, ClaudeAgentOptions, ResultMessage
 
 BLOCK_S = float(sys.argv[1]) if len(sys.argv) > 1 else 180.0
 result = {}

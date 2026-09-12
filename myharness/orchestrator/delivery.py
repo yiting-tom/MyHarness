@@ -104,12 +104,12 @@ async def build_delivery(
     confidence: str = "medium",
 ) -> Delivery:
     summary_stats = summarize(events)
-    base = dict(
-        job_id=job_id, status=status, report_artifact=report_artifact,
-        caveats=tuple(summary_stats.caveats), cost_usd=summary_stats.total_usd,
-        dispatches=summary_stats.dispatches,
-        throttle_seconds=summary_stats.throttle_seconds,
-    )
+    base = {
+        "job_id": job_id, "status": status, "report_artifact": report_artifact,
+        "caveats": tuple(summary_stats.caveats), "cost_usd": summary_stats.total_usd,
+        "dispatches": summary_stats.dispatches,
+        "throttle_seconds": summary_stats.throttle_seconds,
+    }
 
     if not report_artifact:
         return Delivery(

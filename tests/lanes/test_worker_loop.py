@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 
 import pytest
@@ -14,7 +15,7 @@ from myharness.lanes.handle import HandleStatus
 from myharness.lanes.transport import ScriptedTransport
 from myharness.lanes.worker import WorkerRequest, run_lane_worker
 
-from .conftest import JOB, GOOD_HANDLE, api_retry, assistant, handle_text, result, with_backend
+from .conftest import GOOD_HANDLE, JOB, api_retry, assistant, handle_text, result, with_backend
 
 
 def req(bench, task="分析 2024 交易", inputs=(), dispatch_id="d1"):
@@ -142,7 +143,9 @@ async def test_budget_exhaustion_returns_a_handle_with_partials(bench):
 
 async def test_max_turns_returns_a_handle_not_an_exception(bench):
     """Scenario: 回合數用盡不拋例外"""
-    transport = ScriptedTransport([assistant("…"), result(subtype="error_max_turns", is_error=True)])
+    transport = ScriptedTransport(
+        [assistant("…"), result(subtype="error_max_turns", is_error=True)]
+    )
     handle = await run(bench, transport)
     assert handle.status is HandleStatus.MAX_TURNS
     assert "回合" in handle.headline
@@ -280,8 +283,10 @@ async def test_failed_run_still_leaves_a_transcript(bench):
 
 async def test_end_event_carries_cost_and_usage(bench):
     """Scenario: 成功執行的事件含成本與用量"""
-    await run(bench, ScriptedTransport([result(structured=GOOD_HANDLE, usd=0.31,
-                                               usage={"input_tokens": 4000, "output_tokens": 300})]))
+    await run(bench, ScriptedTransport([
+        result(structured=GOOD_HANDLE, usd=0.31,
+               usage={"input_tokens": 4000, "output_tokens": 300}),
+    ]))
     (end,) = await bench.events_for(DISPATCH_END)
     assert end.get("status") == "ok"
     assert end.get("tokens") == {"in": 4000, "out": 300, "fresh_in": 4000,
@@ -440,8 +445,7 @@ def test_a_string_bodied_user_message_does_not_crash():
 
 def _exchange(acc, reply="x" * 4_000, tool_result="r" * 1_000):
     """One round trip: the model answers, tool results come back, a request goes out."""
-    from claude_agent_sdk import (AssistantMessage, TextBlock, ToolResultBlock,
-                                  UserMessage)
+    from claude_agent_sdk import AssistantMessage, TextBlock, ToolResultBlock, UserMessage
 
     from myharness.lanes.worker import _consume
 
@@ -474,7 +478,7 @@ def test_the_estimate_grows_with_every_request():
 
     assert seen == sorted(seen) and len(set(seen)) == len(seen)
     # Each request costs more than the last, because the conversation is longer.
-    steps = [b - a for a, b in zip(seen, seen[1:])]
+    steps = [b - a for a, b in itertools.pairwise(seen)]
     assert steps == sorted(steps)
 
 

@@ -13,7 +13,7 @@ inventing a second kind of state.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any

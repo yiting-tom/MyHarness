@@ -47,75 +47,74 @@ async def main() -> int:
         env=dict(os.environ),
     )
     started = time.monotonic()
-    async with stdio_client(params) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
+    async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
+        await session.initialize()
 
-            listed = await session.list_tools()
-            print(f"tools: {sorted(t.name for t in listed.tools)}\n")
+        listed = await session.list_tools()
+        print(f"tools: {sorted(t.name for t in listed.tools)}\n")
 
-            job = body(await session.call_tool("analysis_start", {
-                "task": "分析提供的交易資料。報告中必須明確給出不重複帳戶的總數。",
+        job = body(await session.call_tool("analysis_start", {
+            "task": "分析提供的交易資料。報告中必須明確給出不重複帳戶的總數。",
+        }))
+        print("start:", job)
+        job_id = job["job_id"]
+
+        provided = body(await session.call_tool("analysis_provide", {
+            "job_id": job_id, "payload": ROWS, "name": "txn.csv",
+        }))
+        print("provide:", provided, "\n")
+
+        revision, last = None, None
+        for _ in range(40):
+            progress = body(await session.call_tool("analysis_poll", {
+                "job_id": job_id, "wait": 30, **({"since": revision} if revision else {}),
             }))
-            print("start:", job)
-            job_id = job["job_id"]
+            if not progress.get("ok"):
+                print("poll refused:", progress)
+                break
+            revision = progress["revision"]
+            line = (f"[{time.monotonic()-started:6.1f}s] {progress['state']:9s} "
+                    f"rev={revision:<3} dispatches={progress['dispatches']} "
+                    f"${progress['spent_usd']:.4f} "
+                    f"{progress['recent'][-1] if progress['recent'] else ''}")
+            if line[20:] != (last or "")[20:]:
+                print(line[:150])
+                last = line
+            for q in progress["pending_questions"]:
+                print(f"    answering {q['id']}: {q['text'][:80]}")
+                await session.call_tool("analysis_answer", {
+                    "job_id": job_id, "question_id": q["id"],
+                    # A real client has the id from analysis_provide, so
+                    # give it. The first run answered without one and the
+                    # orchestrator asked twice.
+                    "text": f"資料是 {provided['artifact']}，40 列交易，"
+                            "欄位 txn_id/ts/account/amount/channel。"
+                            "不需要其他資料。",
+                })
+            if progress["state"] != "running":
+                break
 
-            provided = body(await session.call_tool("analysis_provide", {
-                "job_id": job_id, "payload": ROWS, "name": "txn.csv",
+        print()
+        result = body(await session.call_tool("analysis_result", {"job_id": job_id}))
+        if not result.get("ok"):
+            print("no result:", result)
+            return 1
+        encoded = json.dumps(result, ensure_ascii=False)
+        print(f"result: {len(encoded)} chars, "
+              f"{len(result['sections'])} sections, "
+              f"{result['total_section_tokens']} section tokens")
+        print("  summary:", result["executive_summary"][:200])
+        for s in result["sections"]:
+            print(f"    {s['id']}  {s['est_tokens']} tokens")
+
+        drilled = None
+        if result["sections"]:
+            drilled = body(await session.call_tool("analysis_drill", {
+                "job_id": job_id, "section_id": result["sections"][0]["id"],
             }))
-            print("provide:", provided, "\n")
-
-            revision, last = None, None
-            for _ in range(40):
-                progress = body(await session.call_tool("analysis_poll", {
-                    "job_id": job_id, "wait": 30, **({"since": revision} if revision else {}),
-                }))
-                if not progress.get("ok"):
-                    print("poll refused:", progress)
-                    break
-                revision = progress["revision"]
-                line = (f"[{time.monotonic()-started:6.1f}s] {progress['state']:9s} "
-                        f"rev={revision:<3} dispatches={progress['dispatches']} "
-                        f"${progress['spent_usd']:.4f} "
-                        f"{progress['recent'][-1] if progress['recent'] else ''}")
-                if line[20:] != (last or "")[20:]:
-                    print(line[:150])
-                    last = line
-                for q in progress["pending_questions"]:
-                    print(f"    answering {q['id']}: {q['text'][:80]}")
-                    await session.call_tool("analysis_answer", {
-                        "job_id": job_id, "question_id": q["id"],
-                        # A real client has the id from analysis_provide, so
-                        # give it. The first run answered without one and the
-                        # orchestrator asked twice.
-                        "text": f"資料是 {provided['artifact']}，40 列交易，"
-                                "欄位 txn_id/ts/account/amount/channel。"
-                                "不需要其他資料。",
-                    })
-                if progress["state"] != "running":
-                    break
-
-            print()
-            result = body(await session.call_tool("analysis_result", {"job_id": job_id}))
-            if not result.get("ok"):
-                print("no result:", result)
-                return 1
-            encoded = json.dumps(result, ensure_ascii=False)
-            print(f"result: {len(encoded)} chars, "
-                  f"{len(result['sections'])} sections, "
-                  f"{result['total_section_tokens']} section tokens")
-            print("  summary:", result["executive_summary"][:200])
-            for s in result["sections"]:
-                print(f"    {s['id']}  {s['est_tokens']} tokens")
-
-            drilled = None
-            if result["sections"]:
-                drilled = body(await session.call_tool("analysis_drill", {
-                    "job_id": job_id, "section_id": result["sections"][0]["id"],
-                }))
-                print(f"\ndrill '{result['sections'][0]['id']}': "
-                      f"{len(drilled.get('text',''))} chars, "
-                      f"truncated={drilled.get('truncated')}")
+            print(f"\ndrill '{result['sections'][0]['id']}': "
+                  f"{len(drilled.get('text',''))} chars, "
+                  f"truncated={drilled.get('truncated')}")
 
     print(f"\n--- checks ---  ({time.monotonic()-started:.0f}s)")
     checks = [

@@ -14,8 +14,8 @@ import pytest
 
 from myharness.artifacts.local import LocalArtifactStore
 from myharness.artifacts.types import GrantSet
-from myharness.lanes.tabular.query import QueryFailure, QueryRunner
 from myharness.lanes.tabular import ingest as ingest_mod
+from myharness.lanes.tabular.query import QueryFailure, QueryRunner
 
 JOB = "jf"
 

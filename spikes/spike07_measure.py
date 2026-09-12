@@ -3,19 +3,23 @@
 Part A（離線、零成本）：用錄音端點攔下真正的請求，比較裁切前後的 prefix token 數。
 Part B（live）：同一條 lane 連跑兩次，量 prompt cache 命中率與單次成本。
 """
-import os, sys, json, threading
+import json
+import os
+import sys
+import threading
+
 os.environ.pop("ANTHROPIC_API_KEY", None)
 
-import anyio
-from pathlib import Path
 from http.server import ThreadingHTTPServer
+from pathlib import Path
+
+import anyio
 
 sys.path.insert(0, "spikes")
-from spike02_litellm_passthrough import H, CAPTURED  # noqa: E402
+from spike02_litellm_passthrough import CAPTURED, H
 
 from myharness.artifacts.local import LocalArtifactStore
-from myharness.backends.profile import (BUILTIN_TOOLS, BackendCapability,
-                                        BackendProfile, registry)
+from myharness.backends.profile import BackendCapability, BackendProfile, registry
 from myharness.events.log import LocalEventLog
 from myharness.events.query import summarize
 from myharness.lanes.types import LaneRegistry, LaneType

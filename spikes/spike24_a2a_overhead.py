@@ -60,7 +60,6 @@ def as_a2a_task(job_id: str, answer: dict) -> dict:
     The extension URI is the mark spike #13 established -- declared on the agent
     card with required=true, repeated here so a client sees it on the artifact.
     """
-    sections = answer.get("sections") or []
     return {
         "jsonrpc": "2.0",
         "id": 1,

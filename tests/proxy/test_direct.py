@@ -10,29 +10,32 @@ traded away the first time someone reaches for the SDK's conveniences.
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import httpx
 import pytest
 
-from myharness.backends.gate import BackendGate, ThrottleReport
+from myharness.backends.gate import BackendGate
 from myharness.backends.profile import (
     BackendProfile,
     ModelTier,
     WireFormat,
     registry,
 )
+from myharness.orchestrator.routing import RoutingTable
 from myharness.proxy.classify import SYSTEM_PROMPT, Unrouted, build_prompt, classify
 from myharness.proxy.direct import (
     Completion,
     DirectError,
     DirectStatusError,
+    HttpDirect,
     complete_via_gate,
 )
-from myharness.orchestrator.routing import RoutingTable
 from myharness.proxy.sample import Sample
 
 DIRECT = BackendProfile(
     name="direct-test",
-    models={tier: "aird-35b" for tier in ModelTier},
+    models=dict.fromkeys(ModelTier, "aird-35b"),
     capabilities=frozenset(),
     base_url="http://endpoint.invalid",
     auth_token_env=None,
@@ -128,7 +131,7 @@ async def test_backend_without_a_wire_format_still_classifies():
     class Msg:
         content = ()
         total_cost_usd = 0.002
-        usage = {"input_tokens": 8991, "output_tokens": 30}
+        usage: ClassVar[dict[str, int]] = {"input_tokens": 8991, "output_tokens": 30}
 
         def __init__(self, text):
             self.content = [Block(text)]
@@ -298,7 +301,7 @@ def test_no_direct_profile_when_unconfigured(monkeypatch):
 # lives in the request body, so it is asserted there.
 
 
-def wired(handler) -> "HttpDirect":
+def wired(handler) -> HttpDirect:
     """An HttpDirect whose client is driven by httpx's MockTransport."""
     import myharness.proxy.direct as mod
 

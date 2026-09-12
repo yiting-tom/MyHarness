@@ -180,7 +180,7 @@ class TestAuthorisation:
 
     async def test_object_shaped_input_is_refused_not_mangled(self, bench):
         """The fourth golden run lost two lanes to str() on a dict."""
-        toolbox, ids, _ = bench
+        toolbox, _ids, _ = bench
         out = await call(
             toolbox, "duckdb_query",
             artifacts=[{"unexpected": "shape"}], sql="SELECT 1",

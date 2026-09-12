@@ -14,8 +14,22 @@ from myharness.lanes.types import LaneInstance, LaneRegistry, LaneType, UnknownL
 from myharness.lanes.worker import WorkerRequest, run_lane_worker
 
 __all__ = [
-    "ContractPath", "HANDLE_SCHEMA", "HandleStatus", "LaneHandle", "LaneInstance",
-    "LaneRegistry", "LaneType", "MAX_HANDLE_CHARS", "ScriptedTransport", "SdkTransport",
-    "UnknownLaneType", "WorkerRequest", "WorkerToolbox", "WorkerTransport",
-    "clamp_handle", "failure_handle", "run_lane_worker", "validate_payload",
+    "HANDLE_SCHEMA",
+    "MAX_HANDLE_CHARS",
+    "ContractPath",
+    "HandleStatus",
+    "LaneHandle",
+    "LaneInstance",
+    "LaneRegistry",
+    "LaneType",
+    "ScriptedTransport",
+    "SdkTransport",
+    "UnknownLaneType",
+    "WorkerRequest",
+    "WorkerToolbox",
+    "WorkerTransport",
+    "clamp_handle",
+    "failure_handle",
+    "run_lane_worker",
+    "validate_payload",
 ]

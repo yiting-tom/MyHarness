@@ -13,7 +13,7 @@ import pytest
 pytest.importorskip("a2a", reason="the a2a extra is optional (D6)")
 
 from myharness.a2a.card import PRICE_LIST_EXTENSION, SKILL_FULL_TEXT, SKILL_PRICE_LIST
-from myharness.a2a.server import NotLoopback, RPC_PATH, build_app, require_loopback
+from myharness.a2a.server import RPC_PATH, NotLoopback, build_app, require_loopback
 
 PRICE_LIST = {
     "ok": True,

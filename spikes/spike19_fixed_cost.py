@@ -31,13 +31,15 @@ from pathlib import Path
 
 os.environ.pop("ANTHROPIC_API_KEY", None)
 
-from myharness.artifacts.local import LocalArtifactStore              # noqa: E402
-from myharness.backends.profile import self_hosted_from_env           # noqa: E402
-from myharness.events.log import LocalEventLog                        # noqa: E402
-from myharness.lanes.budget import estimate, split_chars              # noqa: E402
-from myharness.lanes.types import LaneInstance, LaneType              # noqa: E402
-from myharness.lanes.worker import (                                  # noqa: E402
-    FRAMEWORK_TOKENS_PER_REQUEST, WorkerRequest, run_lane_worker,
+from myharness.artifacts.local import LocalArtifactStore
+from myharness.backends.profile import self_hosted_from_env
+from myharness.events.log import LocalEventLog
+from myharness.lanes.budget import estimate
+from myharness.lanes.types import LaneInstance, LaneType
+from myharness.lanes.worker import (
+    FRAMEWORK_TOKENS_PER_REQUEST,
+    WorkerRequest,
+    run_lane_worker,
 )
 
 ANALYST_TOOLS = ("read_note", "write_finding", "update_state",

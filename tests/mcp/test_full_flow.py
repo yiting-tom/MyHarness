@@ -16,6 +16,7 @@ import asyncio
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 from mcp.shared.memory import create_connected_server_and_client_session
@@ -43,7 +44,7 @@ app 13,981.81 為四個通路中最低，其餘三者介於 20,612 與 21,655 �
 class ScriptedLoop:
     """Plays out a plausible job: dispatch, ask, dispatch, finish."""
 
-    instances: list["ScriptedLoop"] = []
+    instances: ClassVar[list[ScriptedLoop]] = []
 
     def __init__(self, *, runner, lanes, backend):
         self.runner = runner

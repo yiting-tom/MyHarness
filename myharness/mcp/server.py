@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import sys
 from pathlib import Path
 
@@ -157,10 +158,8 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             await service.aclose()
 
-    try:
+    with contextlib.suppress(KeyboardInterrupt):  # operator action, not a failure
         asyncio.run(run())
-    except KeyboardInterrupt:  # pragma: no cover - operator action
-        pass
     return 0
 
 

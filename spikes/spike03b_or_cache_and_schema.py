@@ -3,11 +3,14 @@
   B) 結構化輸出強制（handle 契約「強制 vs 祈禱」的前提）
 對照組同時跑 Anthropic 直連。
 """
-import os, sys, json, time
+import json
+import os
+import sys
+
 os.environ.pop("ANTHROPIC_API_KEY", None)
 
 import anyio
-from claude_agent_sdk import query, ClaudeAgentOptions, ResultMessage, AssistantMessage, TextBlock
+from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, ResultMessage, TextBlock, query
 
 BUILTINS = ["Agent","Bash","CronCreate","CronDelete","CronList","Edit","EnterWorktree",
             "ExitWorktree","Glob","Grep","NotebookEdit","Read","ReportFindings","ScheduleWakeup",

@@ -8,7 +8,10 @@ granted blobs, can the worker's SQL reach ANYTHING we did not grant?
 Run: python spikes/spike10_duckdb_sandbox.py
 """
 
-import tempfile, pathlib, sys
+import pathlib
+import sys
+import tempfile
+
 import duckdb
 
 SECRET = pathlib.Path(tempfile.mkdtemp()) / "not-granted.csv"
@@ -33,7 +36,7 @@ def fresh():
     return conn
 
 ESCAPES = {
-    "read granted table (must WORK)":  f"SELECT sum(x) FROM t",
+    "read granted table (must WORK)":  "SELECT sum(x) FROM t",
     "read ungranted csv":              f"SELECT * FROM read_csv_auto('{SECRET}')",
     "read ungranted via glob":         f"SELECT * FROM read_csv_auto('{SECRET.parent}/*.csv')",
     "attach another duckdb file":      f"ATTACH '{SECRET.parent}/x.db' AS other",
@@ -82,7 +85,9 @@ print("  => guard = exactly one statement, type SELECT.")
 
 # Interruptibility: a runaway query must be killable.
 print("\ninterrupt:")
-import threading, time
+import threading
+import time
+
 conn = fresh()
 threading.Timer(0.5, conn.interrupt).start()
 t0 = time.monotonic()

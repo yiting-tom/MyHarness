@@ -12,9 +12,9 @@ import asyncio
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
-from mcp.server.models import InitializationOptions
 from mcp.shared.memory import create_connected_server_and_client_session
 
 from myharness.lanes.types import LaneRegistry, LaneType
@@ -24,7 +24,7 @@ from myharness.mcp.tools import TOOL_DESCRIPTIONS, TOOL_SCHEMAS
 
 
 class FakeLoop:
-    instances: list["FakeLoop"] = []
+    instances: ClassVar[list[FakeLoop]] = []
 
     def __init__(self, *, runner, lanes, backend):
         self.runner = runner
@@ -130,15 +130,15 @@ async def test_a_refusal_comes_back_as_a_readable_result(tmp_path: Path):
 
 
 async def test_an_unknown_tool_lists_the_real_ones(tmp_path: Path):
-    async with connected(tmp_path) as session:
-        from myharness.mcp.tools import build_handlers, call
+    async with connected(tmp_path):
+        from myharness.mcp.tools import call
 
         text = await call({}, "analysis_nope", {})
         assert json.loads(text)["error"] == "unknown_tool"
 
 
 async def test_a_handler_that_raises_becomes_a_refusal(tmp_path: Path):
-    async with connected(tmp_path) as session:
+    async with connected(tmp_path):
         from myharness.mcp.tools import call
 
         async def boom(args):

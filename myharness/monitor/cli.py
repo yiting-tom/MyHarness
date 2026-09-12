@@ -22,7 +22,7 @@ from myharness.artifacts.types import ArtifactMeta
 from myharness.dataflow import build_dataflow, detect
 from myharness.events.log import LocalEventLog
 from myharness.events.types import Event
-from myharness.local_layout import JobLayout, find_jobs
+from myharness.local_layout import find_jobs
 from myharness.monitor.inspect import render_inspect
 from myharness.monitor.live import LiveView
 from myharness.monitor.render import colour_enabled, human_duration, pad, style
@@ -48,8 +48,8 @@ def discover(root: Path) -> list[JobRef]:
     found: list[JobRef] = []
     for layout in find_jobs(root):
         path = layout.events_path
-        lines = [l for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
-        finished = any('"job.finish"' in l for l in lines[-5:])
+        lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        finished = any('"job.finish"' in ln for ln in lines[-5:])
         found.append(JobRef(layout.job_id, len(lines), finished,
                             path.stat().st_mtime, layout.root))
     return sorted(found, key=lambda j: -j.last_activity)
@@ -67,7 +67,7 @@ async def load(root: Path, job_id: str) -> tuple[list[Event], Sequence[ArtifactM
     events = list(await LocalEventLog(root).read(job_id))
     try:
         artifacts = await LocalArtifactStore(root).list(job_id)
-    except Exception:
+    except Exception:  # noqa: BLE001 - a job with no artifacts still has events
         artifacts = ()
     return events, artifacts
 

@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import pytest
-
 from claude_agent_sdk import ResultMessage
 
 from myharness.backends.profile import BackendCapability, BackendProfile, registry
 from myharness.events.types import CTX, HANDOFF_RESTART, JOB_FINISH, LIMIT_REACHED
 from myharness.jobs.spec import JobPhase
 from myharness.orchestrator.loop import OrchestratorLoop
-from myharness.orchestrator.plan import read_plan, write_plan
+from myharness.orchestrator.plan import write_plan
 from myharness.orchestrator.session import ScriptedSession, ScriptedSessionFactory
 
 from .conftest import JOB, payload
@@ -177,7 +176,7 @@ async def test_an_unfinished_job_still_delivers(bench):
 
     Past the bounded grace the fallback is written by code, not by the model.
     """
-    dispatched = payload(await bench.h["dispatch"]({"lane": "txn", "task": "x"}))
+    await bench.h["dispatch"]({"lane": "txn", "task": "x"})
     await bench.declare("txn")
     session = ScriptedSession(turns=[[result_msg()]], usage_series=[1_000])
     outcome = await make_loop(bench, ScriptedSessionFactory([session])).run()
@@ -189,7 +188,9 @@ async def test_an_unfinished_job_still_delivers(bench):
         __import__("myharness.artifacts.ids", fromlist=["ArtifactId"]).ArtifactId.parse(
             outcome.report_artifact
         ),
-        grants=__import__("myharness.artifacts.types", fromlist=["GrantSet"]).GrantSet.unrestricted(JOB),
+        grants=__import__(
+            "myharness.artifacts.types", fromlist=["GrantSet"]
+        ).GrantSet.unrestricted(JOB),
         max_tokens=10_000,
     )
     assert "自動產出" in text
@@ -315,9 +316,9 @@ async def test_a_rate_limit_after_real_work_does_not_abandon_the_job(bench, monk
     import random
 
     from myharness.backends import gate as gate_module
-    from .conftest import FakeLane  # noqa: F401
-
     from tests.lanes.conftest import FakeClock  # virtual time, so no real sleeping
+
+    from .conftest import FakeLane  # noqa: F401
 
     clock = FakeClock()
     monkeypatch.setattr(

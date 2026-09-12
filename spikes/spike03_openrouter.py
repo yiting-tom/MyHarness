@@ -5,15 +5,25 @@
   2. 工具呼叫（含 SDK in-process MCP tool）能不能用
   3. cache_control 有沒有真的生效（看 cache_read_input_tokens）
 """
-import os, sys
+import os
+import sys
+
 os.environ.pop("ANTHROPIC_API_KEY", None)
 
-import anyio, json, time
-from mcp.types import ToolAnnotations
+import time
+
+import anyio
 from claude_agent_sdk import (
-    query, tool, create_sdk_mcp_server, ClaudeAgentOptions,
-    AssistantMessage, TextBlock, ResultMessage, SystemMessage,
+    AssistantMessage,
+    ClaudeAgentOptions,
+    ResultMessage,
+    SystemMessage,
+    TextBlock,
+    create_sdk_mcp_server,
+    query,
+    tool,
 )
+from mcp.types import ToolAnnotations
 
 OR_KEY = os.environ["OR_KEY"]
 MODEL = sys.argv[1] if len(sys.argv) > 1 else "anthropic/claude-sonnet-4.5"

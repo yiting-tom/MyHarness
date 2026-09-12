@@ -23,8 +23,7 @@ from myharness.lanes.handle import HandleStatus
 from myharness.lanes.transport import ScriptedTransport
 from myharness.lanes.worker import WorkerRequest, run_lane_worker
 
-from .conftest import JOB, GOOD_HANDLE, assistant, result, with_backend
-
+from .conftest import GOOD_HANDLE, JOB, assistant, result, with_backend
 
 # --- Requirement: Per-lane 的後端設定 ------------------------------------
 
@@ -128,7 +127,9 @@ async def test_api_budget_is_only_sent_when_supported(bench):
     assert enforcing.calls[0][1].task_budget == {"total": bench.lane.type.token_budget}
 
     lane = with_backend(bench.lane, "test-degraded")
-    degraded = ScriptedTransport([assistant('{"artifact":"a","headline":"h","confidence":"low"}'), result()])
+    degraded = ScriptedTransport(
+        [assistant('{"artifact":"a","headline":"h","confidence":"low"}'), result()]
+    )
     await run_lane_worker(
         WorkerRequest(job_id=JOB, lane=lane, task="t", dispatch_id="d2"),
         store=bench.store, event_log=bench.events, transport=degraded,
@@ -141,7 +142,9 @@ async def test_local_token_ceiling_stops_a_backend_without_api_budget(bench):
     lane = with_backend(bench.lane, "test-degraded")
     lane = replace(lane, type=replace(lane.type, token_budget=500))
     over = {"input_tokens": 900, "output_tokens": 400}
-    transport = ScriptedTransport([assistant("…", usage=over), assistant("…", usage=over), result()])
+    transport = ScriptedTransport(
+        [assistant("…", usage=over), assistant("…", usage=over), result()]
+    )
 
     handle = await run_lane_worker(
         WorkerRequest(job_id=JOB, lane=lane, task="t", dispatch_id="d1"),

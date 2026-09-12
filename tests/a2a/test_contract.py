@@ -23,7 +23,6 @@ pytest.importorskip("a2a", reason="the a2a extra is optional (D6)")
 from myharness.a2a.server import RPC_PATH, build_app
 from myharness.lanes.types import LaneRegistry, LaneType
 from myharness.mcp.service import AnalysisService
-
 from tests.mcp.test_full_flow import ScriptedLoop
 
 VERSION_HEADERS = {"A2A-Version": "1.0"}

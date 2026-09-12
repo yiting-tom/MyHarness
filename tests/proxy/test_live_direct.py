@@ -20,8 +20,6 @@ suite cannot tell -- it feeds the classifier a scripted answer.
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from myharness.backends.profile import ModelTier, direct_openai_from_env
@@ -82,8 +80,8 @@ async def test_two_payloads_reach_two_lanes(profile, capsys):
         print(f"\n  endpoint : {profile.base_url}")
         print(f"  model    : {profile.resolve_model(ModelTier.CHEAP)}")
         print(f"  own prompt: {own} chars")
-        for name, r, expected in results:
-            print(f"  {name:9} -> {str(r.lane):9} {r.confidence:7} "
+        for name, r, _expected in results:
+            print(f"  {name:9} -> {r.lane!s:9} {r.confidence:7} "
                   f"in={r.tokens_in:<6} out={r.tokens_out:<4} {r.reason[:48]}")
         worst = max(r.tokens_in for _, r, _ in results)
         print(f"  SDK path : {SDK_INPUT_TOKENS:,} input tokens (spike #12)")

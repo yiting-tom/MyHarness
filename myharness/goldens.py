@@ -20,12 +20,12 @@ from typing import Any
 
 from myharness.artifacts.local import LocalArtifactStore
 from myharness.artifacts.types import GrantSet
+from myharness.dataflow import Anomaly, DataFlow, build_dataflow, critical, detect
 from myharness.events.log import LocalEventLog
 from myharness.events.query import summarize
 from myharness.jobs.runner import JobRunner
 from myharness.jobs.spec import JobSpec
 from myharness.lanes.types import LaneRegistry, LaneType
-from myharness.dataflow import Anomaly, DataFlow, build_dataflow, critical, detect
 from myharness.orchestrator.delivery import Delivery, build_delivery
 from myharness.orchestrator.loop import LoopOutcome, OrchestratorLoop
 

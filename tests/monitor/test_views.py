@@ -5,13 +5,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from myharness.dataflow import build_dataflow, detect
 from myharness.monitor.cli import discover, main, resolve_root
 from myharness.monitor.inspect import render_inspect
 from myharness.monitor.live import LiveView, current_activity
-
 from tests.dataflow.conftest import JOB, Stream
 
 BLOB = f"{JOB}/blob/raw/txns"
@@ -112,7 +109,8 @@ def test_live_distinguishes_throttling_from_thinking():
     assert "openrouter" in activity.detail
 
     thinking = Stream().start().dispatch("d1", "a")
-    assert current_activity(thinking.events, build_dataflow(thinking.events)).state.endswith("執行中")
+    activity = current_activity(thinking.events, build_dataflow(thinking.events))
+    assert activity.state.endswith("執行中")
 
 
 def test_live_reports_waiting_on_the_user():

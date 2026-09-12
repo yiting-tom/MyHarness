@@ -69,4 +69,4 @@ def describe(bindings: Sequence[Binding]) -> str:
     return ", ".join(f"{b.table} = {b.artifact}" for b in bindings)
 
 
-__all__ = ["Binding", "MAX_TABLE_CHARS", "bind_all", "bind_name", "describe"]
+__all__ = ["MAX_TABLE_CHARS", "Binding", "bind_all", "bind_name", "describe"]

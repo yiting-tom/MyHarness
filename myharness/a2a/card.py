@@ -17,7 +17,11 @@ though it were the analysis.
 from __future__ import annotations
 
 from a2a.types import (
-    AgentCapabilities, AgentCard, AgentExtension, AgentInterface, AgentSkill,
+    AgentCapabilities,
+    AgentCard,
+    AgentExtension,
+    AgentInterface,
+    AgentSkill,
 )
 from a2a.utils.constants import PROTOCOL_VERSION_CURRENT
 

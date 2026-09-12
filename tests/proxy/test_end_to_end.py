@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
@@ -61,7 +61,7 @@ class KeywordClassifier:
 
 
 class FakeLoop:
-    instances: list["FakeLoop"] = []
+    instances: ClassVar[list[FakeLoop]] = []
 
     def __init__(self, *, runner, lanes, backend):
         self.runner = runner

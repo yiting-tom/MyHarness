@@ -23,37 +23,37 @@ class Stream:
         self.job_id = job_id
         self.events: list[Event] = []
 
-    def _add(self, t: str, **data) -> "Stream":
+    def _add(self, t: str, **data) -> Stream:
         self.events.append(
             Event(t=t, seq=len(self.events), ts=datetime.now(UTC),
                   job_id=self.job_id, data=data)
         )
         return self
 
-    def start(self, goal: str = "分析") -> "Stream":
+    def start(self, goal: str = "分析") -> Stream:
         return self._add("job.start", goal=goal)
 
-    def ingress(self, payload: str, nbytes: int = 1024) -> "Stream":
+    def ingress(self, payload: str, nbytes: int = 1024) -> Stream:
         return self._add("ingress", payload=payload, bytes=nbytes)
 
-    def dispatch(self, did: str, lane: str, inputs=(), task: str = "t") -> "Stream":
+    def dispatch(self, did: str, lane: str, inputs=(), task: str = "t") -> Stream:
         return self._add("dispatch.start", id=did, lane=lane,
                          inputs=list(inputs), task=task)
 
     def done(self, did: str, lane: str, artifact: str | None = None,
              status: str = "ok", usd: float = 0.1,
-             tokens: dict | None = None, turns: int = 3) -> "Stream":
+             tokens: dict | None = None, turns: int = 3) -> Stream:
         return self._add("dispatch.end", id=did, lane=lane, artifact=artifact,
                          status=status, usd=usd, turns=turns,
                          tokens=tokens or {"in": 1000, "out": 200, "cache_read": 800})
 
-    def read(self, did: str, artifact: str) -> "Stream":
+    def read(self, did: str, artifact: str) -> Stream:
         return self._add("artifact.read", dispatch=did, artifact=artifact)
 
-    def finish(self, report: str | None = None, reason: str = "finished") -> "Stream":
+    def finish(self, report: str | None = None, reason: str = "finished") -> Stream:
         return self._add("job.finish", report=report, reason=reason)
 
-    def unknown(self) -> "Stream":
+    def unknown(self) -> Stream:
         return self._add("some.future.event", whatever=1)
 
 

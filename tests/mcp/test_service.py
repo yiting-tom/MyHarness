@@ -10,10 +10,11 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
-from myharness.events.types import DISPATCH_END, DISPATCH_START, JOB_FINISH
+from myharness.events.types import DISPATCH_START, JOB_FINISH
 from myharness.jobs.channel import Question
 from myharness.lanes.types import LaneRegistry, LaneType
 from myharness.mcp.service import AnalysisService
@@ -22,7 +23,7 @@ from myharness.mcp.service import AnalysisService
 class FakeLoop:
     """Stands in for OrchestratorLoop. Driven by the test, not by a model."""
 
-    instances: list[FakeLoop] = []
+    instances: ClassVar[list[FakeLoop]] = []
 
     def __init__(self, *, runner, lanes, backend):
         self.runner = runner
@@ -165,10 +166,11 @@ class TestPoll:
     async def test_pending_questions_reach_the_client(self, service):
         job_id = (await service.start("t"))["job_id"]
         channel = service.manager.get(job_id).channel
-        asyncio.create_task(channel.ask(Question(id="q1", text="要含 2023 嗎？")))
+        asking = asyncio.create_task(channel.ask(Question(id="q1", text="要含 2023 嗎？")))
         await asyncio.sleep(0)
         out = await service.poll(job_id, wait=0.05)
         assert [q["id"] for q in out["pending_questions"]] == ["q1"]
+        asking.cancel()
 
 
 class TestAnswer:
@@ -184,11 +186,12 @@ class TestAnswer:
     async def test_an_unknown_question_is_refused_with_the_real_ids(self, service):
         job_id = (await service.start("t"))["job_id"]
         channel = service.manager.get(job_id).channel
-        asyncio.create_task(channel.ask(Question(id="q1", text="?")))
+        asking = asyncio.create_task(channel.ask(Question(id="q1", text="?")))
         await asyncio.sleep(0)
         out = await service.answer(job_id, "q9", "x")
         assert not out["ok"] and out["error"] == "unknown_question"
         assert out["pending"] == ["q1"]
+        asking.cancel()
 
     async def test_answering_an_unknown_job(self, service):
         out = await service.answer("nope", "q1", "x")

@@ -12,7 +12,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-
 _JOBS_DIR = "jobs"
 
 

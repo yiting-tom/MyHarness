@@ -75,7 +75,7 @@ async def test_long_report_request_still_yields_a_bounded_handle(live):
     This is the change's central claim. The task explicitly asks for a long
     report; the handle must stay inside its ceiling regardless.
     """
-    run, store, events, _ = live
+    run, store, _events, _ = live
     handle = await run(
         "請針對『表格資料分析的方法論』寫一份至少 3000 字的詳盡報告，"
         "涵蓋抽樣、異常偵測、與信賴區間。寫得越詳細越好。"
@@ -98,7 +98,7 @@ async def test_long_report_request_still_yields_a_bounded_handle(live):
 
 async def test_budget_exhaustion_is_a_value_not_an_exception(live):
     """Scenario: 超出預算回傳部分結果"""
-    run, _, events, make = live
+    run, _, _events, make = live
     handle = await run(
         "請寫一份極為詳盡的長篇報告，並反覆檢查與擴充內容。",
         lane_type=make(token_budget=600), dispatch_id="d-budget",

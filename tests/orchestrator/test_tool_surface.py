@@ -6,10 +6,9 @@ import pytest
 
 from myharness.events.types import PEEK, PLAN_UPDATE
 from myharness.jobs.spec import JobPhase
-from myharness.orchestrator.tools import TOOL_NAMES, OrchestratorTools
+from myharness.orchestrator.tools import TOOL_NAMES
 
 from .conftest import JOB, payload
-
 
 # --- Requirement: 工具面固定且極小 ----------------------------------------
 
@@ -277,13 +276,10 @@ async def test_dispatch_refuses_an_unusable_grant_instead_of_mangling_it(bench):
 
 async def test_dispatch_tool_says_inputs_are_the_authorisation(bench):
     """The grant model is invisible unless the tool description states it."""
-    from myharness.orchestrator.tools import OrchestratorTools
 
-    server = bench.tools.build_server()
-    descriptions = {
-        t.name: t.description for t in server["instance"]._tools
-    } if hasattr(server.get("instance", None), "_tools") else {}
-    # Fall back to the source of truth if the SDK shape differs.
+    bench.tools.build_server()
+    # The SDK does not expose the built tools' descriptions, so the claim is
+    # asserted where it is written.
     import inspect
 
     from myharness.orchestrator import tools as tools_module

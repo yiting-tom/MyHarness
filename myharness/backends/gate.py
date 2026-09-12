@@ -20,7 +20,7 @@ import asyncio
 import random
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Final
 
 #: Total wall-clock a single worker may spend waiting on one backend before it

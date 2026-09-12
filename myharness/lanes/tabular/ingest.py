@@ -84,9 +84,9 @@ def check_size(meta: ArtifactMeta, *, limit: int | None = None) -> IngestRefusal
 
 
 __all__ = [
-    "IngestRefusal",
     "MAX_INGEST_BYTES",
     "SUPPORTED",
+    "IngestRefusal",
     "check_size",
     "choose_reader",
 ]

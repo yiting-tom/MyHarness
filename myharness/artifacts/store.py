@@ -108,4 +108,4 @@ class ArtifactStore(abc.ABC):
         """Enumerate artifacts, optionally filtered by kind and/or namespace."""
 
 
-__all__ = ["ArtifactStore", "ArtifactId", "ArtifactMeta", "GrantSet", "AsyncIterator"]
+__all__ = ["ArtifactId", "ArtifactMeta", "ArtifactStore", "AsyncIterator", "GrantSet"]

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from myharness.artifacts.ids import ArtifactId
+from myharness.artifacts.ids import ArtifactId, InvalidArtifactId
 from myharness.lanes.tabular.binding import bind_all, bind_name, describe
 
 
@@ -25,7 +25,7 @@ def test_leaf_segment_becomes_a_legal_identifier(name: str, expected: str):
 @pytest.mark.parametrize("bad", ["_leading", "交易", "has space", ""])
 def test_ids_that_would_need_defending_against_cannot_exist(bad: str):
     """The invariant bind_name relies on is enforced one layer down."""
-    with pytest.raises(Exception):
+    with pytest.raises(InvalidArtifactId):
         ArtifactId("job1", "blob", bad)
 
 

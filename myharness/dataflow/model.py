@@ -14,7 +14,6 @@ looks, in a read-only view, exactly like one that chose not to read.
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any

@@ -1,8 +1,10 @@
 """Spike #3c — OpenRouter 上的 task_budget 硬預算 + 非 Anthropic 模型可行性。"""
-import os, sys, json
+import json
+import os
+
 os.environ.pop("ANTHROPIC_API_KEY", None)
 import anyio
-from claude_agent_sdk import query, ClaudeAgentOptions, ResultMessage, AssistantMessage, TextBlock
+from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, ResultMessage, TextBlock, query
 
 BUILTINS = ["Agent","Bash","CronCreate","CronDelete","CronList","Edit","EnterWorktree",
             "ExitWorktree","Glob","Grep","NotebookEdit","Read","ReportFindings","ScheduleWakeup",

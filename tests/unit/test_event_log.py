@@ -222,7 +222,7 @@ def test_unanswered_question_becomes_a_caveat():
     kinds = {c.kind for c in derive_caveats(_stream())}
     assert "unanswered_question" in kinds
 
-    answered = _stream() + [ev(12, ASK_ANSWER, qid="q1", text="不用")]
+    answered = [*_stream(), ev(12, ASK_ANSWER, qid="q1", text="不用")]
     assert "unanswered_question" not in {c.kind for c in derive_caveats(answered)}
 
 

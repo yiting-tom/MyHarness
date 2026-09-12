@@ -9,10 +9,6 @@ visible.
 
 from __future__ import annotations
 
-from dataclasses import replace
-
-import pytest
-
 from myharness.backends.profile import (
     ANTHROPIC_DIRECT,
     OPENROUTER,
@@ -93,7 +89,7 @@ def loop_for(profile: BackendProfile, spec: JobSpec, runner_factory):
 
 def profile_with(*caps, name="probe") -> BackendProfile:
     return BackendProfile(
-        name=name, models={t: "m" for t in ModelTier}, capabilities=frozenset(caps)
+        name=name, models=dict.fromkeys(ModelTier, "m"), capabilities=frozenset(caps)
     )
 
 

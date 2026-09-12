@@ -22,11 +22,11 @@ from pathlib import Path
 
 os.environ.pop("ANTHROPIC_API_KEY", None)
 
-from myharness.artifacts.local import LocalArtifactStore     # noqa: E402
-from myharness.backends.profile import self_hosted_from_env  # noqa: E402
-from myharness.events.log import LocalEventLog               # noqa: E402
-from myharness.lanes.types import LaneInstance, LaneType     # noqa: E402
-from myharness.lanes.worker import WorkerRequest, run_lane_worker  # noqa: E402
+from myharness.artifacts.local import LocalArtifactStore
+from myharness.backends.profile import self_hosted_from_env
+from myharness.events.log import LocalEventLog
+from myharness.lanes.types import LaneInstance, LaneType
+from myharness.lanes.worker import WorkerRequest, run_lane_worker
 
 #: Small enough that the reported input is overhead plus a rounding error.
 TASK = "回答 handle 即可，不要使用任何工具。"

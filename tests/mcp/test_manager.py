@@ -295,4 +295,4 @@ def test_every_meaningful_kind_is_a_real_event_kind():
 
     known = {v for k, v in vars(types).items()
              if k.isupper() and isinstance(v, str) and not k.startswith("STATUS_")}
-    assert MEANINGFUL <= known, MEANINGFUL - known
+    assert known >= MEANINGFUL, MEANINGFUL - known

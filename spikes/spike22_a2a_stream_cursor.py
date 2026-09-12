@@ -120,7 +120,6 @@ CHECKS = [
 
 async def reconnect_demo() -> list[str]:
     """Drop a subscriber mid-job, move the job on, reconnect with a stale cursor."""
-    from myharness.events.types import CTX, DISPATCH_END, DISPATCH_START
     from myharness.mcp.manager import JobHandle
 
     notes: list[str] = []
@@ -156,8 +155,8 @@ async def reconnect_demo() -> list[str]:
 
 def not_news_demo() -> list[str]:
     """The per-turn event must not wake a subscriber."""
-    from myharness.mcp.manager import MEANINGFUL, NOT_NEWS
     from myharness.events.types import CTX, DISPATCH_END
+    from myharness.mcp.manager import MEANINGFUL, NOT_NEWS
 
     notes = [
         f"MEANINGFUL has {len(MEANINGFUL)} kinds; NOT_NEWS has {len(NOT_NEWS)}",

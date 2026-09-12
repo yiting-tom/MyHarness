@@ -13,8 +13,7 @@ from myharness.jobs.spec import JobPhase, LimitKind
 from myharness.jobs.state import TaskStatus
 from myharness.lanes.handle import HandleStatus
 
-from .conftest import JOB, failing
-
+from .conftest import failing
 
 # --- Requirement: 派工非阻塞，收割單次阻塞 -------------------------------
 

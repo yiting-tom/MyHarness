@@ -118,7 +118,9 @@ class LaneRegistry:
         except KeyError:
             raise UnknownLaneType(name, list(self._types)) from None
 
-    def create(self, instance_id: str, type_name: str, *, scope: str = "", **metadata: Any) -> LaneInstance:
+    def create(
+        self, instance_id: str, type_name: str, *, scope: str = "", **metadata: Any
+    ) -> LaneInstance:
         if instance_id in self._instances:
             raise LaneConfigError(f"lane instance {instance_id!r} already exists")
         instance = LaneInstance(

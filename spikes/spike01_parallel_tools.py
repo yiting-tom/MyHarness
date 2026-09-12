@@ -10,14 +10,23 @@
 併發化，那決策 #15 一樣翻盤。
 """
 import os
+
 os.environ.pop("ANTHROPIC_API_KEY", None)  # env 裡那把是無效的，讓子行程走 claude.ai 登入
 
-import anyio, json, sys, time
-from mcp.types import ToolAnnotations
+import json
+import time
+
+import anyio
 from claude_agent_sdk import (
-    query, tool, create_sdk_mcp_server, ClaudeAgentOptions,
-    AssistantMessage, ToolUseBlock, TextBlock, ResultMessage,
+    AssistantMessage,
+    ClaudeAgentOptions,
+    ResultMessage,
+    ToolUseBlock,
+    create_sdk_mcp_server,
+    query,
+    tool,
 )
+from mcp.types import ToolAnnotations
 
 N_CALLS = 3
 SLEEP_S = 5.0

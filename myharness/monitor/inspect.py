@@ -13,7 +13,6 @@ from myharness.dataflow import (
     Anomaly,
     DataFlow,
     DispatchInfo,
-    EdgeKind,
     NodeKind,
     Severity,
     detect,
@@ -22,7 +21,6 @@ from myharness.events.query import JobSummary, summarize
 from myharness.events.types import Event
 from myharness.monitor.render import (
     bar,
-    display_width,
     human_duration,
     human_tokens,
     pad,
@@ -75,7 +73,11 @@ def _header(flow: DataFlow, summary: JobSummary, colour: bool, width: int) -> st
         + (f"，{summary.duplicates} 次重複" if summary.duplicates else ""),
         f"  成本      ${summary.total_usd:.4f}",
         f"  context   峰值 {human_tokens(summary.context_peak)}"
-        + (f"，peek 用了 {human_tokens(summary.peek_tokens)}" if summary.peek_tokens else "，未使用 peek"),
+        + (
+            f"，peek 用了 {human_tokens(summary.peek_tokens)}"
+            if summary.peek_tokens
+            else "，未使用 peek"
+        ),
     ]
     if summary.cache_hit_ratio:
         lines.append(
@@ -177,7 +179,8 @@ def _dispatch_table(flow: DataFlow, colour: bool, width: int) -> str:
         estimated = estimated or d.tokens_estimated
         lines.append(
             f"  {pad(d.id, 5)}{pad(d.lane, 17)}"
-            f"{pad(style(d.status, *STATUS_STYLE.get(d.status, DEFAULT_STATUS_STYLE), enabled=colour), 18)}"
+            f"{pad(style(d.status, *STATUS_STYLE.get(d.status, DEFAULT_STATUS_STYLE),
+                        enabled=colour), 18)}"
             f"{pad(mark + human_tokens(d.tokens_in), 8, 'right')}"
             f"{pad(mark + human_tokens(d.tokens_out), 8, 'right')}"
             f"{pad(human_tokens(d.cache_read), 8, 'right')}"

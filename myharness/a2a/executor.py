@@ -32,7 +32,7 @@ from a2a.server.events import EventQueue
 from a2a.server.tasks import TaskUpdater
 from a2a.types import Part, Task, TaskState, TaskStatus
 
-from myharness.a2a.card import PRICE_LIST_EXTENSION, SKILL_FULL_TEXT, SKILL_PRICE_LIST
+from myharness.a2a.card import PRICE_LIST_EXTENSION, SKILL_FULL_TEXT
 from myharness.mcp.service import AnalysisService
 
 #: What a price-list artifact says about itself. The section ids alone would be
@@ -322,4 +322,4 @@ async def _refuse(updater: TaskUpdater, code: str, message: str, **detail: Any) 
     )
 
 
-__all__ = ["AnalysisExecutor", "PRICE_LIST_GUIDANCE"]
+__all__ = ["PRICE_LIST_GUIDANCE", "AnalysisExecutor"]

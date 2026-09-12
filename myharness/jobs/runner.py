@@ -277,7 +277,7 @@ class JobRunner:
             return_when = (
                 asyncio.FIRST_COMPLETED if mode == "any" else asyncio.ALL_COMPLETED
             )
-            done, still = await asyncio.wait(pending, timeout=timeout,
+            _done, still = await asyncio.wait(pending, timeout=timeout,
                                              return_when=return_when)
             timed_out = bool(still) and mode != "any"
 
@@ -354,7 +354,7 @@ class JobRunner:
         Work already paid for should not be thrown away, and a task left running
         after the job ends leaks a process and keeps billing.
         """
-        outstanding = [t for t in self.state.running()]
+        outstanding = list(self.state.running())
         if outstanding:
             await self.await_tasks([t.id for t in outstanding], timeout=timeout)
         for task_id, task in self._tasks.items():

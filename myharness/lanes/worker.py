@@ -13,26 +13,24 @@ to do about them (DESIGN.md decision #12).
 from __future__ import annotations
 
 import json
-import math
 from dataclasses import dataclass, field
 from typing import Any, Final
 
 from claude_agent_sdk import (
     AssistantMessage,
-    ToolResultBlock,
-    UserMessage,
     ClaudeAgentOptions,
     ResultMessage,
     SystemMessage,
     TextBlock,
     ThinkingBlock,
+    ToolResultBlock,
     ToolUseBlock,
+    UserMessage,
 )
 
 from myharness.artifacts.ids import ArtifactId
 from myharness.artifacts.store import ArtifactStore
 from myharness.artifacts.types import GrantSet
-from myharness.lanes.budget import estimate as estimate_budget_tokens, split_chars
 from myharness.backends.gate import BackendGate, ThrottleReport, gates
 from myharness.backends.profile import BackendCapability, BackendProfile
 from myharness.events.log import EventLog
@@ -44,6 +42,8 @@ from myharness.events.types import (
     THROTTLE_GAVE_UP,
     THROTTLE_WAIT,
 )
+from myharness.lanes.budget import estimate as estimate_budget_tokens
+from myharness.lanes.budget import split_chars
 from myharness.lanes.contract import (
     MAX_SCHEMA_RETRIES,
     ContractPath,
@@ -548,9 +548,8 @@ async def _run_once(
             # Reading acc.tokens_in here meant the ceiling only ever tripped on
             # the final message -- it relabelled a finished run rather than
             # stopping one (golden run #11).
-            if not profile.supports(BackendCapability.TASK_BUDGET):
-                if spent > budget:
-                    return acc, _LocalBudgetExceeded()
+            if not profile.supports(BackendCapability.TASK_BUDGET) and spent > budget:
+                return acc, _LocalBudgetExceeded()
     except BaseException as exc:  # noqa: BLE001 - classified below, never re-raised
         return acc, exc
     return acc, None
@@ -563,7 +562,7 @@ class _LocalBudgetExceeded(Exception):
 class _ResultReportedError(Exception):
     """The run ended cleanly but the result said it failed."""
 
-    def __init__(self, acc: "Accumulated") -> None:
+    def __init__(self, acc: Accumulated) -> None:
         super().__init__(
             (acc.text or "run reported is_error")[:200]
         )
@@ -836,12 +835,13 @@ def _classify(acc: Accumulated, exc: BaseException, profile: BackendProfile) -> 
         acc.saw_transient and acc.result is None
     ):
         return HandleStatus.BACKEND_UNAVAILABLE
-    if profile.supports(BackendCapability.TASK_BUDGET):
-        # With an API-side budget in play, the request being rejected outright
-        # (400, no output) or the stream dying before any result both mean the
-        # budget could not cover the task (spikes/RESULTS.md §Spike #6).
-        if acc.result is None or acc.api_error_status == 400:
-            return HandleStatus.BUDGET_EXCEEDED
+    # With an API-side budget in play, the request being rejected outright
+    # (400, no output) or the stream dying before any result both mean the
+    # budget could not cover the task (spikes/RESULTS.md §Spike #6).
+    if profile.supports(BackendCapability.TASK_BUDGET) and (
+        acc.result is None or acc.api_error_status == 400
+    ):
+        return HandleStatus.BUDGET_EXCEEDED
     return HandleStatus.TOOL_FAILURE
 
 
@@ -895,13 +895,13 @@ async def _load_state(
     aid = ArtifactId(request.job_id, "note", request.lane.state_name)
     try:
         meta = await store.stat(aid, grants=grants)
-    except Exception:
+    except Exception:  # noqa: BLE001 - no state note means empty state, not failure
         return None, 0
     try:
         text = await store.read_note(
             aid, grants=grants, max_tokens=request.lane.type.state_max_tokens
         )
-    except Exception:
+    except Exception:  # noqa: BLE001 - an unreadable note degrades to none
         return None, meta.revision
     return text, meta.revision
 

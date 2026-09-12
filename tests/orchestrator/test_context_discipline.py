@@ -15,10 +15,8 @@ from myharness.artifacts.ids import ArtifactId
 from myharness.artifacts.types import GrantSet
 from myharness.events.query import peek_tokens_spent
 from myharness.jobs.spec import JobPhase
-from myharness.orchestrator.tools import MIN_USEFUL_PEEK_TOKENS
 
 from .conftest import JOB, payload
-
 
 # --- Requirement: Peek 有 job 級的總預算（收斂性） ------------------------
 
@@ -71,10 +69,10 @@ async def test_limit_then_grace_then_coded_delivery(bench):
     Each step is tested elsewhere; this walks the whole path, because the
     guarantee that matters is that a user never receives an empty job.
     """
+    from myharness.backends.profile import BackendCapability, BackendProfile, registry
     from myharness.orchestrator.delivery import build_delivery
     from myharness.orchestrator.loop import OrchestratorLoop
     from myharness.orchestrator.session import ScriptedSession, ScriptedSessionFactory
-    from myharness.backends.profile import BackendCapability, BackendProfile, registry
 
     registry.register(BackendProfile(
         name="path-test", models={"strong": "m"},
@@ -85,7 +83,8 @@ async def test_limit_then_grace_then_coded_delivery(bench):
     # Two dispatches reach the ceiling.
     ids = []
     for i in range(2):
-        ids.append(payload(await bench.h["dispatch"]({"lane": "txn", "task": f"分析 {i}"}))["task_id"])
+        out = await bench.h["dispatch"]({"lane": "txn", "task": f"分析 {i}"})
+        ids.append(payload(out)["task_id"])
     collected = payload(await bench.h["await_tasks"]({"task_ids": ids}))
     assert "收工" in collected["notice"], "the ceiling must be told to the orchestrator"
 

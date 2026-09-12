@@ -17,7 +17,6 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Final
 
-
 #: How many times the CLI may retry internally before our gate takes over.
 SDK_INTERNAL_RETRIES: Final = 2
 
@@ -226,7 +225,7 @@ def self_hosted_from_env() -> BackendProfile | None:
         return None
     return replace(
         SELF_HOSTED,
-        models={tier: model for tier in ModelTier},
+        models=dict.fromkeys(ModelTier, model),
         base_url=base_url,
         auth_token_env="HARNESS_PROXY_KEY" if os.environ.get("HARNESS_PROXY_KEY") else None,
     )
@@ -253,7 +252,7 @@ def direct_openai_from_env(name: str = "direct") -> BackendProfile | None:
         return None
     return BackendProfile(
         name=name,
-        models={tier: model for tier in ModelTier},
+        models=dict.fromkeys(ModelTier, model),
         capabilities=frozenset(),
         base_url=base_url,
         auth_token_env=DIRECT_KEY_ENV if os.environ.get(DIRECT_KEY_ENV) else None,

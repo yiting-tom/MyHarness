@@ -17,7 +17,6 @@ from claude_agent_sdk import ToolAnnotations, create_sdk_mcp_server, tool
 from myharness.artifacts.errors import ArtifactError
 from myharness.artifacts.ids import ArtifactId, coerce_artifact_ids
 from myharness.artifacts.tokens import estimate_tokens
-from myharness.orchestrator.routing import RoutingError, RoutingTable, write_routing
 from myharness.artifacts.types import GrantSet
 from myharness.events.types import PEEK, PLAN_UPDATE
 from myharness.jobs.channel import Question, QuestionKind
@@ -25,6 +24,7 @@ from myharness.jobs.runner import JobRunner
 from myharness.jobs.spec import JobPhase
 from myharness.lanes.types import LaneRegistry
 from myharness.orchestrator.plan import LaneSpec, write_plan
+from myharness.orchestrator.routing import RoutingError, RoutingTable, write_routing
 
 SERVER_NAME = "harness"
 
@@ -133,7 +133,7 @@ class OrchestratorTools:
                     continue
                 try:
                     instance = self.lanes.create(spec.id, spec.type, scope=spec.scope)
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 - a bad lane type is a value
                     return _err("unknown_lane_type", str(exc))
                 self.runner.register_lane(instance)
                 created.append(spec.id)
@@ -281,7 +281,11 @@ class OrchestratorTools:
             question = Question(
                 id=f"q{self.runner.state.questions_asked + 1}",
                 text=text,
-                kind=QuestionKind(kind) if kind in set(QuestionKind) else QuestionKind.ANSWERABLE_BY_HOST,
+                kind=(
+                    QuestionKind(kind)
+                    if kind in set(QuestionKind)
+                    else QuestionKind.ANSWERABLE_BY_HOST
+                ),
                 options=tuple(str(o) for o in (args.get("options") or [])),
                 default=str(args.get("default") or ""),
             )

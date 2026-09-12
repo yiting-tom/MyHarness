@@ -1,13 +1,16 @@
 """Run the same live assertions against both loops and print the comparison."""
 from __future__ import annotations
 
-import os, sys, time
+import os
+import sys
+import time
+
 os.environ.pop("ANTHROPIC_API_KEY", None)
 sys.path.insert(0, "spikes")
 
-import anyio
 from pathlib import Path
 
+import anyio
 from spike08_direct_loop import DirectLaneWorker
 
 from myharness.artifacts.local import LocalArtifactStore
@@ -86,7 +89,7 @@ async def scenario(name: str, task: str, budget: int, expect_ok: bool):
         h = r["handle"]
         bounded = len(h.to_json()) <= MAX_HANDLE_CHARS
         ok = (h.status is HandleStatus.OK) if expect_ok else (h.status is not HandleStatus.OK)
-        print(f"  {label:<7} status={str(h.status):<20} handle={len(h.to_json()):>4}ch "
+        print(f"  {label:<7} status={h.status!s:<20} handle={len(h.to_json()):>4}ch "
               f"bounded={'✅' if bounded else '❌'} expected={'✅' if ok else '⚠️'}")
         print(f"  {'':<7} turns={r['turns']:<3} in={r['in']:>6,} out={r['out']:>5,} "
               f"cache_read={r['cache_read']:>6,} wall={r['wall']}s"

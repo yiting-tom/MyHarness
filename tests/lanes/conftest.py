@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from claude_agent_sdk import AssistantMessage, ResultMessage, SystemMessage, TextBlock
 
 from myharness.artifacts.local import LocalArtifactStore

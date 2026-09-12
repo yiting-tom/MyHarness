@@ -55,53 +55,52 @@ async def main() -> int:
     )
     started = time.monotonic()
 
-    async with stdio_client(params) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            job = body(await session.call_tool("analysis_start", {
-                "task": "分析交易資料與 KYC 文件。先宣告 routing table，"
-                        "lane txn 收交易明細，lane kyc 收身分文件。",
+    async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
+        await session.initialize()
+        job = body(await session.call_tool("analysis_start", {
+            "task": "分析交易資料與 KYC 文件。先宣告 routing table，"
+                    "lane txn 收交易明細，lane kyc 收身分文件。",
+        }))
+        job_id = job["job_id"]
+        print(f"job {job_id}\n")
+
+        # Wait for the orchestrator to publish a routing table. Without one
+        # the proxy short-circuits, and the spike would prove nothing.
+        print("waiting for a routing table…")
+        revision, table_seen = None, False
+        for _ in range(20):
+            progress = body(await session.call_tool("analysis_poll", {
+                "job_id": job_id, "wait": 30,
+                **({"since": revision} if revision else {}),
             }))
-            job_id = job["job_id"]
-            print(f"job {job_id}\n")
+            if not progress.get("ok"):
+                print("poll refused:", progress)
+                return 1
+            revision = progress["revision"]
+            for q in progress["pending_questions"]:
+                print(f"  answering {q['id']}: {q['text'][:70]}")
+                await session.call_tool("analysis_answer", {
+                    "job_id": job_id, "question_id": q["id"],
+                    "text": "請先呼叫 plan_update 宣告 routing table："
+                            + json.dumps(ROUTING, ensure_ascii=False),
+                })
+            if any("plan.update" in line for line in progress["recent"]):
+                table_seen = True
+                break
+            if progress["state"] != "running":
+                break
+        print(f"  [{time.monotonic()-started:5.1f}s] "
+              f"routing table published: {table_seen}\n")
 
-            # Wait for the orchestrator to publish a routing table. Without one
-            # the proxy short-circuits, and the spike would prove nothing.
-            print("waiting for a routing table…")
-            revision, table_seen = None, False
-            for _ in range(20):
-                progress = body(await session.call_tool("analysis_poll", {
-                    "job_id": job_id, "wait": 30,
-                    **({"since": revision} if revision else {}),
-                }))
-                if not progress.get("ok"):
-                    print("poll refused:", progress)
-                    return 1
-                revision = progress["revision"]
-                for q in progress["pending_questions"]:
-                    print(f"  answering {q['id']}: {q['text'][:70]}")
-                    await session.call_tool("analysis_answer", {
-                        "job_id": job_id, "question_id": q["id"],
-                        "text": "請先呼叫 plan_update 宣告 routing table："
-                                + json.dumps(ROUTING, ensure_ascii=False),
-                    })
-                if any("plan.update" in line for line in progress["recent"]):
-                    table_seen = True
-                    break
-                if progress["state"] != "running":
-                    break
-            print(f"  [{time.monotonic()-started:5.1f}s] "
-                  f"routing table published: {table_seen}\n")
-
-            print("providing two payloads…")
-            first = body(await session.call_tool("analysis_provide", {
-                "job_id": job_id, "payload": TXNS, "name": "txn.csv"}))
-            second = body(await session.call_tool("analysis_provide", {
-                "job_id": job_id, "payload": DOCS, "name": "kyc.csv"}))
-            for label, out in (("txn.csv", first), ("kyc.csv", second)):
-                print(f"  {label:9s} routed={str(out['routed']):5s} "
-                      f"-> {out['routed_to']}  "
-                      f"({out.get('unrouted_because') or out['routing_reason'][:60]})")
+        print("providing two payloads…")
+        first = body(await session.call_tool("analysis_provide", {
+            "job_id": job_id, "payload": TXNS, "name": "txn.csv"}))
+        second = body(await session.call_tool("analysis_provide", {
+            "job_id": job_id, "payload": DOCS, "name": "kyc.csv"}))
+        for label, out in (("txn.csv", first), ("kyc.csv", second)):
+            print(f"  {label:9s} routed={out['routed']!s:5s} "
+                  f"-> {out['routed_to']}  "
+                  f"({out.get('unrouted_because') or out['routing_reason'][:60]})")
 
     print(f"\n--- checks ---  ({time.monotonic()-started:.0f}s)")
     checks = [

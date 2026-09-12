@@ -5,12 +5,16 @@
 這決定 LiteLLM 必須原樣轉發哪些東西才不會弄壞 harness 依賴的強制機制。
 """
 import os
+
 for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"):
     os.environ.pop(k, None)
 
-import anyio, json, threading, time
+import json
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from claude_agent_sdk import query, ClaudeAgentOptions, ResultMessage
+
+import anyio
+from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
 
 CAPTURED = []
 

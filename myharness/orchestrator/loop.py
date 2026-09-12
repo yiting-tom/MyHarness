@@ -32,8 +32,8 @@ from claude_agent_sdk import (
 )
 
 from myharness.backends.gate import ThrottleReport, gates
-from myharness.backends.profile import BackendCapability, BackendProfile, registry as backends
-from myharness.lanes.worker import TRANSIENT_STATUSES
+from myharness.backends.profile import BackendCapability, BackendProfile
+from myharness.backends.profile import registry as backends
 from myharness.events.types import (
     CTX,
     HANDOFF_RESTART,
@@ -44,6 +44,7 @@ from myharness.events.types import (
 from myharness.jobs.runner import JobRunner
 from myharness.jobs.spec import JobPhase
 from myharness.lanes.types import LaneRegistry
+from myharness.lanes.worker import TRANSIENT_STATUSES
 from myharness.orchestrator.plan import initial_plan, read_plan, write_plan
 from myharness.orchestrator.session import SdkSessionFactory, SessionFactory
 from myharness.orchestrator.tools import OrchestratorTools
@@ -376,10 +377,11 @@ class OrchestratorLoop:
                 # refusals as values rather than errors (design.md D7), so
                 # is_error is False and only the payload says it failed.
                 for block in getattr(message, "content", None) or []:
-                    if isinstance(block, ToolResultBlock):
-                        if reason := _refusal_of(block):
-                            refused += 1
-                            refusals.append(reason)
+                    if isinstance(block, ToolResultBlock) and (
+                        reason := _refusal_of(block)
+                    ):
+                        refused += 1
+                        refusals.append(reason)
             elif isinstance(message, SystemMessage):
                 if message.subtype == "api_retry":
                     transient = True

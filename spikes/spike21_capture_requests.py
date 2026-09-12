@@ -183,9 +183,6 @@ async def main() -> int:
     breakdown = end.get("estimate") or {}
     tokens = end.get("tokens") or {}
     last = posts[-1]["body"]["messages"] if posts else []
-    last_start = len(posts) - sum(
-        1 for c in posts if len(c["body"]["messages"]) <= len(last)
-        and len(c["body"]["messages"]) >= 2)
     print()
     print(f"the accountant saw   {breakdown.get('requests', 0)} requests")
     print(f"the wire carried     {len(posts)} requests")

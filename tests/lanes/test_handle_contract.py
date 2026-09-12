@@ -18,12 +18,12 @@ from myharness.lanes.contract import (
     validate_payload,
 )
 from myharness.lanes.handle import (
+    DEGRADED_STATUSES,
     HANDLE_SCHEMA,
+    MAX_FOLLOWUPS,
     MAX_HANDLE_CHARS,
     MAX_HEADLINE_CHARS,
     MAX_METRICS,
-    MAX_FOLLOWUPS,
-    DEGRADED_STATUSES,
     HandleStatus,
     LaneHandle,
     clamp_handle,

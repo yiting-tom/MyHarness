@@ -119,7 +119,8 @@ def test_lock_configuration_pins_what_the_fence_does_not(granted: Path):
     unlocked.execute("SET autoload_known_extensions=true")  # allowed, unlocked
     unlocked.close()
 
-    with sandboxed([Ingest("t", granted, "read_csv_auto")]) as locked:
+    # 巢狀是刻意的：raises 不能蓋住 sandboxed() 本身，否則建不起來也會過。
+    with sandboxed([Ingest("t", granted, "read_csv_auto")]) as locked:  # noqa: SIM117
         with pytest.raises(duckdb.Error):
             locked.execute("SET autoload_known_extensions=true")
 
@@ -149,17 +150,17 @@ def test_ingest_happens_before_the_door_closes(granted: Path):
 
 
 def test_unreadable_source_raises_sandbox_error(tmp_path: Path):
-    with pytest.raises(SandboxError, match="could not load"):
-        with sandboxed([Ingest("t", tmp_path / "nope.csv", "read_csv_auto")]):
-            pass
+    with pytest.raises(SandboxError, match="could not load"), sandboxed(
+        [Ingest("t", tmp_path / "nope.csv", "read_csv_auto")]
+    ):
+        pass
 
 
 def test_connection_is_closed_even_on_error(granted: Path):
     held = None
-    with pytest.raises(ValueError):
-        with sandboxed([Ingest("t", granted, "read_csv_auto")]) as c:
-            held = c
-            raise ValueError("boom")
+    with pytest.raises(ValueError), sandboxed([Ingest("t", granted, "read_csv_auto")]) as c:
+        held = c
+        raise ValueError("boom")
     with pytest.raises(duckdb.Error):
         held.execute("SELECT 1")
 
@@ -208,13 +209,12 @@ class TestInterruptible:
         the execute left it with no timeout at all."""
         from myharness.lanes.tabular.sandbox import interruptible
 
-        with pytest.raises(duckdb.Error):
-            with interruptible(conn, 0.5):
-                cursor = conn.execute(
-                    "SELECT a.range, b.range FROM range(1000000) a, range(100000) b"
-                )
-                while cursor.fetchmany(1000):
-                    pass
+        with pytest.raises(duckdb.Error), interruptible(conn, 0.5):
+            cursor = conn.execute(
+                "SELECT a.range, b.range FROM range(1000000) a, range(100000) b"
+            )
+            while cursor.fetchmany(1000):
+                pass
 
     def test_a_fast_block_is_not_disturbed(self, conn):
         from myharness.lanes.tabular.sandbox import interruptible

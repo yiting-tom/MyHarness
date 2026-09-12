@@ -4,13 +4,21 @@ Live 測試顯示 worker 把兩者都歸類成 TOOL_FAILURE。_classify 的假�
 「預算耗盡時 ResultMessage 不會來」（spike #3c 的觀察），但實際上似乎會來。
 這裡直接印出訊息序列，讓分類邏輯依事實而非假設。
 """
-import os, sys, json
+import json
+import os
+
 os.environ.pop("ANTHROPIC_API_KEY", None)          # 無效，會蓋掉 AUTH_TOKEN
 
 import anyio
-from claude_agent_sdk import (ClaudeAgentOptions, ResultMessage, SystemMessage,
-                              AssistantMessage, query)
-from myharness.backends.profile import OPENROUTER, BUILTIN_TOOLS
+from claude_agent_sdk import (
+    AssistantMessage,
+    ClaudeAgentOptions,
+    ResultMessage,
+    SystemMessage,
+    query,
+)
+
+from myharness.backends.profile import BUILTIN_TOOLS, OPENROUTER
 
 MODEL = OPENROUTER.resolve_model("strong")
 

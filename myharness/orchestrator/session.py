@@ -56,7 +56,7 @@ class SdkSession(OrchestratorSession):
     async def context_usage(self) -> ContextUsage:
         try:
             usage = await self._client.get_context_usage()
-        except Exception:
+        except Exception:  # noqa: BLE001 - no usage reported means fall back
             return ContextUsage(0, self._fallback_limit)
         return ContextUsage(
             int(usage.get("totalTokens", 0)),
