@@ -2294,3 +2294,65 @@ every section        5 round trips   2,572 tokens
 
 D1 選 B（雙軌）而不是 A（單軌價目表）的理由在這裡變成數字：
 **單軌會讓後面那個呼叫方沒有出路。**
+
+---
+
+## A2A 端到端 —— 遠端 agent 真的跑得動，12 分 27 秒
+
+（change `expose-over-a2a` 任務 8.2，`tests/a2a/test_live_chain.py`，自架 `aird-35b`。）
+
+真到底：uvicorn 綁在 loopback 的一個隨機埠上、`a2a.client` 從
+`/.well-known/agent-card.json` 解析 agent card、真的 `AnalysisService`、
+真的三條 lane、真的模型。整條鏈：
+
+```
+解析 card → 看到兩個 skill 與 required 的 extension
+啟動（return_immediately）→ 立刻拿到 task id，狀態 SUBMITTED/WORKING
+GetTask 輪詢 → COMPLETED
+價目表 artifact，帶 extension URI，有章節與 est_tokens，沒有報告全文
+Task.history → revision 遞增，至少兩個 tick
+用價目表裡的 section id 取一節全文 → 有內容，且沒有被標成價目表
+```
+
+### 六次嘗試，三個真的問題，和一次不是我的問題
+
+前五次沒有一次是「跑通了但斷言寫錯」：
+
+1. **`str(task.status.state).endswith("COMPLETED")`** —— protobuf 的 enum 是 int，
+   那個字串是 `"3"`，這個斷言永遠不可能過。花了二十分鐘的真實分析才發現一件
+   不需要模型就能發現的事。
+2. **啟動阻塞。** `SendMessage` 預設等到終局狀態才回應，所以 HTTP 請求開了
+   整趟分析，第 30 分鐘以 `ReadTimeout` 死掉。`configuration.return_immediately`
+   是協定給的答案。
+3. **那個旗標暴露出一個 race。** 它在 Task 事件送出的當下就交出 task id，而
+   executor 是**之後**才呼叫 `service.start()` —— 拿到 id 立刻動作的客戶端會被
+   告知「查無此 job」。現在 job 先起，task 才被宣告。
+
+第四、五次卡在 `phase=planning, dispatches=0`，而我一開始把它歸因於
+「沒人回答 orchestrator 的提問」—— **錯的**：查三次 golden 執行的事件流，
+`ask.user` 出現次數都是 0，這個設定下它根本不問。
+
+真正的原因用兩個**完全不經 A2A** 的腳本重現出來：同一個 service、同一個
+start、同一個 provide，一樣卡在第一次模型呼叫。然後直接對端點下一個 5 token
+的 completion：
+
+```
+http 000 in 75.002s          ← 完全沒有回應
+/v1/models: http 000 in 20s  ← 幾小時前還是 60ms 回 401
+```
+
+**後端死了**（VPN 斷線）。我對著一個死掉的端點修了兩輪測試。
+
+### 這次學到的，比通過本身有用
+
+**離線那條鏈現在跟 live 那條是同一個函式。** `tests/a2a/chain.py` 被兩個測試
+驅動：一個把假 service 放在後面（真 uvicorn、真 socket、真 client、真序列化），
+1.9 秒跑完；另一個只多加不能造假的那一段。上面第 1、3 個問題都是那條免費的
+鏈現在會抓到的。
+
+**客戶端的耐心必須大於 job 自己的上限。** 第三次在第 1800 秒放棄，而
+`max_wall_clock_s` 也是 1800 —— 那次執行同時是「harness 停了它」和
+「我不等了」，分不出來。現在 deadline 是 2100。
+
+**逾時要說出它在做什麼。** 「還在 WORKING」對診斷毫無用處；
+`phase=planning, dispatches=0` 一行就把方向指對了。
