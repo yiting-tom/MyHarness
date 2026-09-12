@@ -1,7 +1,10 @@
 # event-log Specification
 
 ## Purpose
-TBD - created by archiving change add-artifact-store-and-event-log. Update Purpose after archive.
+job 執行過程的唯一事實來源，append-only 且結構化。交付物的 caveats、資料流圖、
+成本歸屬、回歸測試的斷言，全都是從這條流推導出來的，而不是各自另記一份。
+它記錄發生過什麼，不解釋那代表什麼。
+
 ## Requirements
 ### Requirement: Append-only 的結構化事件流
 每個 job SHALL 擁有一份 append-only 的事件流，每筆事件為一行 JSON。

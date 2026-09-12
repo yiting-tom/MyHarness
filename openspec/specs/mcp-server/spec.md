@@ -1,7 +1,10 @@
 # mcp-server Specification
 
 ## Purpose
-TBD - created by archiving change add-mcp-server. Update Purpose after archive.
+把整套 harness 開成一個 MCP server，讓一個 agent 可以非阻塞地啟動分析、
+等狀態改變而不是輪詢固定秒數、回答分析提出的問題、補充資料。
+回傳的內容一律受上限約束——這條邊界存在的理由就是保護呼叫端的 context。
+
 ## Requirements
 ### Requirement: 分析以非阻塞方式啟動
 系統 SHALL 提供啟動一次分析的工具，該工具 SHALL 在分析完成前返回，並 SHALL

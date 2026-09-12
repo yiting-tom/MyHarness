@@ -1,7 +1,11 @@
 # lane-worker Specification
 
 ## Purpose
-TBD - created by archiving change add-lane-worker. Update Purpose after archive.
+跑一條 lane：吃 charter、用被授權的工具做完一件事、交回一個受契約約束的 handle。
+Worker 是 ephemeral 的，狀態寫在 lane state 而不是留在記憶體裡；失敗是回傳值而
+不是例外，因為呼叫端必須能處置它。它看得到的資料由授權決定，包括對表格資料的
+查詢——那條路有自己的隔離、上限與拒絕理由。
+
 ## Requirements
 ### Requirement: Lane type 與 lane instance 分離
 系統 SHALL 區分 lane type 與 lane instance。Lane type 由開發者靜態宣告，

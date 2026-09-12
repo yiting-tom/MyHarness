@@ -1,7 +1,10 @@
 # job-runner Specification
 
 ## Purpose
-TBD - created by archiving change add-orchestrator. Update Purpose after archive.
+管一個 job 裡所有 lane 的執行：派工不阻塞、收割才阻塞，重複派工不重跑，
+撞到 job 級硬上限時善終而不是斷掉。它排程與計量，但不決定要派什麼工——
+那是 orchestrator 的事。
+
 ## Requirements
 ### Requirement: 派工非阻塞，收割單次阻塞
 `dispatch` SHALL 立即返回一個任務識別，實際執行在背景進行；

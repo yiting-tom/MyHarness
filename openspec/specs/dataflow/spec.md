@@ -1,7 +1,10 @@
 # dataflow Specification
 
 ## Purpose
-TBD - created by archiving change add-dataflow-monitor. Update Purpose after archive.
+從事件流推導出「哪份資料流到哪裡、誰產出了什麼」，並指出其中不對勁的地方——
+沒有授權卻有產出、產出被覆蓋、資料進來卻沒人用。它不另外記錄任何東西：
+凡是它說得出來的，都必須能從事件流重新推導出來，否則就是兩份會互相漂移的真相。
+
 ## Requirements
 ### Requirement: 資料流由事件流推導，不另行記錄
 資料流模型 SHALL 完全由既有的事件流與 artifact index 推導。系統 SHALL NOT 為此

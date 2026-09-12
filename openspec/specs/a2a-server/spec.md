@@ -1,7 +1,11 @@
 # a2a-server Specification
 
 ## Purpose
-TBD - created by archiving change expose-over-a2a. Update Purpose after archive.
+把同一次分析開成第二條對外邊界，讓另一個 agent 能用 A2A 協定跑它、看進度、
+取結果。它是殼不是腦：所有判斷都在 orchestrator 與 lane，這裡只負責把那些判斷
+翻成 AgentCard、Task 與 Artifact。它與 MCP 邊界對同一個 job 必須給出一致的答案，
+而預設不把報告全文送出去——先給摘要與章節價目表，由呼叫端決定要買哪一節。
+
 ## Requirements
 ### Requirement: 兩種輸出模式，且皆對外宣告
 系統 SHALL 對外宣告它支援的輸出模式：**摘要與章節價目表**，以及**章節全文**。

@@ -1,7 +1,10 @@
 # proxy Specification
 
 ## Purpose
-TBD - created by archiving change add-ingress-proxy. Update Purpose after archive.
+資料進入 harness 的那一關：由分類器判斷它可能屬於哪條 lane。
+判斷只是建議——分類器不派工也不授權，看得到的只有 routing table 與一段有界樣本。
+分類失敗不能影響資料落地，而它自己的花費要單獨記帳。
+
 ## Requirements
 ### Requirement: 進入的資料由分類器判斷歸屬
 系統 SHALL 在資料進入 job 時判斷它屬於哪一條 lane。判斷 SHALL 依據 orchestrator

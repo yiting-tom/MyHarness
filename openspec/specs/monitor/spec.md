@@ -1,7 +1,10 @@
 # monitor Specification
 
 ## Purpose
-TBD - created by archiving change add-dataflow-monitor. Update Purpose after archive.
+讓人看得見 job 正在做什麼，以及結束後它到底做了什麼。即時模式顯示當下的活動，
+事後模式展開完整資料流。輸出同時要能給人讀也能給機器解析，而且無論如何都不能
+影響被觀察的那個 job。
+
 ## Requirements
 ### Requirement: 即時模式顯示 job 正在做什麼
 即時模式 SHALL 跟蹤一個執行中的 job 並持續顯示：目前階段、進行中與已完成的派工、

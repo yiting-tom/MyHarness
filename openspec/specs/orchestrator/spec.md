@@ -1,7 +1,10 @@
 # orchestrator Specification
 
 ## Purpose
-TBD - created by archiving change add-orchestrator. Update Purpose after archive.
+規劃並派工，但不自己彙整。它的工具面是固定且極小的，peek 有 job 級總預算，
+計畫寫在外部狀態所以可以續跑，context 逼近上限時交接重啟而不是硬撐。
+失敗的 handle 由它處置——lane 只負責誠實地說自己失敗了。
+
 ## Requirements
 ### Requirement: Orchestrator 的工具面是固定且極小的
 Orchestrator SHALL 只能透過一組固定的工具操作系統，且該組工具中

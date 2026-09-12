@@ -1,7 +1,10 @@
 # model-backend Specification
 
 ## Purpose
-TBD - created by archiving change add-lane-worker. Update Purpose after archive.
+讓每條 lane 各自指定要打哪個後端、哪個 tier，並把後端之間的差異收在一處：
+能力宣告與降級、模型別名、共享的節流閘、有時間預算的重試。上層只說要什麼，
+不必知道那個後端支不支援 task budget 或會不會回 429。
+
 ## Requirements
 ### Requirement: Per-lane 的後端設定
 系統 SHALL 允許每一個 lane type 指定自己的 backend profile，包含 endpoint、

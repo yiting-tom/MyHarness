@@ -1,7 +1,10 @@
 # artifact-store Specification
 
 ## Purpose
-TBD - created by archiving change add-artifact-store-and-event-log. Update Purpose after archive.
+存放分析過程中每一份資料與產出，並在讀取前就回答「這個人能不能看」與「這要花多少
+token」。型別二分是它的核心：blob 永遠不會被讀進任何 context，note 才可以。授權是
+capability-based 的，沒有被授與就讀不到，而不是靠呼叫端自律。
+
 ## Requirements
 ### Requirement: Blob 與 Note 的型別二分
 Artifact store SHALL 將每一筆 artifact 標記為 `blob` 或 `note` 兩種 kind 之一，
