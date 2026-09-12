@@ -514,6 +514,34 @@ def test_the_opening_request_is_not_free():
     assert _estimated_request_cost(acc) > FRAMEWORK_TOKENS_PER_REQUEST
 
 
+async def test_declaring_more_tools_costs_more_per_request(bench):
+    """Scenario: 工具宣告是每個請求都在付的錢
+
+    Spike #26 read the wire: a tool declaration is ~106 tokens and every request
+    carries all of them. A flat framework constant priced a six-tool analyst the
+    same as a two-tool critic, which is 400 tokens a request unaccounted for.
+    """
+    from dataclasses import replace
+
+    async def fixed_for(dispatch_id: str, *tools: str) -> int:
+        lane = replace(bench.lane, type=replace(bench.lane.type, tools=tools))
+        await run_lane_worker(
+            WorkerRequest(job_id=JOB, lane=lane, task="t", dispatch_id=dispatch_id),
+            store=bench.store, event_log=bench.events,
+            transport=ScriptedTransport([assistant("done"), result(structured=GOOD_HANDLE)]),
+        )
+        end = next(e for e in reversed(await bench.events.read(JOB))
+                   if e.t == DISPATCH_END)
+        return int(end.data["estimate"]["fixed_per_request"])
+
+    two = await fixed_for("d1", "read_note", "write_finding")
+    six = await fixed_for("d2", "read_note", "write_finding", "update_state",
+                          "localize_blob", "inspect_blob", "duckdb_query")
+
+    assert six > two, "four more tool declarations are re-sent on every request"
+    assert six - two == pytest.approx(4 * 106, abs=8)
+
+
 def test_the_estimate_includes_what_every_request_re_sends():
     """Conversation alone estimated golden #14's d1 at 45k against 62k reported."""
     from myharness.lanes.worker import Accumulated
@@ -803,12 +831,15 @@ def test_the_breakdown_covers_both_halves_of_the_ceiling():
 
 def test_the_opening_request_is_charged_and_recorded_too():
     """A run cut off after two requests was never free -- nor unaccounted for."""
+    from myharness.lanes.budget import estimate as estimate_budget_tokens
     from myharness.lanes.worker import Accumulated, _charge_request
 
     acc = Accumulated(fixed_tokens_per_request=600, conversation_ascii=2_180)
     _charge_request(acc)
     assert acc.charged_ascii == 2_180
-    assert acc.estimated_tokens_in == 1_600
+    # Against the rate rather than a number computed from it: the coefficients
+    # are measured against a backend and will move again when it does.
+    assert acc.estimated_tokens_in == 600 + estimate_budget_tokens(2_180, 0)
 
 
 async def test_the_dispatch_event_says_whether_the_gate_fired(bench):

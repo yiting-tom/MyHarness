@@ -317,13 +317,25 @@ def _tool_result_text(block: Any) -> str:
     return "" if content is None else str(content)
 
 
-#: What one SDK request costs before a single word of conversation: the CLI's
-#: own system prompt and the tool definitions. Derived by
-#: spikes/spike15_token_rates.py, whose baseline probe cost 672 tokens for one
-#: request carrying a charter this module prices at 240. Measured with a
-#: two-tool lane, so a lane declaring more tools pays somewhat more than this.
-#: Re-run the spike rather than adjusting it by feel.
-FRAMEWORK_TOKENS_PER_REQUEST: Final = 432
+#: What one SDK request costs before a single word of conversation and before
+#: any tool is declared. Read off the wire by spikes/spike26_solve_rates.py:
+#: 118 tokens of the CLI's own system prompt, 261 tokens of text the CLI injects
+#: into the first user message and then re-sends on every request -- a
+#: <system-reminder> carrying CLAUDE.md, plus a <total_tokens> note per turn --
+#: and 41 tokens the regression could not attribute to any text at all.
+#:
+#: That injected block is why six golden runs estimated 29-34% low while both
+#: candidate explanations measured near zero. It never appears in the stream, so
+#: the accumulator cannot see it; it is only visible from in front of the CLI.
+#: It scales with the project's CLAUDE.md, so a deployment with a much larger
+#: one should re-run the spike rather than trust this number.
+FRAMEWORK_TOKENS_PER_REQUEST: Final = 420
+
+#: Every declared tool's JSON definition rides along on every request. Measured
+#: at 665 ascii characters for two tools, priced at the rates above. The old
+#: flat constant charged a six-tool analyst what a two-tool critic pays, and
+#: spike #19 had already seen the gap without being able to size it.
+TOKENS_PER_TOOL_DECLARATION: Final = 106
 
 
 def _estimated_request_cost(acc: Accumulated) -> int:
@@ -524,6 +536,7 @@ async def _run_once(
     acc = Accumulated(
         fixed_tokens_per_request=(
             FRAMEWORK_TOKENS_PER_REQUEST
+            + TOKENS_PER_TOOL_DECLARATION * len(toolbox.tool_names())
             + estimate_budget_tokens(charter_ascii, charter_cjk)
         ),
         conversation_ascii=prompt_ascii,

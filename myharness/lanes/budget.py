@@ -18,15 +18,20 @@ from __future__ import annotations
 import math
 from typing import Final
 
-#: Measured on aird-35b with 2,000 characters of txn CSV. Query output is what
-#: fills a lane's context, and it is far denser than prose -- digits and commas
-#: tokenize badly, so the prose figure of 4.0 would understate it by ~1.8x.
-ASCII_CHARS_PER_TOKEN: Final = 2.18
+#: Solved on aird-35b from fourteen real requests, by recording both halves of
+#: every completion and regressing reported input tokens on the characters that
+#: request carried (spikes/spike26_solve_rates.py). Worst residual 2.2%.
+#:
+#: The previous 2.18 came from feeding the backend an isolated 2,000-character
+#: sample. That measures the tokenizer on one kind of text; this measures it on
+#: what a lane actually sends, where JSON tool calls and prose are mixed.
+ASCII_CHARS_PER_TOKEN: Final = 3.14
 
-#: Measured on the same backend with 2,000 Chinese characters of real prose.
-#: The pricelist's estimator uses 1.5, nearly five times this. That direction
-#: is safe when pricing a read and dangerous when ending a run.
-CJK_TOKENS_PER_CHAR: Final = 0.31
+#: From the same fourteen requests. The previous 0.31 under-priced Chinese by
+#: 2.3x, which is most of the reason six golden runs estimated low: a lane's
+#: conversation is mostly Chinese analysis, so the cheap coefficient was applied
+#: to the bulk of the text and the expensive one to the remainder.
+CJK_TOKENS_PER_CHAR: Final = 0.70
 
 
 def split_chars(text: str) -> tuple[int, int]:
