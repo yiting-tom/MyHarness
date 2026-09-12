@@ -122,6 +122,13 @@
 
 - [x] 8.1 離線測試：以假的 `AnalysisService` 驅動整個邊界，不打網路
 - [ ] 8.2 live：真實 A2A 客戶端跑完整條鏈（啟動 → 串流 → 價目表 → 取一節全文）
+      **測試寫好了，但沒有跑通過——卡在後端不是卡在邊界。**
+      `tests/a2a/test_live_chain.py`（`pytest -m live tests/a2a`）。
+      五次嘗試抓到三個真的問題（enum 比字串、啟動阻塞、job 先起才交出 id），
+      全部已修。第四、五次卡在 `phase=planning, dispatches=0`，而**同樣的卡法
+      在完全不經 A2A 的情況下也會發生**——直接對自架端點下一個 5 token 的
+      completion 也 timeout（`http 000`，75 秒無回應），`/v1/models` 同樣不通。
+      **自架後端當時是死的。** 等它回來再跑一次就能收尾。
 - [x] 8.3 量出走價目表模式比全文模式多幾次 round-trip，記錄成本差
 - [x] 8.4 更新 `README.md` 與 `docs/introduction.md`：兩條邊界並存，
       並寫明 A2A 上「job 不能跨程序重連」這面牆（D5）
