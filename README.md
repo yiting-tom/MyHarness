@@ -147,8 +147,10 @@ Golden job 每次跑都斷言這些（`tests/golden/`，`pytest -m live tests/go
 ## 開發
 
 ```bash
-pytest                  # 離線，不花錢（855 tests）
-pytest -m live          # 打真實 API，要金鑰，會花錢
+pytest                  # 離線，不花錢（862 tests）
+pytest -m live          # 打真實 API，要金鑰，會花錢（24 tests）
+ruff check .            # lint
+mypy                    # myharness/，strict
 openspec list           # 進行中的規格變更
 ```
 

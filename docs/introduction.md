@@ -774,15 +774,17 @@ system prompt。
 ## 開發
 
 ```bash
-pytest                  # 離線，不花錢（855 tests）
-pytest -m live          # 打真實 API，要金鑰，會花錢
+pytest                  # 離線，不花錢（862 tests）
+pytest -m live          # 打真實 API，要金鑰，會花錢（24 tests）
+ruff check .            # lint
+mypy                    # myharness/，strict
 openspec list           # 進行中的規格變更
 ```
 
 專案用規格驅動流程（OpenSpec）：每個改動先寫 proposal 與 design，
 再把需求寫成可斷言的 scenario，實作完才歸檔進 `openspec/specs/`。
-目前 10 個 capability、83 條需求、855 個測試。`a2a-server` 還在 change 裡，
-尚未歸檔成 spec。
+目前 11 個 capability、91 條需求、211 個 scenario、862 個離線測試。
+沒有進行中的 change。
 
 ### 可行性驗證都留著
 
