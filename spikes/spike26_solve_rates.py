@@ -29,6 +29,7 @@ import os
 import sys
 import tempfile
 import threading
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -286,8 +287,13 @@ async def main() -> int:
         print("not enough priced requests to solve for three unknowns")
         return 1
 
-    Path("spikes/spike26_exchanges.json").write_text(
-        json.dumps(EXCHANGES, ensure_ascii=False), encoding="utf-8")
+    # One file per run, not one file. The first run of this spike overwrote its
+    # own capture on the second, and the two runs solve to different
+    # coefficients -- which is the finding, and it was nearly unexaminable.
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    capture = Path(f"spikes/spike26_exchanges_{stamp}.json")
+    capture.write_text(json.dumps(EXCHANGES, ensure_ascii=False), encoding="utf-8")
+    print(f"captured -> {capture}\n")
 
     print(f"{'#':>2} {'msgs':>4} {'ascii':>8} {'非ascii':>8} {'in':>7} {'out':>6}")
     rows, targets = [], []
