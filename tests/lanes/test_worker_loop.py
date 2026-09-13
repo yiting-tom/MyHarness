@@ -920,3 +920,57 @@ async def test_a_single_attempt_carries_nothing(bench):
     (end,) = await bench.events_for(DISPATCH_END)
     assert end.get("estimate")["attempts"] == 1
     assert end.get("estimate")["carried_tokens"] == 0
+
+
+# --- what the lane actually read (dataflow spec: 三種邊) ---------------------
+
+
+async def test_a_read_is_recorded_as_an_event_not_only_as_a_grant(bench):
+    """Scenario: 一次派工的三種邊
+
+    The dataflow spec asks for grant edges and read edges kept apart, because a
+    lane that was granted two artifacts and read one is the case worth seeing.
+    ARTIFACT_READ had a consumer in dataflow/build.py and no producer anywhere,
+    so read_edges_available was False in every real run and the monitor said the
+    information was unavailable -- while the offline suite stayed green, because
+    its dataflow tests build the event by hand.
+    """
+    from myharness.artifacts.types import GrantSet
+    from myharness.dataflow import build_dataflow
+    from myharness.events.types import ARTIFACT_READ
+    from myharness.lanes.tools import WorkerToolbox
+    from myharness.lanes.worker import _run_with_toolbox
+
+    granted = await bench.store.put_note(JOB, "lanes/kyc/findings/001", "已授權",
+                                         produced_by="kyc")
+    unread = await bench.store.put_note(JOB, "lanes/kyc/findings/002", "也授權了",
+                                        produced_by="kyc")
+    grants = GrantSet.for_lane(JOB, bench.lane.namespace, [granted.id, unread.id])
+    toolbox = WorkerToolbox(store=bench.store, job_id=JOB, lane=bench.lane,
+                            grants=grants, read_budget=3_000)
+    toolbox.build_server()
+
+    class ReadingTransport:
+        """Calls a tool the way a model would, so the wiring is exercised."""
+
+        def stream(self, prompt, options):
+            async def gen():
+                await toolbox.handlers["read_note"]({"artifact": str(granted.id)})
+                yield result(structured=GOOD_HANDLE)
+
+            return gen()
+
+    async with toolbox:
+        await _run_with_toolbox(
+            req(bench, inputs=[str(granted.id), str(unread.id)]),
+            toolbox=toolbox, grants=grants, store=bench.store,
+            event_log=bench.events, transport=ReadingTransport(),
+        )
+
+    reads = [e for e in await bench.events.read(JOB) if e.t == ARTIFACT_READ]
+    assert [e.get("artifact") for e in reads] == [str(granted.id)], \
+        "one of the two granted artifacts was read, and only that one"
+    assert reads[0].get("dispatch") == "d1"
+
+    flow = build_dataflow(await bench.events.read(JOB))
+    assert flow.read_edges_available, "a real run must make the read view available"

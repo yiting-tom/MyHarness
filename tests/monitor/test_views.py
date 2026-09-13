@@ -276,3 +276,25 @@ def test_a_long_lane_name_does_not_eat_the_status_column():
               .finish(None))
     out = render_inspect(build_dataflow(stream.events), stream.events, colour=False)
     assert "tabular-analyst  budget_exceeded" in out
+
+
+def test_a_granted_artifact_that_was_never_read_says_so():
+    """dataflow spec: 授權與讀取分開表示，因為兩者不一致最值得被看見。
+
+    The read edges reached the model and stopped there. Rendering only grants
+    meant the one case the distinction exists for -- granted and not read --
+    looked exactly like the case where everything was read.
+    """
+    stream = (Stream().start().ingress(BLOB)
+              .dispatch("d1", "a", [BLOB, F1])
+              .read("d1", BLOB)
+              .done("d1", "a", REPORT).finish(REPORT))
+    flow = build_dataflow(stream.events)
+    out = render_inspect(flow, stream.events, colour=False)
+
+    granted = [ln for ln in out.splitlines() if "←授權" in ln]
+    read_line = next(ln for ln in granted if "raw/txns" in ln)
+    unread_line = next(ln for ln in granted if "a:1" in ln)
+    assert "已讀" in read_line, "the artifact the lane actually read must say so"
+    assert "未讀" in unread_line, "and the one it never opened must say that"
+    assert "不可得" not in out, "the read view is available in this run"

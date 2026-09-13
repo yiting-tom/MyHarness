@@ -13,6 +13,7 @@ from myharness.dataflow import (
     Anomaly,
     DataFlow,
     DispatchInfo,
+    EdgeKind,
     NodeKind,
     Severity,
     detect,
@@ -113,11 +114,16 @@ def _anomalies(anomalies: Sequence[Anomaly], colour: bool, width: int) -> str:
 
 
 def _flow(flow: DataFlow, colour: bool, width: int) -> str:
-    """Raw data → dispatch → output, with the grants on the arrows."""
+    """Raw data → dispatch → output, with the grants on the arrows.
+
+    A grant that was never opened is marked, because that is the only reason the
+    flow keeps grants and reads apart: when they agree the distinction costs a
+    column and says nothing, and when they disagree it is the finding.
+    """
     lines = [style(rule("資料流向", width), "bold", enabled=colour)]
     if not flow.read_edges_available:
         lines.append(style(
-            "  （實際讀取資訊不可得 —— worker 尚未記錄 artifact.read 事件；"
+            "  （這份事件流沒有 artifact.read 事件，實際讀取不可得 —— "
             "以下顯示的是授權）", "dim", enabled=colour))
 
     for dispatch in flow.dispatches.values():
@@ -125,12 +131,19 @@ def _flow(flow: DataFlow, colour: bool, width: int) -> str:
         lines.append(_dispatch_line(flow, dispatch, colour, width))
         granted = list(dispatch.granted)
         produced = list(dispatch.produced)
+        read = {e.dst for e in flow.edges_from(dispatch.id, EdgeKind.READ)}
         for i, artifact in enumerate(granted):
             last = (i == len(granted) - 1) and not produced
+            if not flow.read_edges_available:
+                mark = ""
+            elif artifact in read:
+                mark = style(" 已讀", "dim", enabled=colour)
+            else:
+                mark = style(" 未讀", "yellow", enabled=colour)
             lines.append(
                 "  " + ("└─" if last else "├─")
                 + style(" ←授權 ", "dim", enabled=colour)
-                + _artifact_label(flow, artifact, colour, width - 16)
+                + _artifact_label(flow, artifact, colour, width - 21) + mark
             )
         for i, artifact in enumerate(produced):
             lines.append(

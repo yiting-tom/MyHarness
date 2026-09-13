@@ -35,6 +35,7 @@ from myharness.backends.gate import BackendGate, ThrottleReport, gates
 from myharness.backends.profile import BackendCapability, BackendProfile
 from myharness.events.log import EventLog
 from myharness.events.types import (
+    ARTIFACT_READ,
     CTX,
     DISPATCH_END,
     DISPATCH_START,
@@ -616,6 +617,17 @@ async def _run_with_toolbox(
 ) -> LaneHandle:
     transport = transport or SdkTransport()
     lane, lane_type = request.lane, request.lane.type
+
+    async def emit_read(artifact: str) -> None:
+        """A read edge, written as it happens rather than inferred from grants."""
+        await event_log.append(
+            request.job_id, ARTIFACT_READ, dispatch=request.dispatch_id,
+            lane=lane.id, artifact=artifact,
+        )
+
+    # Set here rather than at construction: which dispatch a read belongs to is
+    # a property of the run, and the toolbox outlives neither.
+    toolbox.on_read = emit_read
     profile = lane_type.backend_profile()
     charter = lane_type.charter()
 

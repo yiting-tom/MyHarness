@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from typing import Any
@@ -172,8 +173,13 @@ class WorkerToolbox:
     derived: list[str] = field(default_factory=list)
     state_revision: int = 0
     state_rejected: bool = False
+    #: Artifacts this worker actually read, counted by ``_record_read``.
     reads: int = 0
     queries: int = 0
+    #: Called once per artifact actually read. The toolbox has no event log and
+    #: should not grow one; the worker injects this so a read can become an
+    #: event without the storage tools learning what an event is.
+    on_read: Callable[[str], Awaitable[None]] | None = None
     #: How many calls the budget gate refused. Recorded on the dispatch event so
     #: a run says whether the gate fired rather than leaving it to be inferred.
     gated: int = 0
@@ -187,6 +193,18 @@ class WorkerToolbox:
     #: manager exits, so a path handed out from inside a ``with`` block is dead
     #: on arrival (design.md D8). Closed by ``aclose``.
     _open: AsyncExitStack = field(default_factory=AsyncExitStack)
+
+    async def _record_read(self, artifact: str) -> None:
+        """One artifact actually read, reported as it happens.
+
+        Grants say what a lane was allowed to see; this says what it looked at.
+        The dataflow spec keeps the two apart because their disagreeing is the
+        case most worth seeing, and a read reported only at the end of the run
+        would be invisible to anyone watching a job that is still going.
+        """
+        self.reads += 1
+        if self.on_read is not None:
+            await self.on_read(artifact)
 
     async def aclose(self) -> None:
         """Release every localised blob. Safe to call more than once."""
@@ -296,7 +314,7 @@ class WorkerToolbox:
                 )
             except ArtifactError as exc:
                 return _err(exc.to_dict())
-            self.reads += 1
+            await self._record_read(str(aid))
             return self._result(text)
 
         @tool(
@@ -386,6 +404,7 @@ class WorkerToolbox:
                 path = await self._open.enter_async_context(
                     self.store.localize(aid, grants=self.grants)
                 )
+                await self._record_read(str(aid))
                 return self._result(json.dumps(
                     {"path": str(path), "bytes": meta.bytes, "schema": meta.schema},
                     ensure_ascii=False,
@@ -405,12 +424,11 @@ class WorkerToolbox:
         async def inspect_blob(args: dict[str, Any]) -> dict[str, Any]:
             if refusal := self._gate("inspect_blob"):
                 return refusal
-            result = await self._query_runner().inspect(
-                str(args.get("artifact", "")).strip()
-            )
+            artifact = str(args.get("artifact", "")).strip()
+            result = await self._query_runner().inspect(artifact)
             if isinstance(result, QueryFailure):
                 return self._result(result.text())
-            self.reads += 1
+            await self._record_read(artifact)
             return self._result(result.text())
 
         @tool(
@@ -449,6 +467,8 @@ class WorkerToolbox:
             if isinstance(result, QueryFailure):
                 return self._result(result.text())
             self.queries += 1
+            for read in ids:
+                await self._record_read(read)
             if isinstance(result, IntoResult):
                 self.derived.append(str(result.artifact.id))
             return self._result(result.text())
