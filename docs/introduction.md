@@ -505,7 +505,7 @@ Lane 工具、orchestrator 工具、MCP 工具的拒絕，全部以文字結果�
 | 類型 | 例子 | 處理 |
 |---|---|---|
 | Transient | 429、5xx、連線中斷 | per-backend 共享節流閘，300 秒時間預算，4s→60s 退避加 full jitter |
-| Semantic | handle 不合格式、SQL 寫錯、參數被拒 | 回可據以行動的訊息，讓模型下一輪改正；重試 2 次後回失敗 handle |
+| Semantic | handle 不合格式、SQL 寫錯、參數被拒 | 回可據以行動的訊息，讓模型下一輪改正；重問 1 次後回失敗 handle |
 
 重試用的是**時間預算而不是次數上限**：次數會在限流恢復之前就放棄。
 

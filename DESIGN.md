@@ -360,7 +360,7 @@ blob 與 note 分屬兩棵子樹，因為兩者的存取規則完全不同（見
 | 兩個資料工具的定義成本 | ≈150 tokens/worker turn | 把裁切省下的 16,468 還回去 0.9%；相對 60k lane 預算 0.25% |
 | Transient 重試 | 時間預算 300s、退避 4s→60s 加 full jitter、per-backend 共享閘 | 次數上限會在限流恢復前就放棄；spike #6 |
 | SDK 內建重試 | `CLAUDE_CODE_MAX_RETRIES=2` | 預設 10 次會在單一呼叫內耗掉數分鐘，harness 看不到也協調不了 |
-| 降級路徑重試 | 2 次後回失敗 handle | 離線驗證 |
+| 降級路徑重問 | 1 次後回失敗 handle；重問另給一份等額預算 | golden #19：三次嘗試塞不進一份預算 |
 | OpenRouter 的 `task_budget` | **不宣告** | 預算不足時回 400、output 為 0，拿不到部分結果；spike #6 |
 | 單次 lane 執行成本 | ≈$0.02–0.04（nemotron-3-super-120b） | spike #7；SDK 回報值高於實際帳單，成本斷言以帳單為準 |
 | Blob 的存取方式 | `inspect_blob` + `duckdb_query`，SQL 內不含路徑 | 路徑入 SQL 需要第二套 parser 級授權，兩套裡弱的那套決定安全性 |

@@ -51,7 +51,20 @@ class LaneType:
     max_turns: int = DEFAULT_MAX_TURNS
     state_max_tokens: int = DEFAULT_STATE_MAX_TOKENS
     input_token_budget: int = DEFAULT_INPUT_TOKEN_BUDGET
+    #: What a schema re-prompt may spend *on top of* ``token_budget``. None
+    #: means as much again: a re-prompt starts a fresh conversation carrying the
+    #: same task, so it costs about what that task costs, and an allowance
+    #: smaller than the first would make the rescue likelier to fail than the
+    #: thing it exists to rescue. Added rather than substituted so the ceiling
+    #: still sees everything the dispatch has spent (golden #18).
+    retry_token_budget: int | None = None
     description: str = ""
+
+    def retry_budget(self) -> int:
+        """The extra a re-prompt may spend. Defaults to another whole budget."""
+        if self.retry_token_budget is None:
+            return self.token_budget
+        return self.retry_token_budget
 
     def charter(self) -> str:
         """Read the charter. Kept in a file so it can be diffed and reviewed."""

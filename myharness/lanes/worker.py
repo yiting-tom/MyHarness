@@ -528,6 +528,7 @@ async def _run_once(
     enforce_schema: bool,
     carried: int = 0,
     attempt: int = 1,
+    budget: int | None = None,
 ) -> tuple[Accumulated, BaseException | None]:
     # Seeded rather than empty: the opening request already carries the charter,
     # the tool definitions and the task, and none of that ever appears in the
@@ -546,7 +547,10 @@ async def _run_once(
         attempt=attempt,
     )
     _charge_request(acc)
-    budget = request.lane.type.token_budget
+    # Passed in rather than read here: a re-prompt runs against a raised
+    # ceiling, and only the caller knows which attempt this is.
+    if budget is None:
+        budget = request.lane.type.token_budget
     # Asked before the request goes out, not after it comes back. A re-prompt
     # inherits what the dispatch has already spent (golden #18), and golden #19
     # then sent three attempts that were over budget before the model saw them:
@@ -771,6 +775,7 @@ async def _attempt_all(
     # Survives the rebinding of `acc` below, which is the whole point.
     carried = 0
     attempt = 0
+    budget = request.lane.type.token_budget
 
     for transient_attempt in range(MAX_TRANSIENT_RETRIES + 1):
         for schema_attempt in range(MAX_SCHEMA_RETRIES + 1):
@@ -778,7 +783,7 @@ async def _attempt_all(
             acc, exc = await _run_once(
                 request, profile, toolbox, transport,
                 prompt=current_prompt, charter=charter, enforce_schema=enforce,
-                carried=carried, attempt=attempt,
+                carried=carried, attempt=attempt, budget=budget,
             )
             # Whatever happens next -- a return, a re-prompt, a back-off -- this
             # attempt has been paid for.
@@ -819,6 +824,10 @@ async def _attempt_all(
             # Semantic failures are never auto-retried; a malformed handle is a
             # formatting failure, which a re-prompt legitimately fixes.
             current_prompt = f"{prompt}\n\n{reprompt_text(schema_problems)}"
+            # Raised, not reset. The re-prompt redoes the task, so it needs room
+            # of its own -- but `carried` keeps running, so the ceiling and the
+            # dispatch event still say what the whole dispatch spent.
+            budget += request.lane.type.retry_budget()
         else:  # pragma: no cover - loop always breaks or returns
             break
 

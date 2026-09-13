@@ -251,7 +251,7 @@ async def test_repeated_schema_violation_becomes_a_failure_handle(bench):
         store=bench.store, event_log=bench.events, transport=transport,
     )
     assert handle.status is HandleStatus.SCHEMA_VIOLATION
-    assert transport.call_count == 3, "1 attempt + MAX_SCHEMA_RETRIES"
+    assert transport.call_count == 2, "1 attempt + MAX_SCHEMA_RETRIES"
 
 
 # --- transcript & events --------------------------------------------------
@@ -887,26 +887,27 @@ async def test_a_reprompt_does_not_reset_what_the_dispatch_has_spent(bench):
 async def test_a_dispatch_that_re_prompts_can_exhaust_its_budget(bench):
     """The behaviour the old accounting made impossible.
 
-    Attempt one spends 4,500 of a 5,000 budget and is re-prompted. Attempt two
-    used to start from zero, so a dispatch could re-prompt its way through any
-    multiple of its budget without the ceiling ever seeing it.
+    Attempt two used to start from zero, so a dispatch could re-prompt its way
+    through any multiple of its budget without the ceiling ever seeing it. It
+    now gets an allowance of its own, but an *additive* one: 5,000 and then
+    5,000 more is a ceiling of 10,000 for the dispatch, not a fresh 5,000
+    measured from nothing.
     """
     transport = ScriptedTransport(
         [assistant("prose, not a handle"),
          result(usage={"input_tokens": 4_000, "output_tokens": 500})],
         [assistant(handle_text()),
-         result(usage={"input_tokens": 3_000, "output_tokens": 200})],
+         result(usage={"input_tokens": 5_500, "output_tokens": 600})],
     )
     handle = await run_lane_worker(
         WorkerRequest(job_id=JOB, lane=_with_budget(bench.lane, 5_000),
                       task="t", dispatch_id="d1"),
         store=bench.store, event_log=bench.events, transport=transport,
     )
+    # 6,100 on its own clears the raised 10,000 ceiling. 4,500 + 6,100 does not,
+    # which is the whole point: the ceiling judges the dispatch.
     assert handle.status is HandleStatus.BUDGET_EXCEEDED
-    # It used to start and be cut short mid-stream, which is a request billed
-    # for nothing. With 500 of the 5,000 left, the opening request of attempt
-    # two does not fit, so it is never sent (golden #19).
-    assert transport.call_count == 1, "the second attempt could not afford to start"
+    assert transport.call_count == 2, "the re-prompt could afford to start"
 
 
 async def test_the_ceiling_counts_every_attempt(bench):
@@ -1004,3 +1005,49 @@ async def test_an_attempt_that_cannot_afford_its_own_opening_is_not_sent(bench):
     assert handle.status is HandleStatus.BUDGET_EXCEEDED
     (end,) = await bench.events_for(DISPATCH_END)
     assert end.get("status") == "budget_exceeded"
+
+
+async def test_a_reprompt_gets_its_own_allowance_not_the_remains_of_the_last(bench):
+    """Golden #19: attempt one spent the budget, so the rescue could not start.
+
+    A schema re-prompt starts a fresh conversation with the same task, so it
+    costs about what that task costs. Handing it whatever the attempt it is
+    rescuing left over makes the rescue likelier to fail than the thing it
+    exists to rescue -- which is what happened: three dispatches ended
+    attempts=3, turns=0, having produced nothing.
+    """
+    transport = ScriptedTransport(
+        # Attempt one uses the whole 5,000 and returns prose, not a handle.
+        [assistant("prose, not a handle"),
+         result(usage={"input_tokens": 4_600, "output_tokens": 400})],
+        [assistant(handle_text()),
+         result(usage={"input_tokens": 3_000, "output_tokens": 200})],
+    )
+    lane = _with_budget(bench.lane, 5_000)
+    handle = await run_lane_worker(
+        WorkerRequest(job_id=JOB, lane=lane, task="t", dispatch_id="d1"),
+        store=bench.store, event_log=bench.events, transport=transport,
+    )
+
+    assert transport.call_count == 2, "the re-prompt has its own allowance to spend"
+    assert handle.ok, "and enough of it to finish"
+
+
+async def test_a_dispatch_gets_one_reprompt_and_no_more(bench):
+    """Two attempts, so the worst case is token_budget + one retry allowance.
+
+    Bounded on purpose: the retry allowance is additive, so an unbounded number
+    of re-prompts would be an unbounded bill (golden #18 is how that was found).
+    """
+    from myharness.lanes.contract import MAX_SCHEMA_RETRIES
+
+    assert MAX_SCHEMA_RETRIES == 1
+    lane = with_backend(bench.lane, "test-degraded")
+    transport = ScriptedTransport(*[[assistant("prose only"), result()] for _ in range(5)])
+    handle = await run_lane_worker(
+        WorkerRequest(job_id=JOB, lane=lane, task="t", dispatch_id="d1"),
+        store=bench.store, event_log=bench.events, transport=transport,
+    )
+
+    assert handle.status is HandleStatus.SCHEMA_VIOLATION
+    assert transport.call_count == 2, "asked once, re-asked once, then it is a failure"

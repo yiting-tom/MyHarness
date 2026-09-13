@@ -32,7 +32,12 @@ _VALIDATOR = Draft202012Validator(HANDLE_SCHEMA)
 _FENCE = re.compile(r"```(?:json)?\s*(?P<body>\{.*?\})\s*```", re.DOTALL)
 
 #: How many times to re-prompt a backend that cannot enforce the schema itself.
-MAX_SCHEMA_RETRIES = 2
+#: One. A re-prompt gets its own allowance on top of the lane's budget
+#: (LaneType.retry_budget), so each one is a real increase in what a dispatch
+#: can cost; golden #18 found what happens when that is unbounded. Two attempts
+#: put the worst case at twice the budget, which is a number that can be
+#: reasoned about rather than a loop that cannot.
+MAX_SCHEMA_RETRIES = 1
 
 
 class ContractPath(StrEnum):
