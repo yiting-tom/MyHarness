@@ -140,7 +140,10 @@ async def test_api_budget_is_only_sent_when_supported(bench):
 async def test_local_token_ceiling_stops_a_backend_without_api_budget(bench):
     """Scenario: 不支援 API 端預算時以本地計數硬斷"""
     lane = with_backend(bench.lane, "test-degraded")
-    lane = replace(lane, type=replace(lane.type, token_budget=500))
+    # Above the ~766 the opening request costs, so the run starts; the streamed
+    # usage below is what takes it over. A budget too small to open with is a
+    # different case, and it never reaches the transport at all.
+    lane = replace(lane, type=replace(lane.type, token_budget=1_200))
     over = {"input_tokens": 900, "output_tokens": 400}
     transport = ScriptedTransport(
         [assistant("…", usage=over), assistant("…", usage=over), result()]

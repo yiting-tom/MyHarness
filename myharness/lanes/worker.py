@@ -546,9 +546,18 @@ async def _run_once(
         attempt=attempt,
     )
     _charge_request(acc)
+    budget = request.lane.type.token_budget
+    # Asked before the request goes out, not after it comes back. A re-prompt
+    # inherits what the dispatch has already spent (golden #18), and golden #19
+    # then sent three attempts that were over budget before the model saw them:
+    # 2,115 tokens against 41 of headroom, and nothing to show for it. The
+    # in-stream ceiling below cannot help -- by the time a message streams, the
+    # request has been billed.
+    if not profile.supports(BackendCapability.TASK_BUDGET) and acc.budget_tokens > budget:
+        return acc, _LocalBudgetExceeded()
+
     options = _options(request, profile, toolbox, charter=charter, enforce_schema=enforce_schema)
     try:
-        budget = request.lane.type.token_budget
         async for message in transport.stream(prompt, options):
             _consume(message, acc)
             # The lane cannot see its own consumption; the toolbox attaches

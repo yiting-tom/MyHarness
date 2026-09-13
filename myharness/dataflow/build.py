@@ -94,7 +94,13 @@ def build_dataflow(
             dispatch_id, artifact = event.get("dispatch"), event.get("artifact")
             if dispatch_id and artifact:
                 _touch(flow, str(artifact))
-                flow.edges.append(Edge(str(dispatch_id), str(artifact), EdgeKind.READ))
+                # Once per pair. Golden #19's analyst queried one blob thirteen
+                # times; the log records all thirteen, because that is what
+                # happened, but the edge answers "did it read this" and one
+                # answer is enough.
+                edge = Edge(str(dispatch_id), str(artifact), EdgeKind.READ)
+                if edge not in flow.edges:
+                    flow.edges.append(edge)
 
         elif event.t == JOB_FINISH:
             flow.finished = True

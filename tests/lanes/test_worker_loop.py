@@ -903,7 +903,10 @@ async def test_a_dispatch_that_re_prompts_can_exhaust_its_budget(bench):
         store=bench.store, event_log=bench.events, transport=transport,
     )
     assert handle.status is HandleStatus.BUDGET_EXCEEDED
-    assert transport.call_count == 2, "the second attempt started and was cut short"
+    # It used to start and be cut short mid-stream, which is a request billed
+    # for nothing. With 500 of the 5,000 left, the opening request of attempt
+    # two does not fit, so it is never sent (golden #19).
+    assert transport.call_count == 1, "the second attempt could not afford to start"
 
 
 async def test_the_ceiling_counts_every_attempt(bench):
@@ -974,3 +977,30 @@ async def test_a_read_is_recorded_as_an_event_not_only_as_a_grant(bench):
 
     flow = build_dataflow(await bench.events.read(JOB))
     assert flow.read_edges_available, "a real run must make the read view available"
+
+
+async def test_an_attempt_that_cannot_afford_its_own_opening_is_not_sent(bench):
+    """Golden #19 paid for three requests that were over budget before they left.
+
+    A re-prompt inherits what the dispatch has already spent, which is right.
+    What was wrong is that the attempt went out anyway: d3 sent a 2,115-token
+    request with 41 tokens of headroom, d4 a 1,745-token one with 1,147, and
+    both came back having produced nothing. The budget was already gone; the
+    only thing the request bought was the bill.
+    """
+    from dataclasses import replace
+
+    # test-degraded declares no capabilities, so the local ceiling is the one in
+    # force -- the same shape as the self-hosted backend golden #19 ran on.
+    lane = replace(bench.lane, type=replace(bench.lane.type, backend="test-degraded",
+                                            token_budget=100))
+    transport = ScriptedTransport([assistant("…"), result(structured=GOOD_HANDLE)])
+    handle = await run_lane_worker(
+        WorkerRequest(job_id=JOB, lane=lane, task="t", dispatch_id="d1"),
+        store=bench.store, event_log=bench.events, transport=transport,
+    )
+
+    assert transport.call_count == 0, "nothing may be sent that is already over budget"
+    assert handle.status is HandleStatus.BUDGET_EXCEEDED
+    (end,) = await bench.events_for(DISPATCH_END)
+    assert end.get("status") == "budget_exceeded"

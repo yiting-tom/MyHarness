@@ -187,3 +187,20 @@ def test_index_metadata_enriches_the_nodes():
     flow = build_dataflow(stream.events, [meta(F1, est_tokens=453, revision=2)])
     assert flow.nodes[F1].est_tokens == 453
     assert flow.nodes[F1].revision == 2
+
+
+def test_reading_the_same_artifact_twice_is_one_edge():
+    """Golden #19's analyst queried one blob thirteen times.
+
+    Each query really did read it, and the log says so thirteen times, which is
+    the log's job. The flow answers a different question -- did this dispatch
+    read this artifact -- and thirteen identical edges answer it thirteen times
+    while adding nothing but weight to every walk over the graph.
+    """
+    stream = (Stream().ingress(BLOB).dispatch("d1", "a", [BLOB])
+              .read("d1", BLOB).read("d1", BLOB).read("d1", BLOB)
+              .done("d1", "a", F1))
+    flow = build_dataflow(stream.events)
+
+    assert len(flow.edges_from("d1", EdgeKind.READ)) == 1
+    assert flow.read_edges_available
