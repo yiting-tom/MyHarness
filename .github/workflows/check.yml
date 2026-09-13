@@ -1,0 +1,33 @@
+# Three gates, in the order that fails cheapest first. `pytest` here is the
+# offline suite only -- the live tests need a key and a self-hosted backend
+# behind a VPN, so they cannot run here and are not pretended to.
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - run: uv python install 3.13
+
+      - name: install
+        run: uv pip install --system -e '.[dev,a2a]'
+
+      - name: ruff
+        run: ruff check .
+
+      - name: mypy
+        run: mypy
+
+      - name: pytest
+        run: pytest
