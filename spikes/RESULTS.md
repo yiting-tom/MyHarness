@@ -2717,3 +2717,112 @@ run  id   未串回的 output    估計誤差
 #21 與 #22 連續兩趟 `salvaged: false`——orchestrator 自己把報告交出來，沒有靠補救。
 另外兩趟的 d1（analyst）都是 `budget_exceeded`：#21 用了 17 次請求、22 輪，
 #22 用了 15 次請求、26 輪，都撞在 60,000 上。那條 lane 塞不進預算是另一個問題。
+
+
+---
+
+## 78 次派工的成功率：42%
+
+把所有 golden run 的 `dispatch.end` 攤平來看，比看單一趟清楚得多：
+
+```
+ok                33  (42%)
+budget_exceeded   27  (35%)
+schema_violation  16  (21%)   ← 其中 9 次已經被重問過一次
+state_rejected     1
+tool_failure       1
+```
+
+兩個失敗模式吃掉 56%。歷史上 15 次重問只救回 3 次（20%）。
+
+以下是這兩條的根因，都是在 #21／#22 的紀錄裡找到的，不是推論出來的。
+
+### 一、上限在數 token，而該數的是價錢
+
+Golden #22 的 d1 跑了 12 次聚合查詢、寫完 finding，死在回傳 handle 那一輪。
+它的**整段對話是 6,795 tokens**，最後一個請求帶 8,319——模型窗的 13%。
+
+它「花掉」63,752。拆開：
+
+```
+                        golden21 d1        golden22 d1
+固定區塊 × 請求數    1,524×17 = 25,908  1,524×15 = 22,860   (44% / 36%)
+每回合注入（三角）             5,202              4,080   ( 9% /  6%)
+對話重送 Σ                    28,202             36,812   (48% / 58%)
+最後一個請求的真實 context     6,006              8,319   ( 9% / 13% of 65,536)
+```
+
+`token_budget=60_000` 對上 `max_model_len=65536` 那句話（本文件 §Lane 預算、
+`docs/introduction.md`）是個類別錯誤：**累計重送量不是 context 長度**，
+沒有一個請求接近過模型窗。
+
+而重送是有折扣的。`Accumulated.tokens_in` 把 `input_tokens`、`cache_read`、
+`cache_creation` 以同一個權重相加，但 cache read 實價是十分之一。用 Anthropic
+後端的兩趟 golden 回頭看：
+
+```
+golden-tabular d1   in 24,959   fresh 6,527   cache_read 18,432   (74% 是快取讀)
+golden         d1   in 19,039   fresh 4,063   cache_read 14,976   (79%)
+```
+
+`golden d1` 真正該記的是 `4,063 + 1,498 = 5,561`，帳上記了 19,039——**超收 3.4 倍**。
+上限是 lane 和無上限帳單之間唯一的東西，而它讀到的數字是帳單的三到四倍。
+
+修法（`edc2f53`）：兩側都改成計價而非計數。回報側用後端講的；估計側折掉可證明
+會重複的前綴，也就是固定區塊加上「截至前一個請求為止的對話」，而且只在宣告
+`PROMPT_CACHING` 的 profile 上生效。重放兩趟 golden：
+
+```
+golden21 d1  60,602 → 16,073   101% → 27%   (預測快取 83%)
+golden22 d1  66,951 → 19,665   112% → 33%   (預測快取 82%)
+```
+
+### 二、重問的提示詞在教模型犯錯
+
+`contract.py` 的 `reprompt_text` 寫著「Reply with ONLY a JSON object matching
+this schema」，然後把 **JSON Schema 原文**貼過去。最近四次 `schema_violation`
+裡有三次，模型回的是：
+
+```json
+{"type": "object", "properties": {"artifact": "golden22/note/.../report",
+                                  "headline": "...", "confidence": "medium"}}
+```
+
+值全對，包在 `{"type":"object","properties":{...}}` 這層信封裡——**就是提示詞剛剛
+貼給它看的那個形狀**。四次全部 `attempts: 2`，信封出現在重問**之後**。
+
+無法被後端強制 schema 的模型，是在模仿它看到的東西。所以看到的必須是我們要的東西。
+改成送一個**實例**（`a814b76`），而且那個實例本身必須是合法 handle——測試釘住這點，
+因為逐字照抄正是要修的失敗模式，它得落在無害的地方。
+
+第四次（#21 d2）是另一回事：`metrics: {"lowest_channel": "app"}`，選填 map 裡的一個
+字串欄位讓整個 handle 作廢，儘管三個必填欄位都對、finding 也已經寫進 store。
+改成丟掉不可用的項並標記 `truncated`（`6b395fe`）——`clamp_handle` 本來就會做這件事，
+只是驗證先一步把整個 payload 擋掉了，它從來沒輪到。
+
+### 三、順帶發現：被重問的派工，第一次嘗試的 transcript 是丟掉的
+
+`_run_once` 每次嘗試建一個新的 `Accumulated`——這是對的，重問的 context 本來就該乾淨——
+但 transcript 也跟著只剩最後一次。上面那四次，**觸發重問的那則輸出全部不可考**。
+`carried_tokens` 早就跨過了這個 rebinding，證據沒有。已補（`2a32d97`）。
+
+### 四、CLI 確實有向自架後端要求快取
+
+不用再跑一趟就能回答一半：spike #26 錄下來的請求 body 裡，每個請求都帶
+**三個 `cache_control: {"type":"ephemeral"}`**——兩個在 `system`，一個在
+**最後一則訊息**上，而那則訊息就是 `<total_tokens>` 注入。
+
+```
+req  0  msgs=2   marks=[system[1], system[2], msg[1](system-role)]
+req  2  msgs=8   marks=[system[1], system[2], msg[7](system-role)]
+req 14  msgs=23  marks=[system[1], system[2], msg[22](system-role)]
+```
+
+斷點打在**最後一則訊息**，意思是「到這裡為止全部可快取」。這正好驗證了估計器
+假設的前綴形狀：請求 *i* 的可快取前綴 = 請求 *i−1* 標記過的全部內容。唯一的差別是
+**注入本身也在被標記的前綴裡**，而估計器把它留在 fresh 那側——少折，對一個上限
+來說是安全的方向，現在知道那是刻意的保守而不是漏掉的。
+
+**還不知道的是自架 proxy 有沒有真的照做。** 它的 usage 只回 `input_tokens` 與
+`output_tokens`，連 cache 欄位都沒有。所以 `SELF_HOSTED` 仍然不宣告 `PROMPT_CACHING`
+——要求被送出去了，不等於被兌現，而 profile 的規矩是「未知的 proxy 必須自己證明」。
