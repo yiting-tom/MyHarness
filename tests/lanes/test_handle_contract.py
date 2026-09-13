@@ -53,7 +53,7 @@ def test_valid_payload_becomes_a_handle():
     [
         ({"artifact": None}, "artifact"),
         ({"confidence": "sky-high"}, "confidence"),
-        ({"metrics": {"n": "lots"}}, "metrics"),
+        ({"metrics": "not a map"}, "metrics"),
         ({"followups": "not a list"}, "followups"),
     ],
 )
@@ -76,6 +76,33 @@ def test_extra_fields_are_rejected():
     outcome = validate_payload({**GOOD, "full_report": "…" * 5000})
     assert not outcome.ok
     assert any("Additional properties" in p for p in outcome.problems)
+
+
+def test_a_metric_that_is_not_a_number_does_not_kill_the_handle():
+    """Golden #21's d2 died over one optional field.
+
+    It returned metrics {"distinct_accounts": 765, "lowest_channel_avg":
+    13981.81, "lowest_channel": "app"} -- the last of those prose, in a map the
+    schema says holds numbers. artifact, headline and confidence were all
+    correct and the finding was already written to the store; the dispatch came
+    back schema_violation anyway, and the orchestrator saw nothing.
+    """
+    outcome = validate_payload({**GOOD, "metrics": {"n": 765, "channel": "app"}})
+    assert outcome.ok
+    assert outcome.handle.metrics == {"n": 765.0}
+    assert outcome.handle.truncated, "dropped, and the handle says so"
+
+
+def test_a_metrics_map_with_nothing_usable_is_still_a_handle():
+    outcome = validate_payload({**GOOD, "metrics": {"channel": "app"}})
+    assert outcome.ok
+    assert outcome.handle.metrics == {}
+
+
+def test_the_schema_still_asks_for_numbers():
+    """Relaxing what we accept is not relaxing what we ask for: a backend that
+    can enforce the schema should still refuse prose here."""
+    assert HANDLE_SCHEMA["properties"]["metrics"]["additionalProperties"] == {"type": "number"}
 
 
 def test_schema_forbids_free_form_metric_values():

@@ -93,8 +93,34 @@ def extract_json_object(text: str) -> dict[str, Any] | None:
     return None
 
 
+def _usable_metrics(payload: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    """Drop metric values that are not numbers, before the schema sees them.
+
+    The schema still asks for numbers and a backend that can enforce it still
+    refuses prose there. This is about what to do when nobody enforced it:
+    golden #21's d2 returned ``{"distinct_accounts": 765, "lowest_channel_avg":
+    13981.81, "lowest_channel": "app"}``. Three required fields correct, the
+    finding already written to the store, and the whole dispatch came back
+    schema_violation over the third entry of an optional map -- so the
+    orchestrator got nothing, and a re-prompt spent a second budget.
+
+    The handle is the ~120 tokens that cross back; metrics are the part of it
+    the artifact already holds in full. Losing one entry costs a number the
+    reader can look up. Losing the handle costs the dispatch.
+    """
+    metrics = payload.get("metrics")
+    if not isinstance(metrics, dict):
+        return payload, False
+    kept = {k: v for k, v in metrics.items()
+            if isinstance(v, int | float) and not isinstance(v, bool)}
+    if len(kept) == len(metrics):
+        return payload, False
+    return {**payload, "metrics": kept}, True
+
+
 def validate_payload(payload: dict[str, Any]) -> ValidationOutcome:
     """Check a candidate handle against the schema, then clamp it."""
+    payload, dropped_metrics = _usable_metrics(payload)
     problems = tuple(
         f"{'.'.join(str(p) for p in e.path) or '(root)'}: {e.message}"
         for e in sorted(_VALIDATOR.iter_errors(payload), key=lambda e: list(e.path))
@@ -108,6 +134,7 @@ def validate_payload(payload: dict[str, Any]) -> ValidationOutcome:
         confidence=str(payload["confidence"]),
         metrics={str(k): float(v) for k, v in (payload.get("metrics") or {}).items()},
         followups=tuple(str(f) for f in (payload.get("followups") or ())),
+        truncated=dropped_metrics,
     )
     return ValidationOutcome(clamp_handle(handle), ())
 
