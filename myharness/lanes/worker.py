@@ -114,6 +114,13 @@ class Accumulated:
     #: lanes disagreeing with the rates in both directions at once and no way to
     #: solve for better ones without replaying transcripts again.
     charged: TextCount = field(default_factory=TextCount)
+    #: Transcript rows from earlier attempts of this same dispatch. ``_run_once``
+    #: builds a fresh accumulator per attempt, which is what keeps a re-prompt's
+    #: context clean -- and took the evidence with it: goldens #21 and #22
+    #: re-prompted four dispatches, and for every one of them the output that
+    #: provoked the re-prompt was unrecoverable. carried_tokens already survived
+    #: that rebinding; this is the same trick for the rows.
+    carried_transcript: list[dict[str, Any]] = field(default_factory=list)
     #: What earlier attempts of this same dispatch already spent. A schema
     #: re-prompt starts a fresh run against the backend, and the accumulator
     #: used to start fresh with it: spike #21 recorded 17 requests on the wire
@@ -153,6 +160,11 @@ class Accumulated:
     @property
     def text(self) -> str:
         return "\n".join(self.texts).strip()
+
+    @property
+    def full_transcript(self) -> list[dict[str, Any]]:
+        """Every attempt of this dispatch, oldest first."""
+        return [*self.carried_transcript, *self.transcript]
 
     @property
     def tokens_in(self) -> int:
@@ -588,6 +600,7 @@ async def _run_once(
     charter: str,
     enforce_schema: bool,
     carried: int = 0,
+    carried_transcript: list[dict[str, Any]] | None = None,
     attempt: int = 1,
     budget: int | None = None,
 ) -> tuple[Accumulated, BaseException | None]:
@@ -602,6 +615,7 @@ async def _run_once(
         ),
         conversation=count_text(prompt),
         carried_tokens=carried,
+        carried_transcript=list(carried_transcript or ()),
         attempt=attempt,
         caches_prompts=profile.supports(BackendCapability.PROMPT_CACHING),
     )
@@ -831,8 +845,11 @@ async def _attempt_all(
     acc = Accumulated()
     schema_problems: tuple[str, ...] = ()
     current_prompt = prompt
-    # Survives the rebinding of `acc` below, which is the whole point.
+    # Both survive the rebinding of `acc` below, which is the whole point: one
+    # so the ceiling sees the dispatch rather than the attempt, the other so a
+    # reader does.
     carried = 0
+    carried_rows: list[dict[str, Any]] = []
     attempt = 0
     budget = request.lane.type.token_budget
 
@@ -842,11 +859,13 @@ async def _attempt_all(
             acc, exc = await _run_once(
                 request, profile, toolbox, transport,
                 prompt=current_prompt, charter=charter, enforce_schema=enforce,
-                carried=carried, attempt=attempt, budget=budget,
+                carried=carried, carried_transcript=carried_rows,
+                attempt=attempt, budget=budget,
             )
             # Whatever happens next -- a return, a re-prompt, a back-off -- this
-            # attempt has been paid for.
+            # attempt has been paid for, and what it said is on the record.
             carried = acc.budget_tokens
+            carried_rows = acc.full_transcript
 
             if exc is not None:
                 status = _classify(acc, exc, profile)
@@ -1013,10 +1032,11 @@ async def _persist_transcript(
     store: ArtifactStore, request: WorkerRequest, acc: Accumulated
 ) -> str:
     """A transcript is stored as a blob: it must never be read into a context."""
-    body = "\n".join(json.dumps(row, ensure_ascii=False) for row in acc.transcript)
+    rows = acc.full_transcript
+    body = "\n".join(json.dumps(row, ensure_ascii=False) for row in rows)
     meta = await store.put_blob(
         request.job_id, f"traces/{request.dispatch_id}",
         data=body.encode("utf-8"), produced_by=f"lane:{request.lane.id}",
-        schema={"format": "jsonl", "rows": len(acc.transcript)},
+        schema={"format": "jsonl", "rows": len(rows)},
     )
     return str(meta.id)

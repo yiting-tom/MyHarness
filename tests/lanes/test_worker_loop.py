@@ -244,6 +244,36 @@ async def test_degraded_path_reprompts_then_succeeds(bench):
     assert "not a valid handle" in transport.calls[1][0]
 
 
+async def test_a_reprompted_dispatch_keeps_both_attempts_in_the_transcript(bench):
+    """The output that triggered the re-prompt was the one being thrown away.
+
+    Goldens #21 and #22 re-prompted four dispatches and three came back with
+    the schema envelope. Finding out what the *first* attempt had said was
+    impossible: _run_once builds a fresh accumulator per attempt -- which is
+    what keeps the re-prompt's context clean -- so the transcript held only the
+    last one. carried_tokens already survived that rebinding; the evidence did
+    not.
+    """
+    lane = with_backend(bench.lane, "test-degraded")
+    transport = ScriptedTransport(
+        [assistant("第一次的回答，格式是錯的"), result()],
+        [assistant(handle_text()), result()],
+    )
+    handle = await run_lane_worker(
+        WorkerRequest(job_id=JOB, lane=lane, task="t", dispatch_id="d1"),
+        store=bench.store, event_log=bench.events, transport=transport,
+    )
+    assert handle.ok, "the second attempt succeeded, which is when this is hardest to see"
+
+    async with bench.store.localize(ArtifactId.parse(handle.transcript),
+                                    grants=GrantSet.unrestricted(JOB)) as path:
+        body = path.read_text()
+    assert "第一次的回答，格式是錯的" in body, "what provoked the re-prompt"
+    rows = [json.loads(line) for line in body.splitlines()]
+    assert sum(1 for r in rows if r["role"] == "result") == 2, \
+        "each attempt ends with its own result, which is where one stops"
+
+
 async def test_repeated_schema_violation_becomes_a_failure_handle(bench):
     """Scenario: 不合 schema 的輸出觸發重試後失敗"""
     lane = with_backend(bench.lane, "test-degraded")
