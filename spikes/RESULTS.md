@@ -2826,3 +2826,96 @@ req 14  msgs=23  marks=[system[1], system[2], msg[22](system-role)]
 **還不知道的是自架 proxy 有沒有真的照做。** 它的 usage 只回 `input_tokens` 與
 `output_tokens`，連 cache 欄位都沒有。所以 `SELF_HOSTED` 仍然不宣告 `PROMPT_CACHING`
 ——要求被送出去了，不等於被兌現，而 profile 的規矩是「未知的 proxy 必須自己證明」。
+
+
+---
+
+## Golden run #23 —— 重問修好了，然後量到我一直報錯的那個數字
+
+自架後端，`--root jobs-scratch/golden23`。5 次派工、`salvaged=False`、報告數字全對
+（2,940 筆、765 個帳戶、app 平均 13,981.81），`context_peak=9,454`，$0.33。
+
+```
+d1  analyst-1  budget_exceeded  req 15  in 59,861  out 1,985  gated 1
+d2  analyst-1  budget_exceeded  req 16  in 61,192  out 2,466  gated 0
+d3  critic-1   ok               req  3  in  8,851  out 6,960  attempts 2
+d4  analyst-1  budget_exceeded  req 15  in 62,390  out 2,520  gated 1
+d5  synth-1    ok               req  4  in 11,217  out 2,234  attempts 2
+```
+
+### 一、重問：4 次失敗 → 2 次成功
+
+#21 與 #22 合計 5 個派工裡有 4 個 `schema_violation`，四次全部 `attempts: 2`
+（重問過仍失敗）。**這一趟 0 個。** 而且 d3 與 d5 **都被重問了一次**（`attempts: 2`），
+兩個都回 `ok`。
+
+樣本小（重問 2 次成功 2 次，對上歷史的 15 次成功 3 次），但方向是對的，而且
+失敗的機制（模型照抄 schema 信封）這一趟一次都沒出現。
+
+順帶：`2a32d97` 的 transcript 修正生效了。d3 的 trace 有 **24 列、兩個 `init`、
+兩個 `result`**——第一次嘗試的內容第一次留了下來。在此之前它會是空白。
+
+### 二、預算：三個 analyst 派工全部撞牆，完全如預期
+
+`cached_tokens: 0`，因為 `SELF_HOSTED` 不宣告 `PROMPT_CACHING`。`cache_hit=0.0`，
+usage 連 cache 欄位都沒有。`edc2f53` 的折扣在這個後端上拿不到，所以 d1/d2/d4
+照樣在 60,000 撞牆。**這不是修正沒效，是它照定義不適用。**
+
+### 三、我一直在報的那個數字是錯的
+
+之前寫「估計誤差 −7.6%」。**那是 input 的誤差。** 把 output 算進去之後，
+新估計器七個有真實 usage 的派工是：
+
+```
+                       input 誤差        in+out 誤差
+golden21 d2 analyst      −1.9%             −4.0%
+golden21 d3 critic      −14.0%            −43.8%
+golden21 d5 synth        +3.0%             −1.7%
+golden22 d2 critic      −19.3%            −38.2%
+golden22 d3 synth        −6.0%             −9.7%
+golden23 d3 critic      −14.3%            −42.6%
+golden23 d5 synth        −2.0%             −5.6%
+
+input only:  平均 −7.8%   sd  7.6pp
+in + out  :  平均 −20.8%  sd 18.2pp
+```
+
+**三個大誤差全部是 critic。** 非 critic 的派工 input 在 ±6% 內、總誤差在 −10% 內；
+三個 critic 全部 input −14~−19%、總誤差 −38~−44%。
+
+之前記錄的「與未串回輸出相關（r = −0.80）」，真正的名字是**critic 這條 lane**。
+
+### 四、成因：thinking block 送回來是空的
+
+把所有 golden 裡同時有真實 usage 和 transcript 的派工撈出來（16 個）：
+
+```
+corr(output 缺口, thinking 事件數) = −0.24    ← 不是它
+reported/estimated output 中位數 1.83，全距 1.31..6.20
+
+按 lane：  critic  n=6  中位數 4.28
+          analyst n=4  中位數 1.82
+          synth   n=6  中位數 1.45
+```
+
+而**檢查過的每一個 thinking block，`chars` 都是 0**——25 個派工、沒有例外。
+模型的推理被計費成 output，但串回來的是空殼。
+
+這解釋了為什麼估計的 output 幾乎不動（827~2,205）而實際計費的 output 橫跨
+1,417~13,665：**看得見的輸出（text 加 tool_use JSON）大小差不多，看不見的推理
+隨任務難度變化。** critic 讀 finding、想很久、寫一段短評論，所以它最極端。
+
+也解釋了為什麼 thinking 事件數沒有用：事件只有三到十一個，每個背後多少 token
+完全不知道。**這個資訊不在串流裡，估計器沒有辦法從串流恢復它。**
+
+### 還沒定的事
+
+critic 的 **input** 也低估 −14~−19%，而 synth／analyst 在 ±6% 內。最直覺的解釋是
+未串回的 thinking 在下一輪被當成 input 送回去（`worker.py` 的註解本來就把這個
+標成未知）。但算了一下數量級對不上：golden23 d3 的 output 缺口 5,467，若三輪
+全部重送，input 缺口該是數千，實際只有 1,263。**所以只能說 critic 的 input 也偏低，
+不能說成因是 thinking 重送。** 這一項還是要錄線才知道。
+
+可以做的是：`reported/estimated output` 的 lane 別中位數（critic 4.28、analyst 1.82、
+synth 1.45）是量出來的，不是猜的。要不要把它變成一個 per-lane-type 的 output 係數，
+是下一個決定。
