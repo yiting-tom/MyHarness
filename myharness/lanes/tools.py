@@ -13,6 +13,7 @@ tool just wastes a turn.
 from __future__ import annotations
 
 import json
+import math
 import re
 from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack
@@ -88,21 +89,38 @@ DEFAULT_TOOLS: tuple[str, ...] = (
 )
 
 
-#: Share of the token budget after which every tool result carries a warning.
+#: How many more requests a lane must still be able to afford before the
+#: harness stops warning it. Counted in turns rather than in percent because a
+#: percentage is not a unit of work: the same 10% of a budget buys nine
+#: requests early in a run and less than one late in it, when the conversation
+#: being re-sent has grown to fill it.
+#:
 #: Golden run #9 spent a whole 60k budget on 24 queries without once calling
 #: write_finding, and the analysis died with it. The lane was not being
 #: careless -- it had no way to know how much was left.
-BUDGET_WARN_AT = 0.75
+WARN_TURNS_LEFT = 6.0
 
-#: Share of the budget after which the tools that pull content into a lane's
-#: context stop answering. The warning above is a request, and golden runs #17
-#: and #18 are the same request answered two different ways: #17's d1 read
-#: "預算已用 82%", then 92%, made fifteen more queries and never called
-#: write_finding; #18's d1 read it at 77% and called it. Same string, same
-#: model, same threshold. Delivery can be guaranteed and compliance cannot, and
-#: every other ceiling in this harness holds by construction rather than by
-#: asking (README: 由構造保證，不是由 prompt 祈禱).
-BUDGET_GATE_AT = 0.90
+#: And when the tools that pull content into a lane's context stop answering.
+#: Two, because writing the finding and returning the handle are two separate
+#: requests, plus one for the conversation growing underneath them.
+#:
+#: The warning above is a request, and golden runs #17 and #18 are the same
+#: request answered two different ways: #17's d1 read "預算已用 82%", then 92%,
+#: made fifteen more queries and never called write_finding; #18's d1 read it
+#: at 77% and called it. Same string, same model, same threshold. Delivery can
+#: be guaranteed and compliance cannot, and every other ceiling in this harness
+#: holds by construction rather than by asking (README: 由構造保證，不是由
+#: prompt 祈禱).
+#:
+#: But construction was not enough either, because the gate was built on the
+#: wrong quantity. It fired six times in the harness's history -- golden #19
+#: d1, #20 d1, #20 d3, #21 d1, #23 d1, #23 d4 -- and all six landed nothing.
+#: Each refused exactly one call. At 90% of 60,000 the reserve is 6,000 and the
+#: next request in those runs cost 5,204 to 6,673, so the lane was told to
+#: write its finding at the moment it could no longer pay for the request that
+#: would carry it. #23's d1 and d4 each ran thirteen queries and never called
+#: write_finding at all.
+GATE_TURNS_LEFT = 3.0
 
 #: What the gate closes: the tools that put content the lane does not already
 #: have into its context. write_finding and update_state stay open, because
@@ -186,7 +204,13 @@ class WorkerToolbox:
     #: Share of the lane's token budget consumed so far, updated by the worker
     #: loop after every streamed message. The worker knows this and the lane
     #: does not, which is the whole reason it gets attached to tool results.
+    #: Reported, not acted on -- see turns_affordable.
     budget_used: float = 0.0
+    #: How many more requests the remaining budget can pay for at this run's
+    #: current size, updated alongside budget_used. This is what the warning
+    #: and the gate act on: a lane needs a number of turns to land its work,
+    #: and a share of the budget does not say how many it has left.
+    turns_affordable: float = math.inf
 
     #: Holds every localisation open for as long as the worker runs. A blob
     #: materialised by an object-store backend is deleted when its context
@@ -229,6 +253,19 @@ class WorkerToolbox:
     def last_finding(self) -> str | None:
         return self.findings[-1] if self.findings else None
 
+    def _turns_phrase(self) -> str:
+        """How much room is left, in the unit the lane can act on.
+
+        Requests, not percent: the lane decides "one more query or write now",
+        and that decision needs to be told how many more requests it has.
+        """
+        if not math.isfinite(self.turns_affordable):
+            return "餘裕充足"
+        whole = int(self.turns_affordable)
+        if whole < 1:
+            return "已經付不起下一次請求"
+        return f"只夠再 {whole} 次請求"
+
     def _gate(self, tool_name: str) -> dict[str, Any] | None:
         """Refuse a content tool once the gate is crossed, or None to proceed.
 
@@ -237,25 +274,28 @@ class WorkerToolbox:
         finish. What is left open is exactly what it needs to land the work it
         already has.
         """
-        if tool_name not in GATED_ABOVE_BUDGET or self.budget_used < BUDGET_GATE_AT:
+        if tool_name not in GATED_ABOVE_BUDGET or self.turns_affordable >= GATE_TURNS_LEFT:
             return None
         self.gated += 1
         pct = int(self.budget_used * 100)
-        gate = int(BUDGET_GATE_AT * 100)
+        left = self._turns_phrase()
         if self.findings:
             message = (
-                f"token 預算已用 {pct}%。超過 {gate}% 之後不再受理取用類工具。"
-                "你已經寫過 finding —— 用 write_finding 把新結論補進去，"
-                "然後回傳 handle 結束。"
+                f"token 預算已用 {pct}%，{left}。剩下的餘裕只夠落檔，"
+                "不夠再取用內容，所以取用類工具停止受理。"
+                "用 write_finding 把新結論補進去，然後回傳 handle 結束。"
             )
         else:
             message = (
-                f"token 預算已用 {pct}%。超過 {gate}% 之後不再受理取用類工具。"
+                f"token 預算已用 {pct}%，{left}。剩下的餘裕只夠落檔，"
+                "不夠再取用內容，所以取用類工具停止受理。"
                 "現在就用 write_finding 寫下目前為止的結論 —— "
                 "預算用盡時未落檔的分析會全部消失。"
             )
         return _err({
             "code": "budget_gate", "message": message, "budget_used": pct,
+            "turns_affordable": (int(self.turns_affordable)
+                                 if math.isfinite(self.turns_affordable) else None),
             "still_available": ["write_finding", "update_state"],
         })
 
@@ -266,17 +306,19 @@ class WorkerToolbox:
         messages back is not what the model is attending to when it decides
         whether to run one more query.
         """
-        if self.budget_used < BUDGET_WARN_AT:
+        if self.turns_affordable >= WARN_TURNS_LEFT:
             return _ok(text)
         pct = int(self.budget_used * 100)
+        left = self._turns_phrase()
         if self.findings:
             warning = (
-                f"\n\n[harness] token 預算已用 {pct}%。你已經寫過 finding —— "
+                f"\n\n[harness] token 預算已用 {pct}%，{left}。你已經寫過 finding —— "
                 "把新結論補進去，然後回傳 handle 結束。不要再開新的查詢。"
             )
         else:
             warning = (
-                f"\n\n[harness] token 預算已用 {pct}%，而你還沒有寫任何 finding。"
+                f"\n\n[harness] token 預算已用 {pct}%，{left}，"
+                "而你還沒有寫任何 finding。"
                 "現在就用 write_finding 寫下目前為止的結論 —— "
                 "預算用盡時未落檔的分析會全部消失。"
             )

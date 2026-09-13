@@ -13,6 +13,7 @@ to do about them (DESIGN.md decision #12).
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, Final
@@ -435,6 +436,26 @@ def _estimated_request_cost(acc: Accumulated) -> int:
             + acc.conversation_tokens)
 
 
+def _turns_affordable(acc: Accumulated, remaining: int) -> float:
+    """How many more requests this run can pay for at its current size.
+
+    The quantity the budget signal is expressed in, because a share of the
+    budget is not a unit of work: 10% of 60,000 buys nine requests at turn
+    three and less than one at turn fifteen, when the conversation being
+    re-sent has grown to fill it. Six dispatches were gated on the share and
+    all six landed nothing (tools.py, GATE_TURNS_LEFT).
+
+    Priced at the full re-send cost even on a backend that caches, where the
+    marginal request is cheaper than this says. That over-states the cost and
+    so signals early, which is the safe direction: signalling early costs a
+    lane a query or two, and signalling late has cost six of them everything.
+    """
+    cost = _estimated_request_cost(acc)
+    if cost <= 0:
+        return math.inf
+    return max(0.0, remaining / cost)
+
+
 def _charge_request(acc: Accumulated) -> None:
     """Charge one request to the estimate, and record what it was charged for.
 
@@ -646,6 +667,7 @@ async def _run_once(
             spent = acc.budget_tokens
             if budget:
                 toolbox.budget_used = spent / budget
+                toolbox.turns_affordable = _turns_affordable(acc, budget - spent)
             # Local ceiling for backends that cannot enforce one server-side.
             # Reading acc.tokens_in here meant the ceiling only ever tripped on
             # the final message -- it relabelled a finished run rather than

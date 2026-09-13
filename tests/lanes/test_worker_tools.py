@@ -181,16 +181,17 @@ def _text(result) -> str:
 
 
 async def test_a_result_carries_no_warning_below_the_threshold(bench):
-    from myharness.lanes.tools import BUDGET_WARN_AT
+    from myharness.lanes.tools import WARN_TURNS_LEFT
 
     toolbox, _ = bench
-    toolbox.budget_used = BUDGET_WARN_AT - 0.01
+    toolbox.turns_affordable = WARN_TURNS_LEFT + 1
     assert "[harness]" not in _text(toolbox._result("rows: 12"))
 
 
 async def test_past_the_threshold_a_lane_with_nothing_written_is_told_to_write(bench):
     toolbox, _ = bench
     toolbox.budget_used = 0.8
+    toolbox.turns_affordable = 4.0
     text = _text(toolbox._result("rows: 12"))
 
     assert text.startswith("rows: 12")  # the result itself is never displaced
@@ -204,6 +205,7 @@ async def test_past_the_threshold_a_lane_with_nothing_written_is_told_to_write(b
 async def test_a_lane_that_has_written_is_told_to_finish_instead(bench):
     toolbox, _ = bench
     toolbox.budget_used = 0.9
+    toolbox.turns_affordable = 4.0
     toolbox.findings.append("j/note/lanes/a/findings/1")
     text = _text(toolbox._result("rows: 12"))
 
@@ -217,6 +219,7 @@ async def test_the_warning_repeats_on_every_call(bench):
     when it decides whether to run one more query."""
     toolbox, _ = bench
     toolbox.budget_used = 0.8
+    toolbox.turns_affordable = 4.0
     assert all("[harness]" in _text(toolbox._result(f"r{i}")) for i in range(3))
 
 
@@ -282,11 +285,50 @@ async def test_an_ordinary_name_still_works(bench):
 # ceiling in this harness holds by construction; this one asked nicely.
 
 
-async def test_below_the_gate_a_content_tool_still_answers(bench):
-    from myharness.lanes.tools import BUDGET_GATE_AT
+async def test_the_gate_fires_while_a_write_is_still_affordable(bench):
+    """The gate has fired six times in this harness's history, and all six of
+    those dispatches landed nothing.
+
+        golden19 d1   golden20 d1   golden20 d3
+        golden21 d1   golden23 d1   golden23 d4
+
+    Every one refused exactly one call and produced no artifact. The reason is
+    arithmetic: 90% of a 60,000 budget leaves 6,000, and the next request in
+    those runs cost 5,204 to 6,673. The lane was told to write its finding at
+    the moment it could no longer afford the request that would carry it, and
+    #23's d1 and d4 each ran thirteen queries and never called write_finding
+    at all. A share of the budget is not a unit of work.
+    """
+    from myharness.lanes.tools import GATE_TURNS_LEFT
+
+    assert GATE_TURNS_LEFT >= 2, \
+        "writing the finding and returning the handle are two separate requests"
 
     toolbox, ids = bench
-    toolbox.budget_used = BUDGET_GATE_AT - 0.01
+    toolbox.budget_used = 0.90
+    toolbox.turns_affordable = 1.0  # 6,000 left, a turn costs 6,000: the situation
+    body = error_of(await toolbox.handlers["read_note"]({"artifact": str(ids["granted"].id)}))
+    assert body["code"] == "budget_gate"
+
+
+async def test_a_budget_mostly_spent_on_cheap_turns_is_not_gated(bench):
+    """What the percentage got wrong in the other direction.
+
+    A lane at 92% whose turns are small still has room to finish; closing its
+    tools costs it work and saves nothing.
+    """
+    toolbox, ids = bench
+    toolbox.budget_used = 0.92
+    toolbox.turns_affordable = 12.0
+    result = await toolbox.handlers["read_note"]({"artifact": str(ids["granted"].id)})
+    assert "已授權的內容" in _text(result)
+
+
+async def test_below_the_gate_a_content_tool_still_answers(bench):
+    from myharness.lanes.tools import GATE_TURNS_LEFT
+
+    toolbox, ids = bench
+    toolbox.turns_affordable = GATE_TURNS_LEFT + 1
     result = await toolbox.handlers["read_note"]({"artifact": str(ids["granted"].id)})
     assert "已授權的內容" in _text(result)
 
@@ -294,6 +336,7 @@ async def test_below_the_gate_a_content_tool_still_answers(bench):
 async def test_above_the_gate_a_content_tool_is_refused(bench):
     toolbox, ids = bench
     toolbox.budget_used = 0.93
+    toolbox.turns_affordable = 1.0
     body = error_of(await toolbox.handlers["read_note"]({"artifact": str(ids["granted"].id)}))
 
     assert body["code"] == "budget_gate"
@@ -306,6 +349,7 @@ async def test_the_gate_leaves_somewhere_to_put_the_work(bench):
     """Closing everything would only change what the lane loses its work to."""
     toolbox, _ = bench
     toolbox.budget_used = 0.95
+    toolbox.turns_affordable = 1.0
 
     wrote = await toolbox.handlers["write_finding"]({"name": "partial", "text": "結論"})
     assert "wrote" in _text(wrote)
@@ -316,6 +360,7 @@ async def test_the_gate_leaves_somewhere_to_put_the_work(bench):
 async def test_a_lane_that_already_wrote_is_told_to_finish_not_to_write_again(bench):
     toolbox, ids = bench
     toolbox.budget_used = 0.95
+    toolbox.turns_affordable = 1.0
     toolbox.findings.append("j/note/lanes/a/findings/1")
     body = error_of(await toolbox.handlers["read_note"]({"artifact": str(ids["granted"].id)}))
 
@@ -327,6 +372,7 @@ async def test_localize_stays_open_because_it_returns_a_path_not_content(bench):
     """Refusing it would cost a lane its working file and save nothing."""
     toolbox, ids = bench
     toolbox.budget_used = 0.97
+    toolbox.turns_affordable = 1.0
     result = await toolbox.handlers["localize_blob"]({"artifact": str(ids["blob"].id)})
     # The warning rides along on the same result, so the document is the first line.
     body, _, warning = _text(result).partition("\n\n[harness]")
@@ -337,6 +383,7 @@ async def test_localize_stays_open_because_it_returns_a_path_not_content(bench):
 async def test_the_gate_is_counted_so_a_run_shows_it_fired(bench):
     toolbox, ids = bench
     toolbox.budget_used = 0.95
+    toolbox.turns_affordable = 1.0
     for _ in range(3):
         await toolbox.handlers["read_note"]({"artifact": str(ids["granted"].id)})
     assert toolbox.gated == 3

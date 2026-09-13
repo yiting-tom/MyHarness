@@ -797,6 +797,41 @@ def test_the_two_sides_of_the_ceiling_cover_the_same_ground():
     assert starved.budget_tokens > 50_000, "and the estimate is not input-only"
 
 
+# --- the gate needs a unit of work, not a share of the budget ---------------
+
+
+def test_the_reserve_at_ninety_percent_was_smaller_than_one_turn():
+    """Golden #23's d1, at the request the gate fired on.
+
+    fixed 1,524, fifteen requests, a 4,262-token conversation: 6,296 for the
+    next one. Ten percent of a 60,000 budget is 6,000. It was told to write and
+    could not afford to.
+    """
+    from myharness.lanes.worker import Accumulated, _turns_affordable
+
+    acc = Accumulated(fixed_tokens_per_request=1_524, requests=15,
+                      conversation=count_text("z " * 3_806))
+    assert acc.conversation_tokens == pytest.approx(4_262, abs=20)
+    assert _turns_affordable(acc, 6_000) < 1.5, "not enough for a write and a handle"
+
+
+def test_the_same_reserve_is_plenty_earlier_in_the_run():
+    """Which is why a percentage cannot express this: the unit changes size."""
+    from myharness.lanes.worker import Accumulated, _turns_affordable
+
+    early = Accumulated(fixed_tokens_per_request=1_524, requests=3,
+                        conversation=count_text("z " * 500))
+    assert _turns_affordable(early, 6_000) > 2
+
+
+def test_a_run_that_has_spent_everything_can_afford_nothing():
+    from myharness.lanes.worker import Accumulated, _turns_affordable
+
+    acc = Accumulated(fixed_tokens_per_request=1_524, requests=9)
+    assert _turns_affordable(acc, 0) == 0.0
+    assert _turns_affordable(acc, -500) == 0.0, "overspent is not negative turns"
+
+
 # --- the handle names an artifact; the store says which one -----------------
 
 
