@@ -17,7 +17,7 @@ import json
 import re
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
+from typing import Any, Final
 
 from jsonschema import Draft202012Validator
 
@@ -112,14 +112,37 @@ def validate_payload(payload: dict[str, Any]) -> ValidationOutcome:
     return ValidationOutcome(clamp_handle(handle), ())
 
 
+#: An instance, not a schema. The re-prompt used to send the schema itself, and
+#: golden runs #21 and #22 re-prompted four lanes: three replied with
+#: ``{"type": "object", "properties": {"artifact": "...", ...}}`` -- their real
+#: answer, correct in every field, nested inside the envelope the re-prompt had
+#: just shown them. A backend that cannot be handed a schema is being asked to
+#: imitate what it sees, so what it sees has to be the thing we want back.
+#: Every value here is a placeholder except ``confidence``, which has to be a
+#: real one: the example must itself validate, because verbatim imitation is
+#: the failure mode this is correcting and it has to land somewhere harmless.
+_HANDLE_EXAMPLE: Final[dict[str, Any]] = {
+    "artifact": "lanes/<your lane>/findings/<the name you gave it>",
+    "headline": "One sentence saying what you found.",
+    "confidence": "medium",
+    "metrics": {"rows_examined": 0},
+    "followups": ["What the orchestrator should look at next."],
+}
+
+
 def reprompt_text(problems: tuple[str, ...]) -> str:
     """What to send back when the model's output did not validate."""
     bullets = "\n".join(f"- {p}" for p in problems)
+    allowed = ", ".join(HANDLE_SCHEMA["properties"]["confidence"]["enum"])
     return (
         "Your last message was not a valid handle. Problems:\n"
         f"{bullets}\n\n"
-        "Reply with ONLY a JSON object matching this schema, no prose, no code fence:\n"
-        f"{json.dumps(HANDLE_SCHEMA, ensure_ascii=False)}"
+        "Reply with ONLY a JSON object of exactly this shape -- the same keys, "
+        "your values. No prose, no code fence, no wrapper around it:\n"
+        f"{json.dumps(_HANDLE_EXAMPLE, ensure_ascii=False)}\n\n"
+        f"artifact, headline and confidence are required; confidence is one of "
+        f"{allowed}. Every value in metrics must be a number. Leave metrics and "
+        "followups out if you have none."
     )
 
 

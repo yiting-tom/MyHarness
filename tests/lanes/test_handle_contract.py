@@ -161,12 +161,36 @@ def test_json_extraction_from_free_form_output(text: str, expected):
     assert extract_json_object(text) == expected
 
 
-def test_reprompt_names_the_problems_and_the_schema():
+def test_reprompt_names_the_problems():
     problems = validate_payload({"headline": "x"}).problems
     text = reprompt_text(problems)
     assert "artifact" in text
-    assert json.dumps(HANDLE_SCHEMA, ensure_ascii=False) in text
     assert MAX_SCHEMA_RETRIES >= 1
+
+
+def test_the_reprompt_does_not_hand_back_the_schema_itself():
+    """Goldens #21 and #22 re-prompted four lanes; three replied with
+
+        {"type": "object", "properties": {"artifact": "...", ...}}
+
+    -- their real answer, right in every field, nested inside the envelope the
+    re-prompt had just shown them. The correction was teaching the error.
+    """
+    text = reprompt_text(("artifact: required",))
+    assert '"properties"' not in text
+    assert '"type": "object"' not in text
+
+
+def test_copying_the_reprompt_example_verbatim_produces_a_valid_handle():
+    """Because imitating the nearest JSON object is exactly what happened.
+
+    Whatever the re-prompt shows has to be safe to copy: a model that cannot be
+    handed a schema by the backend is being asked to imitate, so the worst case
+    -- verbatim imitation -- must be a handle rather than an envelope.
+    """
+    shown = extract_json_object(reprompt_text(("artifact: required",)))
+    assert shown is not None
+    assert validate_payload(shown).ok
 
 
 # --- failure handles ------------------------------------------------------
