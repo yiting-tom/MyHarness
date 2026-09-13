@@ -16,7 +16,12 @@ from claude_agent_sdk import ToolAnnotations, create_sdk_mcp_server, tool
 from claude_agent_sdk.types import McpSdkServerConfig
 
 from myharness.artifacts.errors import ArtifactError
-from myharness.artifacts.ids import ArtifactId, coerce_artifact_ids
+from myharness.artifacts.ids import (
+    ArtifactId,
+    InvalidArtifactId,
+    coerce_artifact_ids,
+    lane_namespace,
+)
 from myharness.artifacts.tokens import estimate_tokens
 from myharness.artifacts.types import GrantSet
 from myharness.events.types import PEEK, PLAN_UPDATE
@@ -130,6 +135,14 @@ class OrchestratorTools:
                     spec = LaneSpec.from_dict(raw)
                 except KeyError as exc:
                     return _err("bad_lane", f"lane entry missing {exc}")
+                # A lane id becomes an artifact namespace segment, so a name
+                # the store will not accept has to be refused here rather than
+                # at the first dispatch: golden #21 planned `analyst/txn`, and
+                # run_lane_worker raised out of the job's first turn.
+                try:
+                    lane_namespace(spec.id)
+                except InvalidArtifactId as exc:
+                    return _err("bad_lane", str(exc))
                 if spec.id in self.runner.lanes:
                     continue
                 try:

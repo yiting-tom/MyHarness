@@ -65,6 +65,23 @@ async def test_unknown_lane_type_is_refused(bench):
     assert "ta" in body["message"]
 
 
+async def test_a_lane_id_that_cannot_be_an_artifact_segment_is_refused(bench):
+    """Golden #21: the orchestrator named its lanes `analyst/txn`.
+
+    A lane id becomes an artifact namespace segment, and a slash is not legal
+    there -- so the plan was accepted, three lanes were registered, and the
+    first dispatch raised InvalidArtifactId out of run_lane_worker. That is not
+    caught anywhere: the job died with `session_error` on its first turn, with
+    only salvage between it and no delivery at all. The name is a value the
+    model chose, so it is refused where the model can read the refusal.
+    """
+    body = payload(await bench.h["plan_update"]({
+        "plan": "x", "lanes": [{"id": "analyst/txn", "type": "ta"}]}))
+    assert body["error"] == "bad_lane"
+    assert "analyst/txn" in body["message"]
+    assert "analyst/txn" not in bench.runner.lanes, "and nothing was registered"
+
+
 async def test_empty_plan_is_refused(bench):
     assert payload(await bench.h["plan_update"]({"plan": "  "}))["error"] == "empty_plan"
 
