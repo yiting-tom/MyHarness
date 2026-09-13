@@ -13,6 +13,7 @@ to do about them (DESIGN.md decision #12).
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, Final
 
@@ -743,7 +744,7 @@ async def _run_with_toolbox(
     transcript_id = await _persist_transcript(store, request, acc)
     handle = clamp_handle(
         LaneHandle(
-            artifact=handle.artifact or (toolbox.last_finding or ""),
+            artifact=_resolve_artifact(handle.artifact, toolbox.findings),
             headline=handle.headline, confidence=handle.confidence, status=handle.status,
             metrics=handle.metrics, followups=handle.followups, truncated=handle.truncated,
             lane=lane.id, dispatch_id=request.dispatch_id, transcript=transcript_id,
@@ -812,6 +813,31 @@ async def _emit_throttle(
             request.job_id, THROTTLE_GAVE_UP, backend=profile.name, lane=request.lane.id,
             waited_s=round(throttle.waited_s, 3),
         )
+
+
+def _resolve_artifact(named: str, written: Sequence[str]) -> str:
+    """Reconcile what the handle points at with what the lane actually wrote.
+
+    ``write_finding`` hands the real id back in its result, and the lane's job
+    is to copy it. Golden #23's d3 and d5 -- the two dispatches that were
+    re-prompted -- returned ``lanes/critic-1/findings/critique`` for an
+    artifact stored as ``golden23/note/lanes/critic-1/findings/critique``: the
+    job-qualified head dropped, because the re-prompt's example showed an
+    unqualified placeholder and a model shown a path composes a path. The
+    handle validated, the report still shipped, and the dataflow graph grew a
+    second node for the same finding that nothing read -- reported as an orphan
+    that was not one.
+
+    A suffix has to match exactly one written artifact. Two candidates is not a
+    match and neither is none: never invent an id, because a wrong pointer that
+    reads as right is worse than one that reads as wrong (golden run #4).
+    """
+    if not named:
+        return written[-1] if written else ""
+    if named in written:
+        return named
+    candidates = [w for w in written if w.endswith(f"/{named}")]
+    return candidates[0] if len(candidates) == 1 else named
 
 
 def _as_kwargs(handle: LaneHandle) -> dict[str, Any]:

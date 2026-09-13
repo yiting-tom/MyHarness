@@ -797,6 +797,44 @@ def test_the_two_sides_of_the_ceiling_cover_the_same_ground():
     assert starved.budget_tokens > 50_000, "and the estimate is not input-only"
 
 
+# --- the handle names an artifact; the store says which one -----------------
+
+
+def test_a_handle_that_drops_the_job_prefix_still_points_at_the_real_artifact():
+    """Golden #23's d3 and d5 -- the two dispatches that were re-prompted."""
+    from myharness.lanes.worker import _resolve_artifact
+
+    written = ["golden23/note/lanes/critic-1/findings/critique"]
+    assert _resolve_artifact("lanes/critic-1/findings/critique", written) == written[0]
+
+
+def test_a_handle_naming_nothing_falls_back_to_the_last_finding():
+    from myharness.lanes.worker import _resolve_artifact
+
+    written = ["j/note/lanes/a/findings/one", "j/note/lanes/a/findings/two"]
+    assert _resolve_artifact("", written) == written[-1]
+    assert _resolve_artifact("", []) == ""
+
+
+def test_an_id_the_lane_really_wrote_is_left_exactly_as_it_is():
+    from myharness.lanes.worker import _resolve_artifact
+
+    written = ["j/note/lanes/a/findings/one", "j/note/lanes/a/findings/two"]
+    assert _resolve_artifact(written[0], written) == written[0]
+
+
+def test_an_unrecognisable_id_is_not_guessed_at():
+    """Never invent one: a wrong pointer that reads as right is worse than a
+    wrong pointer that reads as wrong (artifacts/ids.py, golden #4)."""
+    from myharness.lanes.worker import _resolve_artifact
+
+    written = ["j/note/lanes/a/findings/one", "j/note/lanes/a/findings/two"]
+    assert _resolve_artifact("something/else/entirely", written) == "something/else/entirely"
+    assert _resolve_artifact("findings/ambiguous", ["a/note/findings/ambiguous",
+                                                   "b/note/findings/ambiguous"]) \
+        == "findings/ambiguous", "two candidates is not a match"
+
+
 # --- the ceiling charged re-sent text at the price of new text --------------
 #
 # Golden #22's d1 ran twelve aggregate queries, wrote its finding, and was

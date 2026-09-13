@@ -208,6 +208,22 @@ def test_the_reprompt_does_not_hand_back_the_schema_itself():
     assert '"type": "object"' not in text
 
 
+def test_the_reprompt_shows_no_artifact_path_worth_imitating():
+    """Golden #23 caught the second imitation, which the first fix introduced.
+
+    The example's placeholder read "lanes/<your lane>/findings/<name>", and the
+    two dispatches that were re-prompted came back naming
+    ``lanes/critic-1/findings/critique`` for an artifact stored as
+    ``golden23/note/lanes/critic-1/findings/critique``. A model shown a path
+    copies the path. So the example shows none: the only artifact id that was
+    ever correct is the one write_finding handed back.
+    """
+    text = reprompt_text(("artifact: required",))
+    assert "lanes/" not in text
+    assert "write_finding" in text
+    assert "lanes/" not in HANDLE_SCHEMA["properties"]["artifact"]["description"]
+
+
 def test_copying_the_reprompt_example_verbatim_produces_a_valid_handle():
     """Because imitating the nearest JSON object is exactly what happened.
 

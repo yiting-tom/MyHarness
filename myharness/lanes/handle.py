@@ -57,7 +57,9 @@ HANDLE_SCHEMA: Final[dict[str, Any]] = {
     "properties": {
         "artifact": {
             "type": "string",
-            "description": "Artifact id of the findings you wrote, e.g. lanes/<lane>/findings/003",
+            # No example path: golden #23 showed one in the re-prompt and got
+            # it copied back, prefix and all, as if it were the id.
+            "description": "The artifact id write_finding returned, copied exactly.",
         },
         "headline": {
             "type": "string",

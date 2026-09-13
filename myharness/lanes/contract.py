@@ -149,7 +149,7 @@ def validate_payload(payload: dict[str, Any]) -> ValidationOutcome:
 #: real one: the example must itself validate, because verbatim imitation is
 #: the failure mode this is correcting and it has to land somewhere harmless.
 _HANDLE_EXAMPLE: Final[dict[str, Any]] = {
-    "artifact": "lanes/<your lane>/findings/<the name you gave it>",
+    "artifact": "<the id write_finding returned>",
     "headline": "One sentence saying what you found.",
     "confidence": "medium",
     "metrics": {"rows_examined": 0},
@@ -168,8 +168,9 @@ def reprompt_text(problems: tuple[str, ...]) -> str:
         "your values. No prose, no code fence, no wrapper around it:\n"
         f"{json.dumps(_HANDLE_EXAMPLE, ensure_ascii=False)}\n\n"
         f"artifact, headline and confidence are required; confidence is one of "
-        f"{allowed}. Every value in metrics must be a number. Leave metrics and "
-        "followups out if you have none."
+        f"{allowed}. artifact is the id write_finding handed back, copied "
+        "exactly -- not a path you compose yourself. Every value in metrics "
+        "must be a number. Leave metrics and followups out if you have none."
     )
 
 
