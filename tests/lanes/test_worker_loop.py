@@ -10,6 +10,8 @@ import pytest
 from myharness.artifacts.ids import ArtifactId
 from myharness.artifacts.types import GrantSet
 from myharness.events.types import CTX, DISPATCH_END, DISPATCH_START
+from myharness.lanes.budget import TextCount
+from myharness.lanes.budget import count as count_text
 from myharness.lanes.contract import ContractPath
 from myharness.lanes.handle import HandleStatus
 from myharness.lanes.transport import ScriptedTransport
@@ -508,7 +510,7 @@ def test_the_opening_request_is_not_free():
     from myharness.lanes.worker import FRAMEWORK_TOKENS_PER_REQUEST, Accumulated
 
     acc = Accumulated(fixed_tokens_per_request=FRAMEWORK_TOKENS_PER_REQUEST + 300,
-                      conversation_ascii=800)
+                      conversation=count_text("z" * 800))
     from myharness.lanes.worker import _estimated_request_cost
 
     assert _estimated_request_cost(acc) > FRAMEWORK_TOKENS_PER_REQUEST
@@ -517,7 +519,7 @@ def test_the_opening_request_is_not_free():
 async def test_declaring_more_tools_costs_more_per_request(bench):
     """Scenario: 工具宣告是每個請求都在付的錢
 
-    Spike #26 read the wire: a tool declaration is ~106 tokens and every request
+    Spike #26 read the wire: a tool declaration is ~98 tokens and every request
     carries all of them. A flat framework constant priced a six-tool analyst the
     same as a two-tool critic, which is 400 tokens a request unaccounted for.
     """
@@ -539,15 +541,16 @@ async def test_declaring_more_tools_costs_more_per_request(bench):
                           "localize_blob", "inspect_blob", "duckdb_query")
 
     assert six > two, "four more tool declarations are re-sent on every request"
-    assert six - two == pytest.approx(4 * 106, abs=8)
+    assert six - two == pytest.approx(4 * 98, abs=8)
 
 
 def test_the_estimate_includes_what_every_request_re_sends():
     """Conversation alone estimated golden #14's d1 at 45k against 62k reported."""
     from myharness.lanes.worker import Accumulated
 
-    bare = Accumulated(conversation_ascii=40_000)
-    with_overhead = Accumulated(conversation_ascii=40_000, fixed_tokens_per_request=664)
+    long_text = count_text("z " * 20_000)
+    bare = Accumulated(conversation=long_text)
+    with_overhead = Accumulated(conversation=long_text, fixed_tokens_per_request=664)
     for acc in (bare, with_overhead):
         for _ in range(10):
             _exchange(acc, reply="", tool_result="")
@@ -575,7 +578,7 @@ def test_a_tool_result_counts_toward_consumption():
     acc = Accumulated()
     _consume(UserMessage(content=[ToolResultBlock(
         tool_use_id="t1", content="row\n" * 5_000)]), acc)
-    assert acc.conversation_ascii > 15_000
+    assert acc.conversation.words >= 5_000, "five thousand rows of it"
 
 
 # Golden run #13: the ceiling stopped d1 mid-stream for the first time, and the
@@ -624,7 +627,8 @@ def test_a_reported_figure_is_never_replaced_by_the_estimate():
     """
     from myharness.lanes.worker import Accumulated
 
-    acc = Accumulated(conversation_ascii=80_000, estimated_tokens_in=20_000)
+    acc = Accumulated(conversation=count_text("z " * 40_000),
+                      estimated_tokens_in=20_000)
     acc.usage = {"input_tokens": 7, "output_tokens": 0}
     tokens = acc.token_breakdown
     assert "estimated" not in tokens
@@ -644,9 +648,11 @@ async def test_the_event_carries_the_estimate_alongside_the_reported_figure(benc
     ]))
     (end,) = await bench.events_for(DISPATCH_END)
     estimate = end.get("estimate")
-    assert set(estimate) == {"requests", "conversation_tokens", "conversation_ascii",
-                             "conversation_cjk", "thinking_ascii", "thinking_cjk",
-                             "charged_ascii", "charged_cjk",
+    assert set(estimate) == {"requests", "conversation_tokens",
+                             "conversation_words", "conversation_punct",
+                             "conversation_cjk", "thinking_words",
+                             "thinking_punct", "thinking_cjk", "charged_words",
+                             "charged_punct", "charged_cjk",
                              "carried_tokens", "attempts",
                              "fixed_per_request", "tokens_in", "tokens_out"}
     assert end.get("tokens")["in"] == 4_000, "reported, not estimated"
@@ -661,7 +667,44 @@ def test_chinese_and_ascii_are_not_charged_at_the_same_rate():
     """
     from myharness.lanes.budget import estimate
 
-    assert estimate(1_000, 0) != estimate(0, 1_000)
+    assert estimate("word " * 200) != estimate("字" * 1_000)
+
+
+def test_prose_and_structure_are_not_charged_at_the_same_rate():
+    """Two runs of spike #26 solved the one ascii rate to 3.14 and 3.91 chars
+    per token, and that spread was not noise. English prose tokenizes near four
+    characters a token; a JSON tool call, full of quotes, braces and artifact
+    ids, near three. One rate over a mixture measures that run's mixture, which
+    is why the coefficient moved every time the mixture did.
+    """
+    from myharness.lanes.budget import count
+
+    prose = "the quick brown fox jumps over the lazy dog and then rest well"
+    structure = '{"artifact":"p/note/lanes/src/findings/data","ok":true,"n":12}'
+    assert len(prose) == len(structure), "same characters, so only the shape differs"
+    assert count(prose).tokens < count(structure).tokens
+
+
+def test_each_turn_leaves_behind_something_the_stream_never_shows():
+    """Spike #26 run 3: request i carries i copies of the CLI's per-turn note.
+
+    They arrive as system-role messages that the SDK does not stream, so the
+    accumulator cannot see them -- and a flat per-request constant charges the
+    tenth request exactly what it charged the first. Over the 35 recorded
+    requests of runs 2 and 3, giving that growth a term of its own took the
+    worst per-request error from 6.8% to 0.8%.
+    """
+    from myharness.lanes.worker import (
+        TOKENS_PER_TURN_INJECTION,
+        Accumulated,
+        _estimated_request_cost,
+    )
+
+    first = Accumulated(fixed_tokens_per_request=1_000, requests=1)
+    tenth = Accumulated(fixed_tokens_per_request=1_000, requests=10)
+
+    assert (_estimated_request_cost(tenth) - _estimated_request_cost(first)
+            == 9 * TOKENS_PER_TURN_INJECTION)
 
 
 def test_the_budget_estimator_is_not_the_pricelist_estimator():
@@ -682,9 +725,10 @@ def test_the_split_is_recorded_so_the_rates_stay_derivable():
     excerpt tool results at 2,000 characters, which is the dominant term."""
     from myharness.lanes.worker import Accumulated
 
-    acc = Accumulated(conversation_ascii=4_000, conversation_cjk=500)
+    acc = Accumulated(conversation=TextCount(words=800, punct=200, cjk=500))
     breakdown = acc.estimate_breakdown
-    assert breakdown["conversation_ascii"] == 4_000
+    assert breakdown["conversation_words"] == 800
+    assert breakdown["conversation_punct"] == 200
     assert breakdown["conversation_cjk"] == 500
 
 
@@ -711,11 +755,12 @@ def test_the_two_sides_of_the_ceiling_cover_the_same_ground():
     """Whichever side wins, it answers the same question: what has this cost?"""
     from myharness.lanes.worker import Accumulated
 
-    acc = Accumulated(estimated_tokens_in=1_000, output_ascii=2_180)
+    acc = Accumulated(estimated_tokens_in=1_000, output=count_text("z " * 1_090))
     acc.usage = {"input_tokens": 50_000, "output_tokens": 2_000}
     assert acc.budget_tokens == 52_000, "a reported figure still wins outright"
 
-    starved = Accumulated(estimated_tokens_in=50_000, output_ascii=2_180)
+    starved = Accumulated(estimated_tokens_in=50_000,
+                          output=count_text("z " * 1_090))
     assert starved.budget_tokens > 50_000, "and the estimate is not input-only"
 
 
@@ -753,10 +798,10 @@ def test_thinking_is_measured_even_though_it_is_not_kept():
         TextBlock(text="answer"),
     ]), acc)
 
-    assert acc.thinking_cjk == 300
-    assert acc.thinking_ascii == 700
+    assert acc.thinking.cjk == 300
+    assert acc.thinking.words == 1, "seven hundred x's run together as one"
     assert acc.estimate_breakdown["thinking_cjk"] == 300
-    assert acc.estimate_breakdown["thinking_ascii"] == 700
+    assert acc.estimate_breakdown["thinking_words"] == 1
 
 
 def test_measuring_thinking_does_not_yet_charge_for_it():
@@ -775,7 +820,7 @@ def test_measuring_thinking_does_not_yet_charge_for_it():
         ThinkingBlock(thinking="z" * 10_000, signature="")]), acc)
 
     assert acc.conversation_tokens == before
-    assert acc.thinking_ascii == 10_000
+    assert acc.thinking.words == 1 and acc.thinking.cjk == 0
 
 
 def test_the_transcript_says_how_much_thinking_it_dropped():
@@ -802,22 +847,30 @@ def test_the_transcript_says_how_much_thinking_it_dropped():
 
 
 def test_the_estimate_records_the_sum_it_actually_charged():
-    from myharness.lanes.budget import estimate
-    from myharness.lanes.worker import Accumulated, _charge_request
+    from myharness.lanes.budget import TextCount
+    from myharness.lanes.worker import (
+        TOKENS_PER_TURN_INJECTION,
+        Accumulated,
+        _charge_request,
+    )
 
     acc = Accumulated(fixed_tokens_per_request=500)
     _charge_request(acc)  # the opening request, as _run_once does
     for _ in range(4):
-        _exchange(acc, reply="y" * 1_000, tool_result="租" * 200)
+        _exchange(acc, reply="y " * 500, tool_result="租" * 200)
 
     b = acc.estimate_breakdown
-    assert b["charged_ascii"] > b["conversation_ascii"], "four requests, not one"
+    assert b["charged_words"] > b["conversation_words"], "four requests, not one"
     assert b["charged_cjk"] > b["conversation_cjk"]
 
     # With this, one run is a solvable system rather than a single equation in
-    # two unknowns. ceil() runs per request, so the sum may round up that often.
-    solved = b["requests"] * b["fixed_per_request"] + estimate(b["charged_ascii"],
-                                                               b["charged_cjk"])
+    # three unknowns. The injected notes accumulate, so their term is triangular
+    # in the request count rather than flat. ceil() runs per request, so the sum
+    # may round up that often.
+    charged = TextCount(b["charged_words"], b["charged_punct"], b["charged_cjk"])
+    solved = (b["requests"] * b["fixed_per_request"]
+              + TOKENS_PER_TURN_INJECTION * b["requests"] * (b["requests"] + 1) // 2
+              + charged.tokens)
     assert abs(b["tokens_in"] - solved) <= b["requests"]
 
 
@@ -825,21 +878,25 @@ def test_the_breakdown_covers_both_halves_of_the_ceiling():
     """The ceiling judges input and output; the record showed only input."""
     from myharness.lanes.worker import Accumulated
 
-    acc = Accumulated(output_ascii=2_180)
+    acc = Accumulated(output=count_text("z " * 1_090))
     assert acc.estimate_breakdown["tokens_out"] == acc.estimated_tokens_out > 0
 
 
 def test_the_opening_request_is_charged_and_recorded_too():
     """A run cut off after two requests was never free -- nor unaccounted for."""
-    from myharness.lanes.budget import estimate as estimate_budget_tokens
-    from myharness.lanes.worker import Accumulated, _charge_request
+    from myharness.lanes.worker import (
+        TOKENS_PER_TURN_INJECTION,
+        Accumulated,
+        _charge_request,
+    )
 
-    acc = Accumulated(fixed_tokens_per_request=600, conversation_ascii=2_180)
+    opening = count_text("z " * 1_090)
+    acc = Accumulated(fixed_tokens_per_request=600, conversation=opening)
     _charge_request(acc)
-    assert acc.charged_ascii == 2_180
+    assert acc.charged == opening
     # Against the rate rather than a number computed from it: the coefficients
     # are measured against a backend and will move again when it does.
-    assert acc.estimated_tokens_in == 600 + estimate_budget_tokens(2_180, 0)
+    assert acc.estimated_tokens_in == 600 + TOKENS_PER_TURN_INJECTION + opening.tokens
 
 
 async def test_the_dispatch_event_says_whether_the_gate_fired(bench):

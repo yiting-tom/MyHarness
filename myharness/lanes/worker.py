@@ -43,8 +43,8 @@ from myharness.events.types import (
     THROTTLE_GAVE_UP,
     THROTTLE_WAIT,
 )
-from myharness.lanes.budget import estimate as estimate_budget_tokens
-from myharness.lanes.budget import split_chars
+from myharness.lanes.budget import TextCount
+from myharness.lanes.budget import count as count_text
 from myharness.lanes.contract import (
     MAX_SCHEMA_RETRIES,
     ContractPath,
@@ -94,30 +94,26 @@ class Accumulated:
     result: ResultMessage | None = None
     turns: int = 0
     usage: dict[str, int] = field(default_factory=dict)
-    #: Conversation so far, ascii and non-ascii counted apart. Two numbers
-    #: rather than one because they cost very differently, and because keeping
-    #: them lets the rates be re-derived from a recorded run instead of being
-    #: inferred from a transcript (golden run #15).
-    conversation_ascii: int = 0
-    conversation_cjk: int = 0
-    #: The same split for what the model itself produced, so input and output
+    #: Conversation so far, counted in the three quantities the rates are
+    #: priced against rather than in characters. Kept as counts so the rates can
+    #: be re-derived from a recorded run instead of being inferred from a
+    #: transcript (golden run #15).
+    conversation: TextCount = field(default_factory=TextCount)
+    #: The same count for what the model itself produced, so input and output
     #: can be estimated separately.
-    output_ascii: int = 0
-    output_cjk: int = 0
+    output: TextCount = field(default_factory=TextCount)
     #: Thinking, measured but deliberately not charged. Golden #16's estimate
     #: ran a uniform 1.37x low across three lanes that each streamed three or
     #: four ThinkingBlocks, every one of them free -- but whether this backend
     #: re-sends them as input is unknown, and folding them in would prejudge it.
-    thinking_ascii: int = 0
-    thinking_cjk: int = 0
+    thinking: TextCount = field(default_factory=TextCount)
     #: The conversation as the estimate actually charges it: summed once per
     #: request, the way estimated_tokens_in is. The plain split says what the
     #: last request carried; this says what every request carried, which is the
     #: quantity the coefficients have to satisfy. Golden #17 had three completed
     #: lanes disagreeing with the rates in both directions at once and no way to
     #: solve for better ones without replaying transcripts again.
-    charged_ascii: int = 0
-    charged_cjk: int = 0
+    charged: TextCount = field(default_factory=TextCount)
     #: What earlier attempts of this same dispatch already spent. A schema
     #: re-prompt starts a fresh run against the backend, and the accumulator
     #: used to start fresh with it: spike #21 recorded 17 requests on the wire
@@ -169,11 +165,11 @@ class Accumulated:
 
     @property
     def conversation_tokens(self) -> int:
-        return estimate_budget_tokens(self.conversation_ascii, self.conversation_cjk)
+        return self.conversation.tokens
 
     @property
     def estimated_tokens_out(self) -> int:
-        return estimate_budget_tokens(self.output_ascii, self.output_cjk)
+        return self.output.tokens
 
     @property
     def token_breakdown(self) -> dict[str, Any]:
@@ -218,18 +214,17 @@ class Accumulated:
             # The raw split too: with it, one run is enough to solve for the
             # rates. Without it, every calibration is transcript archaeology
             # against excerpted tool results.
-            "conversation_ascii": self.conversation_ascii,
-            "conversation_cjk": self.conversation_cjk,
+            **self.conversation.to_dict("conversation"),
             # Measured, not charged. Recorded so that one run can say whether
             # this is the residual the estimate keeps missing.
-            "thinking_ascii": self.thinking_ascii,
-            "thinking_cjk": self.thinking_cjk,
+            **self.thinking.to_dict("thinking"),
             # Summed the way the estimate sums it, so the rates are solvable
             # from one recorded run:
             #     tokens_in == requests * fixed_per_request
-            #                  + charged_ascii / A + charged_cjk * C
-            "charged_ascii": self.charged_ascii,
-            "charged_cjk": self.charged_cjk,
+            #                  + TOKENS_PER_TURN_INJECTION * requests(requests+1)/2
+            #                  + charged_words * W + charged_punct * P
+            #                  + charged_cjk * C
+            **self.charged.to_dict("charged"),
             # What the re-prompts before this attempt cost, and how many there
             # were. Without these a retried dispatch reads as a cheap one.
             "carried_tokens": self.carried_tokens,
@@ -330,13 +325,27 @@ def _tool_result_text(block: Any) -> str:
 #: the accumulator cannot see it; it is only visible from in front of the CLI.
 #: It scales with the project's CLAUDE.md, so a deployment with a much larger
 #: one should re-run the spike rather than trust this number.
-FRAMEWORK_TOKENS_PER_REQUEST: Final = 420
+FRAMEWORK_TOKENS_PER_REQUEST: Final = 336
 
 #: Every declared tool's JSON definition rides along on every request. Measured
 #: at 665 ascii characters for two tools, priced at the rates above. The old
 #: flat constant charged a six-tool analyst what a two-tool critic pays, and
 #: spike #19 had already seen the gap without being able to size it.
-TOKENS_PER_TOOL_DECLARATION: Final = 106
+TOKENS_PER_TOOL_DECLARATION: Final = 98
+
+#: And what each turn leaves behind. The CLI appends a note of its own to every
+#: request -- the remaining context window, and whatever else it has to say --
+#: and those notes accumulate: request i carries i of them. They arrive as
+#: system-role messages the SDK does not stream, so the accumulator is blind to
+#: them, and a flat per-request constant charges the tenth request exactly what
+#: it charged the first.
+#:
+#: This is the term that was making the rates look unstable. Without it the
+#: ascii rate had to absorb a cost that grows with the turn count, so it came
+#: out high on short runs and low on long ones. With it, spike #26's two runs
+#: solve to coefficients within 3% of each other and each predicts the other's
+#: requests to within 1.7% -- against 38.8% before (spikes/RESULTS.md §Spike #26).
+TOKENS_PER_TURN_INJECTION: Final = 34
 
 
 def _estimated_request_cost(acc: Accumulated) -> int:
@@ -349,7 +358,9 @@ def _estimated_request_cost(acc: Accumulated) -> int:
     opposite errors, because the ratio of conversation to overhead differs from
     run to run.
     """
-    return acc.fixed_tokens_per_request + acc.conversation_tokens
+    return (acc.fixed_tokens_per_request
+            + TOKENS_PER_TURN_INJECTION * acc.requests
+            + acc.conversation_tokens)
 
 
 def _charge_request(acc: Accumulated) -> None:
@@ -360,14 +371,13 @@ def _charge_request(acc: Accumulated) -> None:
     conversation once per request, so a calibration has to be able to see that
     same sum -- the final split alone leaves one equation in two unknowns.
     """
-    acc.charged_ascii += acc.conversation_ascii
-    acc.charged_cjk += acc.conversation_cjk
+    acc.charged += acc.conversation
     acc.estimated_tokens_in += _estimated_request_cost(acc)
 
 
-def _message_chars(message: Any) -> tuple[int, int]:
-    """What this message adds to the conversation, ascii and non-ascii apart."""
-    ascii_chars = cjk_chars = 0
+def _message_count(message: Any) -> TextCount:
+    """What this message adds to the conversation, counted for pricing."""
+    total = TextCount()
     for block in _content_blocks(message):
         text = ""
         if isinstance(block, TextBlock):
@@ -376,13 +386,11 @@ def _message_chars(message: Any) -> tuple[int, int]:
             text = json.dumps(block.input, ensure_ascii=False)
         elif isinstance(block, ToolResultBlock):
             text = _tool_result_text(block)
-        a, c = split_chars(text)
-        ascii_chars += a
-        cjk_chars += c
-    return ascii_chars, cjk_chars
+        total += count_text(text)
+    return total
 
 
-def _thinking_chars(message: Any) -> tuple[int, int]:
+def _thinking_count(message: Any) -> TextCount:
     """Thinking, counted apart from the conversation it is not charged to.
 
     ``_message_chars`` recognises text, tool calls and tool results; a
@@ -390,26 +398,20 @@ def _thinking_chars(message: Any) -> tuple[int, int]:
     re-sends it as input is what golden #17 is meant to settle, so this measures
     without yet deciding.
     """
-    ascii_chars = cjk_chars = 0
+    total = TextCount()
     for block in _content_blocks(message):
         if isinstance(block, ThinkingBlock):
-            a, c = split_chars(block.thinking)
-            ascii_chars += a
-            cjk_chars += c
-    return ascii_chars, cjk_chars
+            total += count_text(block.thinking)
+    return total
 
 
 def _consume(message: Any, acc: Accumulated) -> None:
     """Fold one streamed message into the accumulator."""
-    ascii_chars, cjk_chars = _message_chars(message)
-    acc.conversation_ascii += ascii_chars
-    acc.conversation_cjk += cjk_chars
+    added = _message_count(message)
+    acc.conversation += added
     if isinstance(message, AssistantMessage):
-        acc.output_ascii += ascii_chars
-        acc.output_cjk += cjk_chars
-        thinking_ascii, thinking_cjk = _thinking_chars(message)
-        acc.thinking_ascii += thinking_ascii
-        acc.thinking_cjk += thinking_cjk
+        acc.output += added
+        acc.thinking += _thinking_count(message)
         acc.turns += 1
         blocks = [_block_to_dict(b) for b in message.content]
         acc.transcript.append({"role": "assistant", "content": blocks})
@@ -533,16 +535,13 @@ async def _run_once(
     # Seeded rather than empty: the opening request already carries the charter,
     # the tool definitions and the task, and none of that ever appears in the
     # stream. A run that is cut off after two requests was never free.
-    charter_ascii, charter_cjk = split_chars(charter)
-    prompt_ascii, prompt_cjk = split_chars(prompt)
     acc = Accumulated(
         fixed_tokens_per_request=(
             FRAMEWORK_TOKENS_PER_REQUEST
             + TOKENS_PER_TOOL_DECLARATION * len(toolbox.tool_names())
-            + estimate_budget_tokens(charter_ascii, charter_cjk)
+            + count_text(charter).tokens
         ),
-        conversation_ascii=prompt_ascii,
-        conversation_cjk=prompt_cjk,
+        conversation=count_text(prompt),
         carried_tokens=carried,
         attempt=attempt,
     )

@@ -26,6 +26,7 @@ Run: set -a && . ./.env && set +a && python spikes/spike26_solve_rates.py
 import asyncio
 import json
 import os
+import re
 import sys
 import tempfile
 import threading
@@ -189,6 +190,50 @@ def _counted(request: dict) -> dict[str, tuple[int, int]]:
     }
 
 
+def _request_text(request: dict) -> str:
+    """Everything one request carried, as the backend tokenized it."""
+    return (_text_of(request.get("system")) + _text_of(request.get("tools"))
+            + "".join(_message_text(m) for m in request.get("messages") or ()))
+
+
+#: A run of ascii letters and digits: roughly one BPE token, sometimes two.
+WORD = re.compile(r"[A-Za-z0-9]+")
+
+
+def _features(text: str) -> dict[str, float]:
+    """The columns every candidate model draws from.
+
+    One rate per character class is the shape the estimator has always used, and
+    two runs of this spike solved it to 3.14 and 3.91 ascii chars/token. The
+    spread is not noise: a request whose bulk is English prose tokenizes near
+    four chars/token, and one whose bulk is JSON tool calls and artifact ids
+    near three. One coefficient over a mixture measures that run's mixture.
+
+    So count words and punctuation apart. Whitespace gets no column at all --
+    BPE folds a leading space into the word after it, and giving it one lets the
+    fit hand it a negative rate, which then extrapolates badly onto text with a
+    different line length.
+    """
+    cjk = sum(1 for ch in text if ord(ch) > 127)
+    ascii_chars = len(text) - cjk
+    alnum = sum(1 for ch in text if ch.isascii() and ch.isalnum())
+    space = sum(1 for ch in text if ch in " \n\t")
+    return {
+        "ascii": float(ascii_chars),
+        "cjk": float(cjk),
+        "words": float(len(WORD.findall(text))),
+        "punct": float(ascii_chars - alnum - space),
+        "one": 1.0,
+    }
+
+
+#: The estimator's shape, and the candidate that separates prose from structure.
+MODELS = {
+    "ascii + 非ascii         ": ["ascii", "cjk", "one"],
+    "words + punct + 非ascii": ["words", "punct", "cjk", "one"],
+}
+
+
 # --- least squares, written out so the spike has no numpy dependency ---------
 
 def _solve(rows: list[list[float]], targets: list[float]) -> list[float]:
@@ -210,6 +255,40 @@ def _solve(rows: list[list[float]], targets: list[float]) -> list[float]:
                 ata[row][k] -= factor * ata[col][k]
             atb[row] -= factor * atb[col]
     return [atb[i] / ata[i][i] for i in range(n)]
+
+
+def _compare_models(priced: list[dict]) -> None:
+    """Fit each candidate, and score it on requests it did not see.
+
+    In-sample residual is not the number that matters. Run 1 of this spike fitted
+    fourteen requests to 2.2% and then mispredicted run 2's largest request by
+    16%: three free parameters over fourteen points will always look good on the
+    points. Leaving one out and predicting it is what tells the two shapes apart.
+    """
+    data = [(_features(_request_text(e["request"])),
+             float(e["usage"]["input_tokens"])) for e in priced]
+
+    def fit(keys: list[str], rows: list[tuple[dict[str, float], float]]):
+        return _solve([[f[k] for k in keys] for f, _ in rows], [t for _, t in rows])
+
+    def predict(keys, coefficients, features):
+        return sum(features[k] * c for k, c in zip(keys, coefficients, strict=True))
+
+    print()
+    print("model shapes, scored on requests they were not fitted to:")
+    for name, keys in MODELS.items():
+        coefficients = fit(keys, data)
+        in_sample = max(abs(predict(keys, coefficients, f) - t) / t for f, t in data)
+        held_out = []
+        for i in range(len(data)):
+            partial = fit(keys, data[:i] + data[i + 1:])
+            features, target = data[i]
+            held_out.append(abs(predict(keys, partial, features) - target) / target)
+        print(f"  {name}  in-sample {in_sample * 100:5.1f}%  "
+              f"held-out worst {max(held_out) * 100:5.1f}%  "
+              f"mean {sum(held_out) / len(held_out) * 100:4.1f}%")
+        print("    " + "  ".join(f"{k}={c:.4f}"
+                                 for k, c in zip(keys, coefficients, strict=True)))
 
 
 async def run_probe(note_text: str, task: str) -> dict:
@@ -319,6 +398,8 @@ async def main() -> int:
         predicted = row[0] * a_rate + row[1] * c_rate + k
         worst = max(worst, abs(predicted - target) / target)
     print(f"  worst residual {worst * 100:.1f}%")
+
+    _compare_models(priced)
 
     from myharness.lanes.budget import ASCII_CHARS_PER_TOKEN, CJK_TOKENS_PER_CHAR
     print()
