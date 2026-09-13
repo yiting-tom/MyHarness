@@ -2919,3 +2919,86 @@ critic 的 **input** 也低估 −14~−19%，而 synth／analyst 在 ±6% 內�
 可以做的是：`reported/estimated output` 的 lane 別中位數（critic 4.28、analyst 1.82、
 synth 1.45）是量出來的，不是猜的。要不要把它變成一個 per-lane-type 的 output 係數，
 是下一個決定。
+
+
+---
+
+## Golden #23 的後續：一個我造成的回歸，和兩個從既有紀錄就能回答的問題
+
+### 一、重問範例被抄的不是信封，是路徑
+
+修好信封之後，#23 的 d3 與 d5——**正好就是被重問的那兩個**——回傳：
+
+```
+lanes/critic-1/findings/critique      而實際存的是
+golden23/note/lanes/critic-1/findings/critique
+```
+
+#21／#22 六個 handle 全部正確。差別是我在重問範例裡放了
+`"artifact": "lanes/<your lane>/findings/<the name you gave it>"`。
+**模型被給一條路徑，就自己組一條路徑。** 一種模仿失敗換成另一種。
+
+後果是安靜的：handle 通過驗證（是字串）、報告照樣交出去，但 dataflow 圖為同一份
+finding 長出第二個節點、沒有讀者，於是報 `orphan_output`。那份 critique 其實
+**被授權給 d5 並讀了兩次**。假警報。
+
+修法兩處（`47080f6`）：範例不再出現任何路徑——`write_finding` 的結果就帶著真實 id，
+唯一正確的值就是它；以及 `_resolve_artifact` 拿 handle 說的去對 lane 實際寫過的。
+後綴必須唯一命中，兩個候選不算命中，也絕不發明 id。
+
+**示範擋不住這件事，模型永遠會把 id 寫錯，所以最終要靠 store 當權威。**
+
+### 二、60k 太小嗎？如果模型是 200k 呢？
+
+先看每個派工結束時的**真實 context**：
+
+```
+job      d   lane       req      F    conv   結束 context   累計 in   倍數
+golden21 d1  analyst     17  1,524   3,102        4,626    59,312   12.8x
+golden22 d1  analyst     15  1,524   5,601        7,125    63,752    8.9x
+golden23 d1  analyst     15  1,524   4,262        5,786    59,861   10.3x
+golden23 d2  analyst     16  1,524   3,855        5,379    61,192   11.4x
+golden23 d4  analyst     15  1,524   4,056        5,580    62,390   11.2x
+```
+
+**沒有一個超過模型窗的 11%。** 累計 input 是結束 context 的 9 到 13 倍。
+
+那要跑到把 context 填滿要花多少？用 #22 d1 量到的每輪成長 453 tokens：
+
+```
+   window   輪數      累計 input     倍於 60k 預算
+   65,536    141      4,770,024            80x
+  200,000    438     44,246,785           737x
+1,000,000  2,204  1,104,249,434        18,404x
+```
+
+**視窗永遠不會是那個先撞到的東西，而且模型越大越不會。**
+「因為模型變 200k，所以預算跟著放大」會是同一個類別錯誤換個方向犯。
+
+真正決定預算的是工作量，而工作量的價錢**跟後端會不會快取差三倍**：同樣這幾趟
+派工，用正確計價重放是 60k 的 27~33%。所以現在的 60k 不是「太小」，是
+**在不同後端上代表不同的工作量**——那才是缺陷。
+
+### 三、thinking 沒有被當 input 重送——不用錄新的線
+
+`worker.py` 的註解把這件事標成未知，說「folding them in would prejudge it」。
+Spike #26 錄下來的請求 body 裡就有答案。thinking block **確實**被累積重送，
+請求 *i* 帶 *i−1* 個，但每一個都是：
+
+```json
+{"type": "thinking", "thinking": "", "signature": ""}
+```
+
+**53 個 byte，沒有內容。** 推理被計費成 output，但重送回去的是空殼。
+
+所以：
+- 不把 thinking 算進 input，這個決定是**對的**，現在有證據了。
+- critic 的 input 低估 −14~−19% **不是**這個原因造成的。領先假說被自己的錄音推翻。
+
+也順手排除了另一個：`MAX_TOOL_RESULT_CHARS` 的 2,000 字元截斷只發生在
+`_block_to_dict` 寫 transcript 時，`_message_count` 拿到的是完整訊息。
+critic 讀大 note 不會被少算。
+
+**成因仍然未知。** 已排除：thinking 重送、tool result 截斷。還在檯面上的：
+兩個工具的宣告大小與 98 的平均值差多少（上界約每請求 200，三個請求 600，
+而缺口是 1,263——是貢獻，不是全部）。
