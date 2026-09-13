@@ -20,6 +20,21 @@ backend tokenized -- and K is whatever is charged that is not in the text.
 Fifteen points, three unknowns, and the residual says whether the model is even
 the right shape.
 
+It was not. Three runs solved A to 3.14, 3.91 and 2.74 chars/token and K to 41,
+215 and -3, each with a small in-sample residual and no agreement with the
+others. Two terms were missing, and `_compare_models` below is what found them:
+
+  - The CLI appends a note to every request, and those notes accumulate --
+    request i carries i of them. They never appear in the stream. Charging them
+    per request rather than per conversation is what K could not express, and
+    what made A come out high on short runs and low on long ones.
+  - Ascii is not one class. Prose tokenizes near four characters a token, a
+    JSON tool call near three, and one rate over a mixture measures that run's
+    mixture rather than the tokenizer's.
+
+With both, runs 2 and 3 fitted separately agree within 3% and each predicts the
+other's requests to within 1.7%.
+
 Run: set -a && . ./.env && set +a && python spikes/spike26_solve_rates.py
 """
 

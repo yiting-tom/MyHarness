@@ -1,5 +1,9 @@
 """Spike #19: what does a request cost before any conversation?
 
+SUPERSEDED by spike #26, and it no longer runs: budget.estimate now takes text
+rather than a pair of character counts, and the per-request constant it solved
+for turned out to be two terms, one of them growing with the turn count.
+
 Golden #18 could finally solve for the rates from a recorded run, and the
 solution was a negative number of tokens per Chinese character -- no
 per-character pair fits both lanes. Dividing the residual by requests instead

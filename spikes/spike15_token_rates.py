@@ -1,5 +1,11 @@
 """Spike #15: what does a character actually cost on this backend?
 
+SUPERSEDED by spike #26, and it no longer runs: budget.py stopped exposing
+ASCII_CHARS_PER_TOKEN and split_chars when the rates moved from one ascii class
+to words-and-punctuation. Kept because the finding is still true -- Chinese and
+ascii do not cost the same -- and because its method is the one spike #26 had to
+stop using: probing with padding measures the tokenizer on the padding.
+
 Golden #15's estimate ran 31% low for a lane reading ASCII query output and
 54% low for one reading Chinese findings -- the more Chinese, the worse. The
 coefficients in myharness/artifacts/tokens.py are wrong in both directions for
