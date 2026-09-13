@@ -43,7 +43,7 @@ from myharness.events.types import (
     THROTTLE_GAVE_UP,
     THROTTLE_WAIT,
 )
-from myharness.lanes.budget import TextCount
+from myharness.lanes.budget import TextCount, chargeable
 from myharness.lanes.budget import count as count_text
 from myharness.lanes.contract import (
     MAX_SCHEMA_RETRIES,
@@ -134,6 +134,11 @@ class Accumulated:
     #: own system prompt, the charter, and the tool definitions. Set once at
     #: dispatch, because none of it is visible in the stream.
     fixed_tokens_per_request: int = 0
+    #: Whether this run's backend caches the repeated prefix, from the profile's
+    #: PROMPT_CACHING. Declared rather than probed, like every other capability:
+    #: an unknown proxy that does not cache must not be given the discount, and
+    #: SELF_HOSTED reports fresh_in == in on every golden run since #10.
+    caches_prompts: bool = False
     #: Running estimate of cumulative input tokens. ``usage`` arrives only with
     #: the final message, so it is worth nothing to anything that has to act
     #: while the run is still going (golden run #11).
@@ -164,8 +169,44 @@ class Accumulated:
         return _as_int(self.usage.get("output_tokens"))
 
     @property
+    def chargeable_tokens_in(self) -> int:
+        """What the reported input cost, as opposed to how large it was."""
+        return chargeable(
+            _as_int(self.usage.get("input_tokens")),
+            _as_int(self.usage.get("cache_read_input_tokens")),
+            _as_int(self.usage.get("cache_creation_input_tokens")),
+        )
+
+    @property
     def conversation_tokens(self) -> int:
         return self.conversation.tokens
+
+    @property
+    def estimated_cached_tokens(self) -> int:
+        """Of the estimated input, how much a caching backend re-reads.
+
+        Request *i* carries the fixed block and everything said up to request
+        *i-1*; all of it went out unchanged one request ago, which is exactly
+        what a cache prefix is. So the first request pays in full and each one
+        after it re-reads ``fixed + conversation-as-of-the-previous-request``.
+        Summed over the run that is ``(requests - 1) * fixed`` plus every
+        conversation total except the current one, and ``charged`` is already
+        the sum of all of them.
+
+        The per-turn injections are left on the fresh side even though they too
+        become prefix a request later. Under-discounting is the safe direction
+        for a ceiling, and they are 6% of a run where the fixed block is 36%.
+        """
+        if not self.caches_prompts or self.requests < 2:
+            return 0
+        conversation_prefix = max(0, self.charged.tokens - self.conversation.tokens)
+        return (self.requests - 1) * self.fixed_tokens_per_request + conversation_prefix
+
+    @property
+    def estimated_chargeable_tokens_in(self) -> int:
+        """The estimate, priced the way the reported figure is priced."""
+        cached = min(self.estimated_cached_tokens, self.estimated_tokens_in)
+        return chargeable(self.estimated_tokens_in - cached, cached)
 
     @property
     def estimated_tokens_out(self) -> int:
@@ -192,6 +233,10 @@ class Accumulated:
             "fresh_in": _as_int(self.usage.get("input_tokens")),
             "cache_read": _as_int(self.usage.get("cache_read_input_tokens")),
             "cache_write": _as_int(self.usage.get("cache_creation_input_tokens")),
+            # What the ceiling acted on. Without it a dispatch stopped at
+            # 60,000 whose breakdown reads 63,752 cannot be checked against the
+            # budget it was judged by, because the two are in different units.
+            "chargeable": self.chargeable_tokens_in,
         }
         if any(reported.values()):
             return reported
@@ -199,6 +244,7 @@ class Accumulated:
             **reported,
             "in": self.estimated_tokens_in,
             "out": self.estimated_tokens_out,
+            "chargeable": self.estimated_chargeable_tokens_in,
             # Present only when the numbers are ours, so a consumer that does
             # not know about the key still reads a plausible total, and one
             # that does can decline to treat it as measurement.
@@ -234,6 +280,12 @@ class Accumulated:
             # The ceiling judges input and output together; recording only the
             # input half left half of what it acts on unaccounted for.
             "tokens_out": self.estimated_tokens_out,
+            # tokens_in stays the raw estimate, so the identity above keeps
+            # solving against what a backend reports. This is the part of it
+            # that went out as a repeated prefix and was therefore charged at
+            # CACHE_READ_PRICE -- zero on a backend that does not declare
+            # caching, which is what makes the discount auditable after the run.
+            "cached_tokens": self.estimated_cached_tokens,
         }
 
     @property
@@ -251,10 +303,17 @@ class Accumulated:
         on. Golden #16's d4 finished at 48,705 against a 40,000 budget with its
         estimate showing 56%, having never crossed the 75% warning -- and 37% of
         what it spent was output.
+
+        Both sides are priced rather than counted. Adding fresh, cached and
+        written input together charges a re-sent prefix at the price of new
+        text, which is most of what a multi-turn lane sends: golden #22's d1
+        was stopped at 63,752 for a conversation of 6,795, and its last request
+        carried 13% of the model's window.
         """
-        reported = self.tokens_in + self.tokens_out
+        reported = self.chargeable_tokens_in + self.tokens_out
         return self.carried_tokens + max(
-            reported, self.estimated_tokens_in + self.estimated_tokens_out
+            reported,
+            self.estimated_chargeable_tokens_in + self.estimated_tokens_out,
         )
 
     @property
@@ -544,6 +603,7 @@ async def _run_once(
         conversation=count_text(prompt),
         carried_tokens=carried,
         attempt=attempt,
+        caches_prompts=profile.supports(BackendCapability.PROMPT_CACHING),
     )
     _charge_request(acc)
     # Passed in rather than read here: a re-prompt runs against a raised

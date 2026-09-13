@@ -292,7 +292,8 @@ async def test_end_event_carries_cost_and_usage(bench):
     (end,) = await bench.events_for(DISPATCH_END)
     assert end.get("status") == "ok"
     assert end.get("tokens") == {"in": 4000, "out": 300, "fresh_in": 4000,
-                                 "cache_read": 0, "cache_write": 0}
+                                 "cache_read": 0, "cache_write": 0,
+                                 "chargeable": 4000}
     assert end.get("usd") == 0.31
     assert end.get("transcript") and end.get("artifact")
 
@@ -370,7 +371,7 @@ async def test_token_breakdown_keeps_cache_reads_visible(bench):
     (end,) = await bench.events_for(DISPATCH_END)
     tokens = end.get("tokens")
     assert tokens == {"in": 2000, "out": 80, "fresh_in": 200,
-                      "cache_read": 1800, "cache_write": 0}
+                      "cache_read": 1800, "cache_write": 0, "chargeable": 380}
     assert cache_hit_ratio(await bench.events.read(JOB)) == 0.9
 
 
@@ -632,7 +633,8 @@ def test_a_reported_figure_is_never_replaced_by_the_estimate():
     acc.usage = {"input_tokens": 7, "output_tokens": 0}
     tokens = acc.token_breakdown
     assert "estimated" not in tokens
-    assert tokens == {"in": 7, "out": 0, "fresh_in": 7, "cache_read": 0, "cache_write": 0}
+    assert tokens == {"in": 7, "out": 0, "fresh_in": 7, "cache_read": 0,
+                      "cache_write": 0, "chargeable": 7}
 
 
 async def test_the_event_carries_the_estimate_alongside_the_reported_figure(bench):
@@ -654,7 +656,8 @@ async def test_the_event_carries_the_estimate_alongside_the_reported_figure(benc
                              "thinking_punct", "thinking_cjk", "charged_words",
                              "charged_punct", "charged_cjk",
                              "carried_tokens", "attempts",
-                             "fixed_per_request", "tokens_in", "tokens_out"}
+                             "fixed_per_request", "tokens_in", "tokens_out",
+                             "cached_tokens"}
     assert end.get("tokens")["in"] == 4_000, "reported, not estimated"
     assert estimate["fixed_per_request"] > 0, "and the estimate is recorded anyway"
 
@@ -762,6 +765,88 @@ def test_the_two_sides_of_the_ceiling_cover_the_same_ground():
     starved = Accumulated(estimated_tokens_in=50_000,
                           output=count_text("z " * 1_090))
     assert starved.budget_tokens > 50_000, "and the estimate is not input-only"
+
+
+# --- the ceiling charged re-sent text at the price of new text --------------
+#
+# Golden #22's d1 ran twelve aggregate queries, wrote its finding, and was
+# killed on the turn that returns the handle. Its entire conversation was 6,795
+# tokens and its last request carried 8,319 of them -- 13% of the model's
+# window. It "spent" 63,752 because every request re-sends everything, and the
+# ceiling charged every re-send at the price of new text: 22,860 of that was
+# one 1,524-token block sent fifteen times. On the Anthropic-backed goldens
+# 74-79% of reported input arrives as cache_read, which bills at a tenth.
+
+
+def test_a_cached_prefix_is_not_charged_like_new_text():
+    """Golden run #1's d1, as the backend reported it."""
+    from myharness.lanes.worker import Accumulated
+
+    acc = Accumulated()
+    acc.usage = {"input_tokens": 4_063, "cache_read_input_tokens": 14_976,
+                 "output_tokens": 2_436}
+
+    assert acc.tokens_in == 19_039, "the count stands, for calibration"
+    # 4,063 fresh + 1,498 for the cached 14,976, and the output at full price.
+    assert acc.budget_tokens == 7_997
+
+
+def test_what_the_ceiling_charged_is_recorded_next_to_what_it_counted():
+    """A dispatch stopped at 60,000 whose breakdown reads 63,752 explains nothing."""
+    from myharness.lanes.worker import Accumulated
+
+    acc = Accumulated()
+    acc.usage = {"input_tokens": 4_063, "cache_read_input_tokens": 14_976,
+                 "output_tokens": 2_436}
+
+    tokens = acc.token_breakdown
+    assert tokens["in"] == 19_039
+    assert tokens["chargeable"] == 5_561, "input only: the ceiling adds output itself"
+
+
+def test_a_backend_that_does_not_cache_gets_no_discount():
+    """SELF_HOSTED declares nothing, and an unknown proxy must prove what it does."""
+    from myharness.lanes.worker import Accumulated
+
+    acc = Accumulated(fixed_tokens_per_request=1_524)
+    for _ in range(14):
+        _exchange(acc, reply="", tool_result="")
+
+    assert acc.requests == 15
+    assert acc.estimated_chargeable_tokens_in == acc.estimated_tokens_in
+
+
+def test_a_cacheable_prefix_is_charged_once_and_then_at_a_tenth():
+    """The 1,524-token block golden #22's d1 was charged fifteen times over."""
+    from myharness.lanes.worker import Accumulated
+
+    plain = Accumulated(fixed_tokens_per_request=1_524)
+    cached = Accumulated(fixed_tokens_per_request=1_524, caches_prompts=True)
+    for acc in (plain, cached):
+        for _ in range(14):
+            _exchange(acc, reply="", tool_result="")
+
+    assert plain.estimated_tokens_in == cached.estimated_tokens_in, \
+        "the same wire traffic either way -- only the price differs"
+    saved = plain.estimated_chargeable_tokens_in - cached.estimated_chargeable_tokens_in
+    assert saved == pytest.approx(14 * 1_524 * 0.9, abs=2)
+
+
+def test_the_conversation_is_cached_from_the_turn_after_it_was_said():
+    """The dominant term: 36,812 of golden #22's d1 was conversation re-sent."""
+    from myharness.lanes.worker import Accumulated
+
+    cached = Accumulated(caches_prompts=True)
+    for _ in range(14):
+        _exchange(cached, reply="q" * 2_000, tool_result="r" * 2_000)
+
+    # Everything said before the final request, charged at a tenth. What the
+    # last request added is new text and is charged in full.
+    prefix = cached.charged.tokens - cached.conversation.tokens
+    assert prefix > 0
+    assert cached.estimated_chargeable_tokens_in < cached.estimated_tokens_in
+    assert cached.estimated_tokens_in - cached.estimated_chargeable_tokens_in == \
+        pytest.approx(prefix * 0.9, abs=2)
 
 
 async def test_the_ctx_event_can_explain_a_run_the_ceiling_stopped(bench):

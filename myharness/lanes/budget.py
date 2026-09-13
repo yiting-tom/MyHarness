@@ -37,6 +37,14 @@ WORDS: Final = re.compile(r"[A-Za-z0-9]+")
 TOKENS_PER_WORD: Final = 1.12
 TOKENS_PER_PUNCT: Final = 0.64
 
+#: What a token costs relative to a fresh input token. A cache read bills at a
+#: tenth and a cache write at five quarters, so a ceiling that adds the three
+#: counts together charges re-sent text at the price of new text. Golden #22's
+#: d1 was stopped at 63,752 "tokens" for a conversation of 6,795, and on the
+#: Anthropic-backed goldens three quarters of reported input is cache reads.
+CACHE_READ_PRICE: Final = 0.10
+CACHE_WRITE_PRICE: Final = 1.25
+
 #: Non-ascii, still one class. Chinese is close to uniform here and the two runs
 #: agreed on it all along (0.660 and 0.682); it was never the unstable half.
 CJK_TOKENS_PER_CHAR: Final = 0.67
@@ -92,5 +100,20 @@ def estimate(text: str) -> int:
     return count(text).tokens
 
 
-__all__ = ["CJK_TOKENS_PER_CHAR", "TOKENS_PER_PUNCT", "TOKENS_PER_WORD",
-           "TextCount", "count", "estimate"]
+def chargeable(fresh: int, cache_read: int = 0, cache_write: int = 0) -> int:
+    """Input tokens expressed as what they cost, in fresh-token units.
+
+    The ceiling asks how expensive a run has become; the three counts answer
+    how large it was, which is a different question whenever a prefix repeats.
+    Reporting keeps the counts apart (``token_breakdown``) so cache
+    effectiveness stays visible -- this collapses them, and only for the
+    decision to stop.
+    """
+    return math.ceil(fresh
+                     + cache_read * CACHE_READ_PRICE
+                     + cache_write * CACHE_WRITE_PRICE)
+
+
+__all__ = ["CACHE_READ_PRICE", "CACHE_WRITE_PRICE", "CJK_TOKENS_PER_CHAR",
+           "TOKENS_PER_PUNCT", "TOKENS_PER_WORD", "TextCount", "chargeable",
+           "count", "estimate"]
