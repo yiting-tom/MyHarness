@@ -3133,3 +3133,94 @@ d3 synth1    input − 7.5%   output −27.9%
 ```
 
 `cache_read 0`：自架後端仍然不回報快取，所以計價折扣仍然拿不到。
+
+
+---
+
+## Spike #27 —— critic 的 input 缺口是兩件事，而且兩件都不是我先前猜的
+
+四趟 golden 只對一條 lane 說同一件事：
+
+```
+golden21 d3 critic −14.0%     golden21 d5 synth +3.0%
+golden22 d2 critic −19.3%     golden22 d3 synth −6.0%
+golden23 d3 critic −14.3%     golden23 d5 synth −2.0%
+golden24 d2 critic −21.1%     golden24 d3 synth −7.5%
+```
+
+三個假說已經死了（thinking 重送、工具宣告大小、CJK 費率，見上一節）。剩下的
+是文字本身，而 spike #26 量過我們的計數器對上線的誤差只有 ±2%——**但那是用它
+自己的探針字串量的，而係數就是從那些字串配出來的。** 真實的 critic 讀的是別的
+東西：golden #24 的 analyst finding 是 1,133 tokens 的密集中文分析。
+
+所以把**真實的 finding** 餵進 #26 的錄音 proxy，逐請求比對。
+
+### 量到什麼
+
+```
+req  fixed  messages    wire  reported  residual     err   secs
+  0  1,227       425   1,652     1,690        38   +2.2%    3.0
+  2  1,227       855   2,082     1,901      -181   -9.5%    2.9
+  4  1,227     3,777   5,004     5,377       373   +6.9%    1.7
+  6  1,227     2,046   3,273     3,751       478  +12.7%   97.7
+  7  1,227     3,399   4,626     5,308       682  +12.8%    3.9
+
+8 requests   wire 23,861   reported 25,477   residual +6.3%
+estimator 對第二次嘗試說 8,718，線上是 9,747，後端收 10,919
+```
+
+**缺口分成兩半，各佔一半：**
+
+```
+estimator → wire     8,718 vs  9,747   −11%
+wire → reported      9,747 vs 10,919   +12%
+```
+
+### 一、estimator 看不見信封（結構性，確定）
+
+`_message_count` 算的是 block 的**內容**：TextBlock 的 text、ToolUseBlock 的
+input、ToolResultBlock 的 content。線上還包著：
+
+```json
+{"role":"assistant","content":[
+  {"type":"tool_use","id":"call_b8a41391534d0d04",
+   "name":"mcp__lane__write_finding","input":{...}}]}
+```
+
+`"type"`、32 個十六進位字元的 id、`mcp__lane__` 開頭的工具名，外加 JSON 標點
+——全部是 id 和標點，也就是貴的那一類。扣掉已經另外建模的 system 注入
+（696 tokens，對上模型的 34/turn × 21 = 714，**誤差 2.6%，那個常數很準**）
+與空的 thinking stub（221 tokens），**真正的 block 信封是 1,977 tokens／55 個
+block = 35.9 一個**，而估計器收 0。
+
+block 跟對話一樣會被重送，所以請求 *i* 要付它送出時存在的每一個 block。
+
+### 二、費率對這種文字偏低（相關性強，尚未定案）
+
+把 residual 對 message 大小回歸：
+
+```
+residual = +0.191 × messages − 133      corr = +0.84
+```
+
+**message 那一半被收的是我們算出來的 119%。** 八個點、corr 0.84，方向一致但
+點數太少，不足以據此改係數。
+
+### 為什麼沒有直接修
+
+我加了 `TOKENS_PER_BLOCK_ENVELOPE = 31` 試跑，重放九個有真實 usage 的派工：
+
+```
+        平均      標準差
+舊     −9.2%     7.9pp
+新     −4.7%     9.2pp
+```
+
+**偏差砍半，離散度變差。** 因為其他係數（words 1.12、punct 0.64、cjk 0.67、
+injection 34、framework 336、tool 98）當初全部是在**沒有這一項**的情況下配出來
+的，它們已經各自吸收了一部分。加一項不重配，只是把誤差搬家——那正是 spike #26
+run 1 犯過的錯，這個 repo 的規矩是留一驗證過才算數。
+
+所以常數收回去了，量測留著。**下一步是照 #26 的方法把整個模型重配**：
+把「payload + 信封」當成新的候選形狀，用三份錄音（run2、run3、#27）留一評分。
+係數不能一個一個加，要一起解。
