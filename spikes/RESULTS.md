@@ -3055,3 +3055,81 @@ golden23 d4   req 15, 剩    612 = 0.1 輪    req 13, 剩 12,488 = 2.2 輪
 
 百分比仍然照算、照報（訊息裡與 dispatch 事件上）。它是個適合告訴別人的數字，
 不是個適合拿來做決定的數字。
+
+
+---
+
+## Golden run #24 —— 三個修正對上真實模型
+
+自架後端。3 次派工、`salvaged=False`、報告數字全對、$0.49。**唯一一個失敗是
+d1 的 `budget_exceeded`，而它這次把東西寫下來了。**
+
+```
+d1  analyst1  budget_exceeded  req 15  in 57,197  out 3,908  gated 0
+      -> golden24/note/lanes/analyst1/findings/txn-2024-analysis
+d2  critic1   ok               req  4  in 19,423  out 9,734  attempts 2
+      -> golden24/note/lanes/critic1/findings/critique
+d3  synth1    ok               req  4  in 16,981  out 2,637  attempts 2
+      -> golden24/note/lanes/synth1/findings/report
+```
+
+### 一、預算訊號：在 57% 就送到，lane 下一輪就照做
+
+d1 的 transcript，逐格：
+
+```
+msg  5..26   duckdb_query ×10
+msg 27       [harness] token 預算已用 57%，只夠再 5 次請求，而你還沒有寫任何 finding
+msg 29       write_finding  ← 下一輪就寫
+msg 30       ERROR bad_name（名稱裡有中文，被拒）
+msg 31       update_state   ← 記憶也落了檔
+msg 32       [harness] 已用 77%，只夠再 2 次請求，而你還沒有寫任何 finding
+msg 34       write_finding("txn-2024-analysis")
+msg 35       wrote ... + [harness] 已用 89%，已經付不起下一次請求
+```
+
+**閘一次都沒開（`gated: 0`）——警告就夠了。** 舊規則下這個警告要到 75% 才出現，
+而閘要到 90%、也就是剩 0.1~0.8 輪的時候。
+
+對照 #23 的同一條 lane：d1 與 d4 各跑 13 次查詢、一次 `write_finding` 都沒叫、
+`artifact: null`。這一趟 d1 一樣撞上 60,000，但 finding 和 state 都落了地。
+
+順帶一提 msg 30：第一次寫用了中文名稱被 `bad_name` 擋掉，所以 77% 那則說
+「你還沒有寫任何 finding」是**正確的**，而 lane 自己換成 ASCII 名稱重寫了。
+每一格的行為都對。
+
+### 二、artifact id：三個全部完整，包括兩個被重問的
+
+```
+golden24/note/lanes/analyst1/findings/txn-2024-analysis
+golden24/note/lanes/critic1/findings/critique          (attempts 2)
+golden24/note/lanes/synth1/findings/report             (attempts 2)
+```
+
+#23 的 d3／d5——同樣是被重問的那兩個——回的是 `lanes/critic-1/findings/critique`。
+拿掉範例裡的路徑之後沒有再發生。
+
+### 三、`orphan_output` 這次是真的
+
+```
+[WARNING] synth1:synth_state 被產出但沒有任何後續派工讀到它，也不是最終報告
+```
+
+不是幽靈節點。synth 在第一次嘗試裡呼叫了
+`write_finding(name="synth_state", ...)`——**它把該進 `update_state` 的東西
+寫成了 finding**。監視器報對了。#23 那次報的是同一份 critique 的第二個節點，
+是假的。
+
+### 四、沒有變的
+
+`schema_violation` 連續第二趟是 0，而 #23＋#24 一共四次重問全部成功
+（歷史是 15 次成功 3 次）。
+
+估計誤差的形狀第四次重現，一模一樣：
+
+```
+d2 critic1   input −21.1%   output −74.3%
+d3 synth1    input − 7.5%   output −27.9%
+```
+
+`cache_read 0`：自架後端仍然不回報快取，所以計價折扣仍然拿不到。
