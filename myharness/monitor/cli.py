@@ -28,6 +28,7 @@ from myharness.monitor.inspect import render_inspect
 from myharness.monitor.live import LiveView
 from myharness.monitor.render import colour_enabled, human_duration, pad, style
 from myharness.monitor.report import render_report
+from myharness.monitor.serve import serve
 from myharness.monitor.trace import Trace, parse_trace
 from myharness.monitor.viewer import render_html
 from myharness.orchestrator.delivery import build_delivery, drill
@@ -214,6 +215,8 @@ def cmd_report(args: argparse.Namespace) -> int:
 def cmd_monitor(args: argparse.Namespace) -> int:
     """Redraw until the job finishes, then leave the final frame on screen."""
     root = resolve_root(args.root, args.job)
+    if args.web:
+        return _serve_web(root, args)
     view = LiveView(args.job)
     colour = colour_enabled()
     width = term_width()
@@ -239,6 +242,27 @@ def cmd_monitor(args: argparse.Namespace) -> int:
     except KeyboardInterrupt:
         print()
         return 130
+
+
+def _serve_web(root: Path, args: argparse.Namespace) -> int:
+    """Hold the terminal open while the browser watches.
+
+    The server is the only thing in this package that listens on a port, so the
+    process that started it is the one that has to be killed to stop it -- no
+    daemon, no pidfile, nothing left listening after Ctrl-C.
+    """
+    httpd, url = serve(root, args.job, host=args.host, port=args.port)
+    print(f"monitor: {url}")
+    print("Ctrl-C 停止")
+    try:
+        while True:
+            time.sleep(POLL_INTERVAL_S)
+    except KeyboardInterrupt:
+        print()
+        return 130
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -269,6 +293,12 @@ def build_parser() -> argparse.ArgumentParser:
     monitor.add_argument("job")
     monitor.add_argument("--interval", type=float, default=POLL_INTERVAL_S)
     monitor.add_argument("--once", action="store_true", help="只畫一次就結束")
+    monitor.add_argument("--web", action="store_true",
+                         help="改在瀏覽器裡看（起一個只綁 loopback 的唯讀 server）")
+    monitor.add_argument("--host", default="127.0.0.1",
+                         help="--web 的繫結位址；非 loopback 會被拒絕")
+    monitor.add_argument("--port", type=int, default=0,
+                         help="--web 的 port；0 表示讓系統挑一個")
     monitor.set_defaults(func=cmd_monitor)
     return parser
 

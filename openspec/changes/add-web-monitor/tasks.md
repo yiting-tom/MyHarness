@@ -1,0 +1,55 @@
+## 1. Server
+
+- [x] 1.1 `myharness/monitor/serve.py`：stdlib `ThreadingHTTPServer`，只有 GET
+- [x] 1.2 `require_loopback` 重用 `a2a/server.py` 的那一個，不另寫一份
+- [x] 1.3 job id 與 dispatch id 一律驗過才用；任何指向儲存區外的一律拒絕
+- [x] 1.4 `/state` 每次重讀事件流 —— 沿用 `live.py` 的判斷：
+      幾 KB 的 JSONL，重讀的成本人感覺不到
+- [x] 1.5 `/trace/<id>` 按需給逐輪紀錄。執行中的派工回「還不存在」而不是空的
+
+## 2. 頁面
+
+- [x] 2.1 `myharness/monitor/live.html`：現在在做什麼是主角，大字
+- [x] 2.2 資料流邊跑邊長；執行中的派工有計時
+- [x] 2.3 事件流即時捲動 —— 一個完全靜止的畫面分不出「在等」跟「死了」
+- [x] 2.4 點開已結束的派工看它的工具呼叫；執行中的明說紀錄還不存在
+- [x] 2.5 `prefers-reduced-motion`：動畫關掉，數字要照樣走
+
+## 3. 接線
+
+- [x] 3.1 `myharness monitor <job> --web [--port N]`，印出網址
+- [x] 3.2 終端機模式一行都不改
+
+## 4. 測試
+
+- [x] 4.1 非 loopback 的繫結被拒（規格：拒絕非 loopback 的繫結）
+- [x] 4.2 非 GET 被拒，且 job 不變（規格：沒有寫入路徑）
+- [x] 4.3 路徑穿越被拒（規格：路徑上的識別不被信任）
+- [x] 4.4 `/state` 與終端機 `LiveView` 說的目前活動一致（規格：兩種表面說法一致）
+- [x] 4.5 事件流長出新派工後，下一次 `/state` 就有它（規格：不重新載入就反映新事件）
+- [x] 4.6 執行中的派工 `/trace/<id>` 回「還不存在」（規格：執行中的派工沒有逐輪紀錄）
+- [x] 4.7 執行中的派工已讀取的東西看得到（規格：執行中仍看得到已讀取的東西）
+- [x] 4.8 頁面沒有任何外部資源
+
+## 5. 文件
+
+- [x] 5.1 `add-flow-viewer/design.md` 那句「不做即時模式，因為需要 server」
+      是錯的，要在 README 裡寫清楚為什麼收回
+
+## 6. 實作時才發現的
+
+- [x] 6.1 `require_loopback` 本來在 `a2a/server.py`，而那個模組的 docstring 說
+      「nothing else in the package imports it」，而且 import 它會拖進選配的
+      A2A SDK。抽到 `myharness/loopback.py`，兩邊共用一份
+- [x] 6.2 `::1` 是 loopback 規則會放行的位址，而 `ThreadingHTTPServer` 預設
+      `AF_INET` 綁不起來 —— **規則與 server 對「本機」的定義不一致**。
+      改成依位址決定 address family，URL 也補上中括號
+- [x] 6.3 **看畫面時抓到的**：對一份三天前的錄音，執行中的派工顯示
+      `46:06:52` 還在跳。牆上的時鐘在事件流停掉之後就不是這個 job 的時鐘了。
+      新增**停滯偵測**：超過 180 秒沒有新事件就轉成「事件流沒有動靜 ——
+      最後一個事件在 X 前」，計時器停在最後一個事件並加 `+`。
+      這不是版面問題，這正是 monitor 要回答的那個問題（「在等」還是「死了」）
+- [x] 6.4 `context 峰值 0` 與 `$0.0000` 是兩個**看起來像量測值的非量測值**。
+      後端沒回報就說「尚未回報」／「後端未回報」
+- [x] 6.5 事件流裡同一個 artifact id 連刷十一次。短標籤 + 連續同樣事件收成
+      一行加次數（×11）—— 十一次窺看同一份 finding 是一件事，不是十一件

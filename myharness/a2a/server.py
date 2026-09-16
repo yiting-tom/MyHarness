@@ -21,13 +21,14 @@ Two things this module does NOT do, on purpose:
 from __future__ import annotations
 
 import argparse
-import ipaddress
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from myharness.a2a.card import build_agent_card
 from myharness.a2a.executor import AnalysisExecutor
+from myharness.loopback import NotLoopback
+from myharness.loopback import require_loopback as _require_loopback
 from myharness.mcp.service import AnalysisService
 
 if TYPE_CHECKING:  # the a2a extra is optional; only the annotation needs it
@@ -38,32 +39,16 @@ DEFAULT_PORT = 8973
 RPC_PATH = "/a2a/v1"
 
 
-class NotLoopback(ValueError):
-    """Raised for a bind address this endpoint will not serve on."""
-
-    def __init__(self, host: str) -> None:
-        super().__init__(
-            f"refusing to bind {host!r}: the A2A endpoint has no authentication "
-            "yet (expose-over-a2a, Non-Goals), so it serves loopback only"
-        )
-        self.host = host
+#: Re-exported: the rule is shared with the web monitor and lives in
+#: `myharness.loopback`, because this module drags in the optional A2A SDK and
+#: says so in its own docstring.
+_WHY: Final = ("the A2A endpoint has no authentication yet "
+               "(expose-over-a2a, Non-Goals), so it serves loopback only")
 
 
 def require_loopback(host: str) -> str:
-    """A hostname is not evidence. An address that resolves to loopback is.
-
-    "localhost" is accepted because it is the name of the thing; anything else
-    has to *be* a loopback address, so a public interface cannot arrive through
-    a name that happens to point at one today.
-    """
-    if host == "localhost":
-        return host
-    try:
-        if ipaddress.ip_address(host).is_loopback:
-            return host
-    except ValueError:
-        pass
-    raise NotLoopback(host)
+    """A hostname is not evidence. An address that resolves to loopback is."""
+    return _require_loopback(host, _WHY)
 
 
 def build_app(service: AnalysisService, *, url: str) -> Starlette:
@@ -148,3 +133,15 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+__all__ = [
+    "DEFAULT_HOST",
+    "DEFAULT_PORT",
+    "RPC_PATH",
+    "NotLoopback",
+    "build_app",
+    "main",
+    "require_loopback",
+    "serve",
+]

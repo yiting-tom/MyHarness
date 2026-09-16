@@ -215,6 +215,11 @@ analysis_drill(job_id, section_id)   → 章節全文
   來源報告。資料流是主體，來源鏈預設高亮，caveats 與資料流異常一律翻成人話
   （翻譯表有測試守著，漏一個代碼就紅）。跟 `inspect --html` 是兩個受眾、兩個視圖，
   刻意不合併。`build_delivery` 直接重用 —— 它已經是對外契約，不為畫面再造一份。
+- `myharness/monitor/serve.py`：`myharness monitor <job> --web` —— 即時模式的
+  瀏覽器表面。stdlib `http.server`，零新增相依；只綁 loopback、只有 GET。
+  **這是整個 package 裡唯一會聽 port 的東西**，所以 loopback 規則抽到
+  `myharness/loopback.py` 與 A2A 共用。執行中的派工沒有逐輪紀錄可看
+  （transcript 是結束時才落檔的），頁面明說「還不存在」而不是轉圈圈。
 
 資料流投影的價值有實例：golden job 第五次在所有紀律指標上都是綠的，
 但最終報告來自一次**沒有任何授權**的派工，並覆蓋掉了真正拿到 finding 的版本。

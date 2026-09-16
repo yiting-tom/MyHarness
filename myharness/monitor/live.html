@@ -1,0 +1,504 @@
+<title>Job 即時監看</title>
+<style>
+/* ---------------------------------------------------------------------------
+   第三個表面，第三個受眾：盯著它跑的人。
+
+   所以這一頁的設計重點是**時間**，不是版面 —— 計時器要走、事件要捲、活著的東西
+   要有脈搏。一個完全靜止的畫面，分不出「在等」跟「死了」，而那正是 monitor
+   唯一要回答的問題。
+
+   顏色編碼狀態，不編碼結構：薄荷=正在跑、琥珀=在等什麼、紅=卡住或失敗、
+   藍=已經定案。底色偏暖，跟 inspect --html 的冷灰刻意不同 —— 這是兩個
+   不同的東西，不該長得像同一個工具的兩個分頁。
+--------------------------------------------------------------------------- */
+:root{
+  --ground:#12100E; --panel:#1B1815; --sunk:#171411; --rule:#2F2A25;
+  --fg:#EAE4DB; --dim:#9C9189; --faint:#6B6159;
+  --live:#5FD3A0; --wait:#E3A33D; --stall:#E0655B; --done:#86A9C7;
+  --sans:"Noto Sans TC","Helvetica Neue",Arial,"PingFang TC",
+         "Microsoft JhengHei",sans-serif;
+  --mono:"JetBrains Mono","SFMono-Regular",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:light){
+  :root:not([data-theme="dark"]){
+    --ground:#F7F5F2; --panel:#FFFFFF; --sunk:#EFEBE6; --rule:#DFD8D0;
+    --fg:#1C1713; --fg2:#4A423B; --dim:#6B6159; --faint:#948A81;
+    --live:#0E7A52; --wait:#8A5B10; --stall:#AE3A31; --done:#2F5F84;
+  }
+}
+:root[data-theme="light"]{
+  --ground:#F7F5F2; --panel:#FFFFFF; --sunk:#EFEBE6; --rule:#DFD8D0;
+  --fg:#1C1713; --dim:#6B6159; --faint:#948A81;
+  --live:#0E7A52; --wait:#8A5B10; --stall:#AE3A31; --done:#2F5F84;
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--ground); color:var(--fg);
+  font-family:var(--sans); font-size:14px; line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+}
+:focus-visible{outline:2px solid var(--now,var(--live)); outline-offset:2px}
+button{font:inherit; color:inherit; background:none; border:none; cursor:pointer;
+  text-align:left}
+.mono,.num{font-family:var(--mono); font-variant-numeric:tabular-nums}
+pre{margin:0; white-space:pre-wrap; word-break:break-word}
+
+/* --- status bar --------------------------------------------------------- */
+.bar{
+  position:sticky; top:0; z-index:10; background:var(--panel);
+  border-bottom:1px solid var(--rule); padding:16px 24px 14px;
+}
+.bar .row1{display:flex; align-items:center; gap:16px; flex-wrap:wrap}
+.pulse{
+  width:13px; height:13px; border-radius:50%; background:var(--now);
+  flex:none; position:relative;
+}
+.pulse::after{
+  content:""; position:absolute; inset:-5px; border-radius:50%;
+  border:2px solid var(--now); opacity:0;
+}
+@media (prefers-reduced-motion:no-preference){
+  .live .pulse::after{animation:ping 1.9s cubic-bezier(0,0,.2,1) infinite}
+}
+@keyframes ping{0%{transform:scale(.55); opacity:.9} 80%,100%{transform:scale(1.35); opacity:0}}
+.state{
+  font-size:clamp(21px,2.6vw,29px); font-weight:900; letter-spacing:.01em;
+  color:var(--now); line-height:1.25;
+}
+.detail{color:var(--dim); font-size:14.5px}
+.bar .grow{flex:1}
+.clock{font-family:var(--mono); font-size:25px; font-variant-numeric:tabular-nums}
+.job{font-family:var(--mono); font-size:12px; color:var(--faint);
+  letter-spacing:.09em; text-transform:uppercase}
+
+.stats{display:flex; gap:26px; flex-wrap:wrap; margin-top:11px}
+.stat{display:flex; gap:8px; align-items:baseline}
+.stat .k{font-size:11px; letter-spacing:.09em; text-transform:uppercase; color:var(--faint)}
+.stat .v{font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:14px}
+
+.link{
+  font-size:12px; color:var(--faint); font-family:var(--mono);
+  display:flex; gap:7px; align-items:center;
+}
+.link .d{width:6px; height:6px; border-radius:50%; background:var(--live)}
+.link.bad{color:var(--stall)} .link.bad .d{background:var(--stall)}
+
+/* --- two columns -------------------------------------------------------- */
+.grid{display:grid; grid-template-columns:minmax(0,1fr) 352px; align-items:start}
+.left{padding:22px 24px 80px; min-width:0}
+.right{
+  position:sticky; top:104px; max-height:calc(100dvh - 104px); overflow-y:auto;
+  border-left:1px solid var(--rule); padding:22px 20px 40px;
+}
+h2{
+  font-size:11px; letter-spacing:.14em; text-transform:uppercase;
+  color:var(--faint); font-weight:700; margin:0 0 13px;
+}
+
+/* --- flow --------------------------------------------------------------- */
+.flow{display:flex; flex-direction:column; gap:0}
+.wire{width:2px; height:20px; background:var(--rule); margin-left:27px}
+.card{
+  border:1px solid var(--rule); border-radius:5px; background:var(--panel);
+  padding:13px 16px; display:flex; flex-direction:column; gap:10px;
+}
+.card.origin{background:var(--sunk); border-style:dashed}
+.card.running{border-color:var(--now)}
+.card.final{border-color:var(--done)}
+.head{display:flex; gap:11px; align-items:baseline; flex-wrap:wrap}
+.mk{
+  font-family:var(--mono); width:16px; flex:none; text-align:center;
+  font-size:13px;
+}
+.did{font-family:var(--mono); font-weight:700; font-size:14px}
+.lane{font-size:15px; font-weight:700}
+.elapsed{font-family:var(--mono); font-size:13px; color:var(--now)}
+.elapsed.stalled{color:var(--stall)}
+.pill{
+  font-family:var(--mono); font-size:10.5px; padding:1px 7px 2px;
+  border:1px solid currentColor; border-radius:2px; white-space:nowrap;
+}
+.task{
+  font-size:12.5px; color:var(--faint); overflow:hidden;
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
+}
+.io{display:flex; gap:9px; flex-wrap:wrap; align-items:baseline}
+.io .k{font-size:11.5px; color:var(--faint); flex:none; width:44px}
+.chip{
+  font-family:var(--mono); font-size:12px; padding:2px 8px 3px;
+  border:1px solid var(--rule); border-radius:3px; background:var(--sunk);
+}
+.chip.open{border-color:var(--live); color:var(--live)}
+.chip.shut{border-style:dashed; color:var(--faint)}
+.chip.out{border-color:var(--done); color:var(--done)}
+.nothing{font-size:12.5px; color:var(--faint)}
+
+.expand{
+  font-size:12px; color:var(--dim); border:1px solid var(--rule);
+  border-radius:3px; padding:3px 11px 4px; align-self:flex-start;
+}
+.expand:hover{border-color:var(--done); color:var(--done)}
+
+/* --- trace (fetched on demand) ------------------------------------------ */
+.trace{
+  border-top:1px solid var(--rule); padding-top:11px;
+  display:flex; flex-direction:column; gap:8px;
+}
+.notyet{
+  font-size:13px; color:var(--wait); border-left:2px solid var(--wait);
+  padding-left:11px; line-height:1.6;
+}
+.step{display:grid; grid-template-columns:34px minmax(0,1fr); gap:11px; font-size:12.5px}
+.step .n{font-family:var(--mono); color:var(--faint); text-align:right; font-size:11px}
+.step.think .b{color:var(--faint)}
+.step.think .b em{font-style:normal; color:var(--faint); border-bottom:1px dashed}
+.step.call .b{font-family:var(--mono); color:var(--fg)}
+.step.call .b .fn{color:var(--done); font-weight:500}
+.step.call .args{
+  color:var(--faint); font-size:11.5px; margin-top:2px; max-height:6em;
+  overflow:auto;
+}
+.step.result .b{color:var(--dim); font-size:11.5px; max-height:7em; overflow:auto}
+.step.result.err .b{color:var(--stall)}
+.step.mark .b{color:var(--wait)}
+.step.rule .b{color:var(--faint); font-size:11px; letter-spacing:.08em}
+
+/* --- anomalies ---------------------------------------------------------- */
+.anoms{display:flex; flex-direction:column; gap:8px; margin-bottom:18px}
+.anom{
+  font-size:13px; border:1px solid var(--rule); border-left:3px solid var(--wait);
+  border-radius:4px; padding:9px 13px; background:var(--panel);
+}
+.anom.critical{border-left-color:var(--stall)}
+.anom .k{font-family:var(--mono); font-size:10.5px; color:var(--faint);
+  letter-spacing:.07em; display:block}
+
+/* --- event feed --------------------------------------------------------- */
+.feed{display:flex; flex-direction:column-reverse; gap:0}
+.ev{
+  display:grid; grid-template-columns:62px minmax(0,1fr); gap:11px;
+  padding:4px 0; border-bottom:1px solid var(--rule);
+  font-size:12px; line-height:1.5;
+}
+.ev .t{font-family:var(--mono); font-size:11px; color:var(--faint)}
+.ev .m{overflow-wrap:anywhere}
+.ev .rep{font-family:var(--mono); font-size:10.5px; color:var(--faint);
+  margin-left:6px; border:1px solid var(--rule); border-radius:2px; padding:0 4px}
+.ev.hi .m{color:var(--now)}
+.ev.dispatch .m{color:var(--done)}
+.ev.throttle .m{color:var(--wait)}
+.ev.bad .m{color:var(--stall)}
+@media (prefers-reduced-motion:no-preference){
+  .ev.fresh{animation:slide 420ms ease-out}
+}
+@keyframes slide{from{opacity:0; transform:translateY(-4px)} to{opacity:1}}
+
+@media (max-width:980px){
+  .grid{grid-template-columns:1fr}
+  .right{position:static; max-height:none; border-left:none;
+    border-top:1px solid var(--rule)}
+}
+</style>
+
+<header class="bar" id="bar">
+  <div class="row1">
+    <span class="pulse" aria-hidden="true"></span>
+    <div>
+      <div class="state" id="state">連線中</div>
+      <div class="detail" id="detail"></div>
+    </div>
+    <span class="grow"></span>
+    <div style="text-align:right">
+      <div class="job" id="job"></div>
+      <div class="clock" id="clock">--:--</div>
+    </div>
+  </div>
+  <div class="stats" id="stats"></div>
+</header>
+
+<div class="grid">
+  <main class="left">
+    <div class="anoms" id="anoms"></div>
+    <h2>資料流</h2>
+    <div class="flow" id="flow"></div>
+  </main>
+  <aside class="right">
+    <h2>事件</h2>
+    <div class="link" id="link"><span class="d"></span><span id="linktext">輪詢中</span></div>
+    <div class="feed" id="feed" aria-live="polite" aria-relevant="additions"></div>
+  </aside>
+</div>
+
+<script>
+let DATA = /*__DATA__*/null;
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g,
+  (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const n0 = (n) => (n === null || n === undefined) ? "—" : n.toLocaleString("en-US");
+const GLYPH = {blob:"▣", finding:"▪", report:"★", state:"◇", plan:"◆"};
+
+/* 「在等什麼」決定整頁的顏色。monitor 唯一要回答的問題就是這個。 */
+const TONE = [
+  [/等待限流|限流/, "wait"], [/等待使用者/, "wait"],
+  [/無進展|卡/, "stall"], [/收尾中|交接重啟/, "wait"],
+  [/已結束/, "done"],
+];
+function toneOf(state) {
+  for (const [re, t] of TONE) if (re.test(state)) return t;
+  return "live";
+}
+
+const clock = (s) => {
+  s = Math.max(0, Math.floor(s));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60;
+  const pad = (v) => String(v).padStart(2, "0");
+  return h ? `${h}:${pad(m)}:${pad(x)}` : `${pad(m)}:${pad(x)}`;
+};
+
+let firstTs = null, lastTs = null, openTrace = null, traceCache = {};
+
+/* 事件流多久沒動就算「沒有動靜」。一個 job 在兩次派工之間安靜幾十秒是正常的；
+   安靜好幾分鐘不是。這是「在等」跟「死了」之間那條線，也是 monitor 存在的理由。 */
+const STALE_S = 180;
+const lagSeconds = () => lastTs ? (Date.now() - lastTs) / 1000 : 0;
+const isStale = () => !DATA.finished && lagSeconds() > STALE_S;
+
+/* --- render --------------------------------------------------------------- */
+function render() {
+  const stale = isStale();
+  const tone = DATA.finished ? "done" : stale ? "stall" : toneOf(DATA.activity.state);
+  document.documentElement.style.setProperty("--now", `var(--${tone})`);
+  $("bar").className = "bar" + (tone === "live" && !DATA.finished ? " live" : "");
+  $("state").textContent = DATA.finished
+    ? "已結束" + (DATA.finish_reason ? ` · ${DATA.finish_reason}` : "")
+    : stale ? "事件流沒有動靜"
+    : DATA.activity.state;
+  $("detail").textContent = DATA.finished ? (DATA.activity.detail || "")
+    : stale
+      ? `最後一個事件在 ${clock(lagSeconds())} 前。`
+        + `事件流說它當時在「${DATA.activity.state}」，但之後什麼都沒再寫下來。`
+      : (DATA.activity.detail || "");
+  $("job").textContent = DATA.job_id;
+
+  $("stats").innerHTML = [
+    ["派工", `${DATA.dispatches.length}${DATA.running.length
+      ? `（執行中 ${DATA.running.length}）` : ""}`],
+    /* 後端不回報成本時，$0.0000 是一個看起來像量測值的非量測值 ——
+       跟 context 峰值的 0 是同一個問題。 */
+    ["成本", (!DATA.usd && DATA.dispatches.some((d) => !d.running))
+      ? "後端未回報" : "$" + (DATA.usd || 0).toFixed(4)],
+    ["context 峰值", DATA.context_peak ? n0(DATA.context_peak) : "尚未回報"],
+    ...(DATA.throttle_seconds ? [["限流等待", clock(DATA.throttle_seconds)]] : []),
+    ...(DATA.report ? [["報告", "已產出"]] : []),
+  ].map(([k, v]) => `<div class="stat"><span class="k">${esc(k)}</span>
+     <span class="v">${esc(v)}</span></div>`).join("");
+
+  $("anoms").innerHTML = DATA.anomalies.map((a) => `
+    <div class="anom ${esc(a.severity)}"><span class="k">${esc(a.kind)}</span>
+      ${esc(a.detail)}</div>`).join("");
+
+  renderFlow();
+  renderFeed();
+}
+
+function nodeOf(id) {
+  return DATA.nodes.find((n) => n.id === id)
+    || {id, kind: "finding", label: id, bytes: null, est_tokens: null};
+}
+
+function chip(id, cls) {
+  const n = nodeOf(id);
+  return `<span class="chip ${cls}" title="${esc(id)}">${
+    GLYPH[n.kind] || "·"} ${esc(n.label || id)}</span>`;
+}
+
+function renderFlow() {
+  const produced = new Set(DATA.dispatches.flatMap((d) => d.produced));
+  const origins = DATA.nodes.filter(
+    (n) => n.kind === "blob" && !produced.has(n.id) && !n.id.includes("/traces/"));
+
+  const cards = [];
+  if (origins.length) cards.push(`<div class="card origin">
+    <div class="head"><span class="mk">▣</span><span class="lane">進來的資料</span></div>
+    <div class="io"><span class="k">　</span>${
+      origins.map((n) => chip(n.id, "")).join("")}</div></div>`);
+
+  for (const d of DATA.dispatches) {
+    const opened = new Set(d.opened);
+    const mk = d.running ? "▸" : d.ok ? "✓" : "✗";
+    const reads = d.granted.length
+      ? d.granted.map((a) => chip(a, opened.has(a) ? "open" : "shut")).join("")
+      : '<span class="nothing">（沒有授權任何輸入）</span>';
+    const writes = d.produced.length
+      ? d.produced.map((a) => chip(a, "out")).join("")
+      : `<span class="nothing">${d.running ? "還沒寫出東西" : "沒有產出"}</span>`;
+    cards.push(`<div class="card${d.running ? " running" : ""}" data-d="${esc(d.id)}">
+      <div class="head">
+        <span class="mk">${mk}</span>
+        <span class="did">${esc(d.id)}</span>
+        <span class="lane">${esc(d.lane)}</span>
+        ${d.running
+          ? `<span class="elapsed" data-since="${esc(d.started || "")}">—</span>`
+          : `<span class="pill">${esc(d.status)}</span>`}
+        ${!d.running && d.turns ? `<span class="pill">${d.turns} turns</span>` : ""}
+        ${!d.running && d.tokens_in
+          ? `<span class="pill">${n0(d.tokens_in)} in</span>` : ""}
+      </div>
+      <div class="task">${esc(d.task || "")}</div>
+      <div class="io"><span class="k">讀了</span>${reads}</div>
+      <div class="io"><span class="k">寫出</span>${writes}</div>
+      <button class="expand" data-t="${esc(d.id)}">${
+        openTrace === d.id ? "收合這段做了什麼" : "看這段做了什麼"}</button>
+      ${openTrace === d.id ? renderTrace(traceCache[d.id]) : ""}
+    </div>`);
+  }
+
+  if (DATA.report) cards.push(`<div class="card final">
+    <div class="head"><span class="mk">★</span><span class="lane">報告</span></div>
+    <div class="io"><span class="k">　</span>${chip(DATA.report, "out")}</div></div>`);
+
+  $("flow").innerHTML = cards.join('<div class="wire"></div>');
+  tick();
+}
+
+function renderTrace(t) {
+  if (!t) return '<div class="trace"><span class="nothing">讀取中…</span></div>';
+  if (t.state !== "ready")
+    return `<div class="trace"><p class="notyet">${esc(t.why)}</p></div>`;
+
+  const steps = t.steps.map((s, i) => {
+    if (s.kind === "think")
+      return `<div class="step think"><span class="n">${s.turn}</span>
+        <span class="b">思考 <em>${s.empty_reasoning
+          ? "後端回傳空的推理區塊" : `內容未留存（${n0(s.chars)} 字元）`}</em></span></div>`;
+    if (s.kind === "call")
+      return `<div class="step call"><span class="n">${s.turn}</span><span class="b">
+        <span class="fn">${esc(s.name.replace(/^mcp__[^_]+__/, ""))}</span>
+        <div class="args"><pre>${esc(JSON.stringify(s.args, null, 1))}</pre></div>
+        </span></div>`;
+    if (s.kind === "result")
+      return `<div class="step result${s.error ? " err" : ""}${
+          s.budget_pct ? " mark" : ""}"><span class="n">${
+          s.budget_pct !== null && s.budget_pct !== undefined ? s.budget_pct + "%" : "←"}</span>
+        <span class="b"><pre>${esc(s.body.slice(0, 700))}</pre>${
+          s.harness ? `<div style="color:var(--wait);margin-top:4px">${esc(s.harness)}</div>` : ""}
+        </span></div>`;
+    if (s.kind === "attempt")
+      return `<div class="step rule"><span class="n"></span>
+        <span class="b">第 ${s.n} 次嘗試</span></div>`;
+    if (s.kind === "end")
+      return `<div class="step rule"><span class="n"></span>
+        <span class="b">結束 · ${esc(s.subtype)} · ${s.turns} turns</span></div>`;
+    if (s.kind === "text")
+      return `<div class="step"><span class="n">${s.turn}</span>
+        <span class="b">${esc(s.body || s.detail || "")}</span></div>`;
+    return "";
+  }).join("");
+  return `<div class="trace">${steps}</div>`;
+}
+
+function shortIds(line) {
+  /* 事件流裡的 artifact id 是全長的。在一條要被掃過去的訊息裡，
+     golden24/note/lanes/critic1/findings/critique 佔掉整行而只有最後一段有訊息量。 */
+  return line.replace(/\S*\/(?:lanes\/)?([^/\s]+)\/(?:findings\/)?([^/\s]+)/g,
+                      (m, a, b) => `${a}:${b}`);
+}
+
+function renderFeed() {
+  const seen = new Set([...$("feed").children].map((e) => e.dataset.seq));
+  /* 連續同樣的事件收成一行加次數 —— 十一次「窺看同一份 finding」是一件事，
+     不是十一件。 */
+  const rows = [];
+  for (const e of DATA.events) {
+    const line = shortIds(e.line);
+    const last = rows[rows.length - 1];
+    if (last && last.line === line && last.t === e.t) { last.n += 1; last.seq = e.seq; }
+    else rows.push({...e, line, n: 1});
+  }
+  $("feed").innerHTML = rows.map((e) => {
+    const cls = e.t.startsWith("dispatch") ? "dispatch"
+      : e.t.startsWith("throttle") ? "throttle"
+      : (e.t === "no_progress" || e.t === "limit.reached") ? "bad" : "";
+    const fresh = seen.size && !seen.has(String(e.seq)) ? " fresh" : "";
+    return `<div class="ev ${cls}${fresh}" data-seq="${e.seq}">
+      <span class="t">${esc(e.ts.slice(11, 19))}</span>
+      <span class="m">${esc(e.line)}${
+        e.n > 1 ? `<span class="rep">×${e.n}</span>` : ""}</span></div>`;
+  }).join("");
+}
+
+/* --- ticking clocks ------------------------------------------------------- */
+function tick() {
+  const now = Date.now();
+  if (firstTs) $("clock").textContent = clock(((lastTs || now) - firstTs) / 1000);
+  const stale = isStale();
+  document.querySelectorAll(".elapsed[data-since]").forEach((el) => {
+    const t = Date.parse(el.dataset.since);
+    if (isNaN(t)) return;
+    /* 事件流停了之後，牆上的時鐘就不是這個 job 的時鐘了。停在最後一個事件，
+       加一個 + 表示「至少這麼久」—— 讓計數器繼續跑是在報告一件沒發生的事。 */
+    el.textContent = stale ? clock((lastTs - t) / 1000) + "+"
+                           : clock((now - t) / 1000);
+    el.classList.toggle("stalled", stale);
+  });
+}
+setInterval(tick, 1000);
+
+/* --- polling -------------------------------------------------------------- */
+/* 輪詢而不是 SSE：事件流是幾 KB 的 append-only JSONL，重讀的成本人感覺不到。
+   這跟終端機那份即時模式的判斷一模一樣。 */
+async function poll() {
+  try {
+    const r = await fetch("state", {cache: "no-store"});
+    if (!r.ok) throw new Error(r.status);
+    const next = await r.json();
+    if (next.error) throw new Error(next.error);
+    DATA = next;
+    stamps();
+    render();
+    link(true);
+  } catch (err) {
+    /* 畫面不動有兩種原因，而它們是相反的診斷。說出是哪一種。 */
+    link(false, String(err.message || err));
+  }
+  if (!DATA.finished) setTimeout(poll, 1000);
+  else link(true, "job 已結束，停止輪詢");
+}
+
+function link(ok, note) {
+  $("link").className = "link" + (ok ? "" : " bad");
+  $("linktext").textContent = ok
+    ? (note || `輪詢中 · 最後更新 ${new Date().toTimeString().slice(0, 8)}`)
+    : `連不上 monitor（${note}）—— 畫面停住是這個原因，不是 job 停住`;
+}
+
+function stamps() {
+  const ts = DATA.events.map((e) => Date.parse(e.ts)).filter((t) => !isNaN(t));
+  if (ts.length) { firstTs = firstTs || Math.min(...ts); lastTs = Math.max(...ts); }
+}
+
+/* --- open one dispatch's turns ------------------------------------------- */
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest(".expand");
+  if (!b) return;
+  const id = b.dataset.t;
+  if (openTrace === id) { openTrace = null; renderFlow(); return; }
+  openTrace = id;
+  renderFlow();
+  if (!traceCache[id] || traceCache[id].state === "running") {
+    try {
+      traceCache[id] = await (await fetch("trace/" + encodeURIComponent(id))).json();
+    } catch (err) {
+      traceCache[id] = {state: "absent", why: "讀不到逐輪紀錄：" + err};
+    }
+  }
+  renderFlow();
+});
+
+stamps();
+render();
+if (!DATA.finished) setTimeout(poll, 1000);
+else link(true, "job 已結束");
+</script>

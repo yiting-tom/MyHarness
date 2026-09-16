@@ -1,0 +1,320 @@
+"""The live view, in a browser. Read-only, loopback-only, stdlib-only.
+
+`add-flow-viewer/design.md` ruled this out with a reason that was not true:
+
+    不做即時模式。瀏覽器裡的即時模式需要一個 server，那就違反了「零新增相依」。
+
+`http.server` is not a dependency; it ships with Python, like `json`. The
+terminal live view stays -- over ssh it is still the only thing that works --
+but it cannot be left on a second screen, cannot be scrolled back, and cannot
+open a finished dispatch to show what it actually did.
+
+Polling rather than SSE or inotify, for `live.py`'s own reason: the stream is a
+few kilobytes of append-only JSONL, so re-reading costs nothing a person can
+perceive, while SSE on `http.server` costs a thread per client and makes
+shutdown awkward.
+
+**This is the only surface in the harness that listens on a port.** MCP is
+stdio and the terminal monitor listens to nothing, so the guards here are not
+ceremony: loopback only, GET only, and every identifier on the path treated as
+untrusted input.
+"""
+
+from __future__ import annotations
+
+import ipaddress
+import json
+import socket
+import threading
+from collections.abc import Sequence
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from typing import Any, Final
+from urllib.parse import urlparse
+
+from myharness.dataflow import EdgeKind, build_dataflow, detect
+from myharness.events.query import summarize
+from myharness.local_layout import find_jobs
+from myharness.loopback import require_loopback
+from myharness.monitor.html import SLOT, script_literal, template
+from myharness.monitor.live import current_activity
+from myharness.monitor.trace import parse_trace
+
+_TEMPLATE: Final = "live.html"
+
+#: An id that came in on a URL. Anything outside this is refused before it can
+#: be joined to anything -- the harness's ids are ascii words, dashes and dots,
+#: and a path separator has no business in one.
+_ID_MAX: Final = 128
+
+
+def safe_id(value: str) -> str | None:
+    """An identifier from an untrusted path, or None."""
+    if not value or len(value) > _ID_MAX:
+        return None
+    if any(c in value for c in ("/", "\\", "\0")) or value.startswith("."):
+        return None
+    if not all(c.isalnum() or c in "-_." for c in value):
+        return None
+    return value
+
+
+def build_state(root: Path, job_id: str) -> dict[str, Any]:
+    """The whole current picture, re-derived from the stream on every call."""
+    layout = next((j for j in find_jobs(root) if j.job_id == job_id), None)
+    if layout is None:
+        return {"error": "no_such_job", "job_id": job_id}
+
+    events = _read_events(layout.events_path)
+    flow = build_dataflow(events, job_id=job_id)
+    summary = summarize(events)
+    activity = current_activity(events, flow)
+
+    return {
+        "job_id": job_id,
+        "seq": events[-1].seq if events else -1,
+        "finished": flow.finished,
+        "finish_reason": flow.finish_reason,
+        # The same Activity the terminal renders, so the two surfaces cannot
+        # drift into saying different things about the same stream.
+        "activity": {"state": activity.state, "detail": activity.detail},
+        "running": [d.id for d in flow.running()],
+        "report": flow.report_artifact,
+        "usd": summary.total_usd,
+        "context_peak": summary.context_peak,
+        "throttle_seconds": summary.throttle_seconds,
+        "dispatches": [
+            {
+                "id": d.id, "lane": d.lane, "task": d.task, "status": d.status,
+                "running": d.running, "ok": d.ok,
+                "granted": list(d.granted), "produced": list(d.produced),
+                # artifact.read is written *during* a run, so this is the one
+                # per-dispatch signal that moves while the dispatch is alive.
+                "opened": sorted({e.dst for e in flow.edges_from(d.id, EdgeKind.READ)}),
+                "tokens_in": d.tokens_in, "tokens_out": d.tokens_out,
+                "usd": d.usd, "turns": d.turns,
+                "has_trace": bool(d.transcript),
+                "started": _stamp(events, "dispatch.start", d.id),
+                "ended": _stamp(events, "dispatch.end", d.id),
+            }
+            for d in flow.dispatches.values()
+        ],
+        "nodes": [{"id": n.id, "kind": str(n.kind), "label": n.label,
+                   "bytes": n.bytes, "est_tokens": n.est_tokens}
+                  for n in flow.nodes.values()],
+        "anomalies": [a.to_dict() for a in detect(flow)],
+        "events": [
+            {"seq": e.seq, "t": e.t, "ts": e.ts.isoformat(),
+             "line": _one_line(e)}
+            for e in events[-120:]
+        ],
+    }
+
+
+def build_trace(root: Path, job_id: str, dispatch_id: str) -> dict[str, Any]:
+    """One dispatch's turns, or an honest account of why there are none.
+
+    A transcript is written when the dispatch *ends*. For one still running
+    there is nothing to load -- not yet loaded, not missing: not written. The
+    page has to say which, because "還沒有" and "不會有" are different answers
+    and neither of them is a spinner.
+    """
+    layout = next((j for j in find_jobs(root) if j.job_id == job_id), None)
+    if layout is None:
+        return {"error": "no_such_job"}
+
+    events = _read_events(layout.events_path)
+    flow = build_dataflow(events, job_id=job_id)
+    dispatch = flow.dispatches.get(dispatch_id)
+    if dispatch is None:
+        return {"error": "no_such_dispatch"}
+    if dispatch.running:
+        return {"state": "running", "why": "這段還在跑。逐輪紀錄是在派工結束時才寫下的，"
+                                           "所以現在不是還沒載入 —— 是還不存在。"}
+    if not dispatch.transcript:
+        return {"state": "absent", "why": "這段派工沒有留下逐輪紀錄。"}
+
+    name = _blob_name(dispatch.transcript)
+    if name is None:
+        return {"state": "absent", "why": "逐輪紀錄的位置無法解析。"}
+    path = layout.blob_path(name)
+    if not path.exists():
+        return {"state": "absent", "why": "逐輪紀錄的檔案不在儲存區裡。"}
+
+    rows = [json.loads(line) for line
+            in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    trace = parse_trace(rows)
+    return {
+        "state": "ready",
+        "turns": trace.turns,
+        "attempts": trace.attempts,
+        "unpaired_results": trace.unpaired_results,
+        "steps": [
+            {"kind": str(s.kind), "turn": s.turn, "chars": s.chars,
+             "empty_reasoning": s.empty_reasoning, "name": s.name,
+             "args": dict(s.args), "error": s.error, "body": s.body,
+             "harness": s.harness, "budget_pct": s.budget_pct,
+             "skipped": s.skipped, "answers": s.answers, "n": s.n,
+             "subtype": s.subtype, "detail": s.detail}
+            for s in trace.steps
+        ],
+    }
+
+
+# --- helpers --------------------------------------------------------------
+
+
+def _read_events(path: Path) -> list[Any]:
+    from myharness.events.types import Event
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    out = []
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        try:
+            out.append(Event.from_json(line))
+        except Exception:  # noqa: BLE001 - a half-written tail is normal while
+            continue       # a job is running; the next poll will pick it up
+    return out
+
+
+def _stamp(events: Sequence[Any], kind: str, dispatch_id: str) -> str | None:
+    for event in events:
+        if event.t == kind and str(event.get("id") or "") == dispatch_id:
+            return str(event.ts.isoformat())
+    return None
+
+
+def _blob_name(artifact_id: str) -> str | None:
+    """`job/blob/traces/d1` -> `traces/d1`, refusing anything else."""
+    parts = artifact_id.split("/")
+    if len(parts) < 3 or parts[1] != "blob":
+        return None
+    tail = parts[2:]
+    if any(p in ("", ".", "..") for p in tail):
+        return None
+    return "/".join(tail)
+
+
+_EVENT_SAYS: Final[dict[str, str]] = {
+    "job.start": "job 開始", "job.finish": "job 結束",
+    "plan.update": "計畫更新", "ingress": "資料進入",
+    "proxy.route": "分流", "dispatch.start": "派工開始",
+    "dispatch.end": "派工結束", "artifact.read": "讀取",
+    "ctx": "context", "peek": "窺看", "ask.user": "提問",
+    "ask.answer": "回答", "throttle.cooldown": "限流冷卻",
+    "throttle.wait": "限流等待", "throttle.gave_up": "限流放棄",
+    "limit.reached": "觸及上限", "no_progress": "無進展",
+    "handoff.restart": "交接重啟",
+}
+
+
+def _one_line(event: Any) -> str:
+    """One event as a line someone can read while it scrolls past."""
+    head = _EVENT_SAYS.get(event.t, event.t)
+    bits = [str(event.get(k)) for k in ("id", "lane", "artifact", "payload",
+                                        "who", "backend", "limit")
+            if event.get(k)]
+    return f"{head} {' · '.join(dict.fromkeys(bits))}".strip()
+
+
+# --- server ---------------------------------------------------------------
+
+
+class _Handler(BaseHTTPRequestHandler):
+    """GET only. There is no write path, by construction rather than by check."""
+
+    server_version = "myharness-monitor"
+    root: Path
+    job_id: str
+
+    def do_GET(self) -> None:
+        path = urlparse(self.path).path
+        if path in ("/", "/index.html"):
+            self._page()
+        elif path == "/state":
+            self._json(build_state(self.root, self.job_id))
+        elif path.startswith("/trace/"):
+            dispatch_id = safe_id(path[len("/trace/"):])
+            if dispatch_id is None:
+                self._json({"error": "bad_id"}, HTTPStatus.BAD_REQUEST)
+            else:
+                self._json(build_trace(self.root, self.job_id, dispatch_id))
+        else:
+            self._json({"error": "not_found"}, HTTPStatus.NOT_FOUND)
+
+    def _page(self) -> None:
+        body = template(_TEMPLATE).replace(
+            SLOT, script_literal(build_state(self.root, self.job_id)))
+        self._send(
+            '<!doctype html>\n<html lang="zh-Hant">\n<head>\n'
+            '<meta charset="utf-8">\n'
+            '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+            f"</head>\n<body>\n{body}\n</body>\n</html>\n",
+            "text/html; charset=utf-8",
+        )
+
+    def _json(self, payload: dict[str, Any], status: HTTPStatus = HTTPStatus.OK) -> None:
+        self._send(json.dumps(payload, ensure_ascii=False),
+                   "application/json; charset=utf-8", status)
+
+    def _send(self, text: str, content_type: str,
+              status: HTTPStatus = HTTPStatus.OK) -> None:
+        data = text.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        # Every response is derived fresh from the stream; a cached one would
+        # be a monitor that shows the past.
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def log_message(self, format: str, *args: Any) -> None:
+        """Silence. The terminal running this is showing the URL, not a log."""
+
+
+def make_server(root: Path, job_id: str, *, host: str = "127.0.0.1",
+                port: int = 0) -> ThreadingHTTPServer:
+    """A read-only server for one job. Refuses anything but loopback."""
+    host = require_loopback(
+        host, "the web monitor has no authentication, so it serves loopback only")
+    # A subclass per server rather than attributes on the shared class: two
+    # monitors in one process would otherwise show each other's job. The address
+    # family goes on the subclass too -- ::1 is a loopback address the rule
+    # accepts, and refusing to bind it would make the guard and the server
+    # disagree about what "local" means.
+    bound = type("_BoundHandler", (_Handler,), {"root": root, "job_id": job_id})
+    server = type("_Server", (ThreadingHTTPServer,),
+                  {"address_family": _family(host)})
+    return server((host, port), bound)  # type: ignore[no-any-return]
+
+
+def _family(host: str) -> int:
+    if host == "localhost":
+        return socket.AF_INET
+    try:
+        return (socket.AF_INET6 if ipaddress.ip_address(host).version == 6
+                else socket.AF_INET)
+    except ValueError:
+        return socket.AF_INET
+
+
+def serve(root: Path, job_id: str, *, host: str = "127.0.0.1",
+          port: int = 0) -> tuple[ThreadingHTTPServer, str]:
+    """Start the server in a background thread and return it with its URL."""
+    httpd = make_server(root, job_id, host=host, port=port)
+    bound_host, bound_port = httpd.server_address[0], httpd.server_address[1]
+    shown = bound_host.decode() if isinstance(bound_host, bytes) else str(bound_host)
+    if ":" in shown:  # an IPv6 literal has to be bracketed in a URL
+        shown = f"[{shown}]"
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    return httpd, f"http://{shown}:{bound_port}/"
+
+
+__all__ = ["build_state", "build_trace", "make_server", "safe_id", "serve"]

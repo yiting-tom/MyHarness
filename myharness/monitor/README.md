@@ -25,8 +25,34 @@ myharness inspect <job>                 # 事後：資料流、異常、成本�
 myharness inspect <job> --json          # 同上，機器可讀
 myharness inspect <job> --html -o x.html  # 同上 + 逐輪軌跡（給開發者）
 myharness report <job> -o x.html        # 來源報告（給交出資料的人）
-myharness monitor <job>                 # 即時：現在在做什麼
+myharness monitor <job>                 # 即時：現在在做什麼（終端機）
+myharness monitor <job> --web           # 即時：同上，在瀏覽器裡
 ```
+
+## 收回一個理由
+
+`add-flow-viewer/design.md` 裡寫過：
+
+> 不做即時模式。瀏覽器裡的即時模式需要一個 server，那就違反了「零新增相依」。
+
+**那句話是錯的。** `http.server` 不是相依，它跟 `json` 一樣是 Python 的一部分。
+`--web` 起的就是它：只綁 loopback、只有 GET、沒有任何寫入路徑。
+終端機那份留著 —— ssh 進去的時候它仍然是唯一能用的東西。
+
+輪詢而不是 SSE，理由沿用 `live.py` 自己那一條：事件流是幾 KB 的 append-only
+JSONL，重讀的成本人感覺不到，而 SSE 在 stdlib 的 `http.server` 上要每個 client
+佔一條執行緒並讓關閉變難。
+
+**這是整個 package 裡唯一會聽 port 的東西**（MCP 走 stdio，終端機 monitor
+什麼都不聽），所以 loopback 那條規則抽到 `myharness/loopback.py`，
+跟 A2A 端點共用一份 —— 主機名不算證據，位址才算。
+
+### 逐輪紀錄在執行中的派工上「還不存在」
+
+transcript 是派工**結束時**才落檔的。所以點開一個還在跑的派工，回的是一句話，
+不是一個轉圈圈：**「還沒有」跟「不會有」對讀者是兩件事，而兩者都不是「正在載入」。**
+執行中看得到的是 `artifact.read` —— 那是執行期間就寫下的，也是唯一會在派工
+活著時候動的訊號。
 
 ## 兩個受眾，兩個視圖，刻意不合併
 
