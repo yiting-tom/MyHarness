@@ -1,0 +1,716 @@
+<title>MyHarness 派工軌跡</title>
+<style>
+/* ---------------------------------------------------------------------------
+   Palette: a refined ANSI-16. The terminal view (myharness/monitor/render.py)
+   already spends cyan on "produced / running", green on ok, yellow on warning
+   and red on critical, and the reader looks at that output every day. Changing
+   the mapping here would make them translate between two symbol sets.
+   Magenta is spent on the one thing the terminal view has no symbol for:
+   the reasoning marker.
+   Dark-first by intent, so :root carries dark and light is the override.
+--------------------------------------------------------------------------- */
+:root {
+  --ground:#0C1117; --surface:#141B24; --raised:#1B242F;
+  --rule:#26303C; --rule-soft:#1E2833;
+  --fg:#D7E0E8; --fg-dim:#7C8A98; --fg-faint:#56626E;
+  --cyan:#4EC9C0; --green:#6BBF7B; --yellow:#D9B04A; --red:#E0605A;
+  --magenta:#B98AD6;
+  --sel:#12313A;
+  --mono:"JetBrains Mono","SFMono-Regular",Menlo,Consolas,"Liberation Mono",monospace;
+  --sans:"IBM Plex Sans","Helvetica Neue",Arial,"PingFang TC","Noto Sans TC",
+         "Microsoft JhengHei",sans-serif;
+  --cjk:"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;
+  --step:1.55;
+}
+@media (prefers-color-scheme:light){
+  :root:not([data-theme="dark"]){
+    --ground:#F3F6F8; --surface:#FFFFFF; --raised:#EDF1F4;
+    --rule:#D3DCE3; --rule-soft:#E3E9ED;
+    --fg:#17212C; --fg-dim:#5B6873; --fg-faint:#8795A1;
+    --cyan:#0E6F68; --green:#2F7B45; --yellow:#8A6410; --red:#B3352E;
+    --magenta:#6E479A; --sel:#DDF0EE;
+  }
+}
+:root[data-theme="light"]{
+  --ground:#F3F6F8; --surface:#FFFFFF; --raised:#EDF1F4;
+  --rule:#D3DCE3; --rule-soft:#E3E9ED;
+  --fg:#17212C; --fg-dim:#5B6873; --fg-faint:#8795A1;
+  --cyan:#0E6F68; --green:#2F7B45; --yellow:#8A6410; --red:#B3352E;
+  --magenta:#6E479A; --sel:#DDF0EE;
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--ground); color:var(--fg);
+  font-family:var(--sans); font-size:14px; line-height:var(--step);
+  -webkit-font-smoothing:antialiased;
+}
+:focus-visible{outline:2px solid var(--cyan); outline-offset:2px; border-radius:2px}
+code,kbd,pre,.mono,.num{font-family:var(--mono); font-variant-numeric:tabular-nums}
+pre{margin:0; white-space:pre-wrap; word-break:break-word}
+button{font:inherit; color:inherit; background:none; border:none; cursor:pointer}
+a{color:var(--cyan)}
+
+/* --- top bar ------------------------------------------------------------ */
+.bar{
+  display:flex; align-items:baseline; gap:20px; flex-wrap:wrap;
+  padding:11px 20px; border-bottom:1px solid var(--rule);
+  background:var(--surface); position:sticky; top:0; z-index:20;
+}
+.bar h1{
+  font-family:var(--mono); font-size:15px; font-weight:700; margin:0;
+  letter-spacing:.01em;
+}
+.bar h1 .hash{color:var(--fg-faint); font-weight:400}
+.stat{display:flex; gap:7px; align-items:baseline; font-size:12.5px}
+.stat .k{color:var(--fg-dim); font-size:11px; letter-spacing:.07em; text-transform:uppercase}
+.stat .v{font-family:var(--mono); font-variant-numeric:tabular-nums}
+.bar .spacer{flex:1}
+
+/* --- three columns ------------------------------------------------------ */
+.app{
+  display:grid; grid-template-columns:352px minmax(0,1fr) 316px;
+  align-items:start; min-height:calc(100dvh - 47px);
+}
+.rail,.ledger{
+  position:sticky; top:47px; max-height:calc(100dvh - 47px); overflow-y:auto;
+  padding:18px 16px 40px;
+}
+.rail{border-right:1px solid var(--rule)}
+.ledger{border-left:1px solid var(--rule)}
+.trace{padding:18px 26px 100px; min-width:0}
+
+h2.sec{
+  font-size:10.5px; letter-spacing:.14em; text-transform:uppercase;
+  color:var(--fg-dim); font-weight:600; margin:0 0 9px;
+  font-family:var(--sans);
+}
+h2.sec + h2.sec, .block + h2.sec{margin-top:26px}
+.block{display:flex; flex-direction:column; gap:7px}
+
+/* --- goal --------------------------------------------------------------- */
+.goal{
+  font-size:12.5px; color:var(--fg-dim); line-height:1.5;
+  max-height:5.4em; overflow:hidden; position:relative;
+  border-left:2px solid var(--rule); padding-left:10px;
+}
+.goal.open{max-height:none}
+.goal-more{font-size:11px; color:var(--cyan); padding:2px 0; align-self:flex-start}
+
+/* --- anomalies ---------------------------------------------------------- */
+.anom{
+  display:flex; flex-direction:column; gap:4px;
+  padding:9px 11px; border-radius:3px; font-size:12.5px;
+  background:var(--raised); border-left:3px solid var(--yellow);
+}
+.anom.critical{border-left-color:var(--red)}
+.anom .sev{
+  font-family:var(--mono); font-size:10px; letter-spacing:.08em;
+  color:var(--yellow);
+}
+.anom.critical .sev{color:var(--red)}
+.anom .detail{color:var(--fg); line-height:1.45}
+.clean{font-size:12.5px; color:var(--green); display:flex; gap:7px; align-items:baseline}
+
+/* --- flow tree ---------------------------------------------------------- */
+.tree{display:flex; flex-direction:column; gap:3px}
+.dnode{
+  display:block; width:100%; text-align:left; padding:7px 9px 8px;
+  border-radius:3px; border:1px solid transparent; line-height:1.35;
+}
+.dnode:hover{background:var(--raised)}
+.dnode[aria-current="true"]{background:var(--sel); border-color:var(--cyan)}
+.dnode .head{display:flex; gap:8px; align-items:baseline; font-family:var(--mono); font-size:13px}
+.dnode .did{font-weight:700}
+.dnode .lane{color:var(--fg-dim)}
+.dnode .task{
+  font-size:11.5px; color:var(--fg-faint); margin-top:3px;
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+}
+.edges{
+  margin:6px 0 0; padding:0 0 0 2px; display:flex; flex-direction:column; gap:2px;
+  font-size:11.5px; font-family:var(--mono);
+}
+.edge{display:flex; gap:6px; align-items:baseline; color:var(--fg-dim)}
+.edge .rel{color:var(--fg-faint); flex:none}
+.edge.produced .rel{color:var(--cyan)}
+.edge .name{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1}
+.edge.none{color:var(--red)}
+.ingress{
+  font-family:var(--mono); font-size:12px; color:var(--fg-dim);
+  display:flex; gap:7px; padding:3px 9px;
+}
+
+/* --- status pill (shape + glyph, never colour alone) -------------------- */
+.pill{
+  font-family:var(--mono); font-size:10.5px; letter-spacing:.03em;
+  padding:1px 6px 2px; border-radius:2px; border:1px solid currentColor;
+  white-space:nowrap; flex:none;
+}
+.s-ok{color:var(--green)} .s-running{color:var(--cyan)}
+.s-budget_exceeded,.s-max_turns,.s-tool_failure,.s-state_rejected{color:var(--yellow)}
+.s-duplicate{color:var(--fg-faint)}
+.chip{
+  font-family:var(--mono); font-size:10px; padding:0 5px 1px;
+  border-radius:2px; background:var(--raised); color:var(--fg-dim); flex:none;
+}
+.chip.unread{color:var(--yellow); background:transparent; border:1px solid currentColor}
+.chip.read{color:var(--fg-faint)}
+
+/* --- trace header + filters --------------------------------------------- */
+.thead{border-bottom:1px solid var(--rule); padding-bottom:14px; margin-bottom:4px}
+.thead .line1{display:flex; gap:11px; align-items:baseline; flex-wrap:wrap}
+.thead .did{font-family:var(--mono); font-size:19px; font-weight:700}
+.thead .lane{font-family:var(--mono); font-size:15px; color:var(--cyan)}
+.thead .meta{font-family:var(--mono); font-size:11.5px; color:var(--fg-faint)}
+.thead .task{
+  margin-top:8px; font-size:13px; color:var(--fg-dim); max-width:72ch; line-height:1.5;
+}
+.filters{display:flex; gap:6px; margin:13px 0 0; flex-wrap:wrap}
+.filters button{
+  font-family:var(--mono); font-size:11.5px; padding:3px 10px 4px;
+  border:1px solid var(--rule); border-radius:2px; color:var(--fg-dim);
+}
+.filters button:hover{border-color:var(--fg-faint)}
+.filters button[aria-pressed="true"]{
+  color:var(--ground); background:var(--cyan); border-color:var(--cyan);
+}
+
+/* --- the timeline ------------------------------------------------------- */
+.steps{position:relative; padding-top:18px}
+.steps::before{                       /* the budget track */
+  content:""; position:absolute; left:23px; top:26px; bottom:14px; width:1px;
+  background:var(--rule);
+}
+.step{
+  display:grid; grid-template-columns:48px minmax(0,1fr); column-gap:14px;
+  padding:5px 0; position:relative;
+}
+.gut{
+  font-family:var(--mono); font-size:11px; color:var(--fg-faint);
+  text-align:right; padding-right:2px; padding-top:2px; white-space:nowrap;
+}
+.gut .dot{
+  display:inline-block; width:9px; height:9px; border-radius:50%;
+  background:var(--ground); border:1.5px solid var(--rule);
+  position:absolute; left:19px; top:9px;
+}
+
+/* reasoning: present, never invented */
+.step.think .body{
+  display:flex; gap:9px; align-items:baseline; flex-wrap:wrap;
+  font-size:12.5px; color:var(--fg-dim);
+}
+.step.think .mark{color:var(--magenta); font-family:var(--mono); font-size:13px}
+.step.think .absent{
+  font-size:11.5px; color:var(--fg-faint);
+  border-bottom:1px dashed var(--fg-faint); padding-bottom:1px;
+}
+
+/* tool call */
+.step.call .body{
+  border:1px solid var(--rule); border-left:2px solid var(--cyan);
+  border-radius:3px; background:var(--surface); overflow:hidden;
+}
+.step.call .name{
+  display:flex; gap:9px; align-items:baseline; padding:7px 11px;
+  font-family:var(--mono); font-size:13px; font-weight:500;
+  border-bottom:1px solid var(--rule-soft);
+}
+.step.call .name .ns{color:var(--fg-faint); font-weight:400}
+.args{display:flex; flex-direction:column}
+.arg{display:grid; grid-template-columns:104px minmax(0,1fr); gap:11px; padding:6px 11px}
+.arg + .arg{border-top:1px solid var(--rule-soft)}
+.arg .k{
+  font-family:var(--mono); font-size:11px; color:var(--fg-dim);
+  text-align:right; padding-top:1px;
+}
+.arg .v{font-family:var(--mono); font-size:12px; min-width:0}
+.arg .v pre{max-height:17em; overflow:auto; color:var(--fg)}
+
+/* tool result */
+.step.result .body{
+  border:1px solid var(--rule-soft); border-left:2px solid var(--rule);
+  border-radius:3px; background:var(--raised); overflow:hidden;
+}
+.step.result.err .body{border-left-color:var(--red)}
+.rhead{
+  display:flex; gap:9px; align-items:baseline; padding:5px 11px;
+  font-family:var(--mono); font-size:11px; color:var(--fg-dim);
+}
+.rhead .ok{color:var(--green)} .rhead .bad{color:var(--red)}
+.rbody{padding:2px 11px 9px}
+.rbody pre{
+  font-family:var(--mono); font-size:11.5px; color:var(--fg-dim);
+  max-height:15em; overflow:auto; line-height:1.5;
+}
+.rbody .cut{color:var(--yellow); font-style:normal}
+.hnote{
+  margin:0 11px 10px; padding:7px 10px; border-radius:2px;
+  background:transparent; border:1px dashed var(--yellow);
+  font-size:12px; color:var(--fg); line-height:1.45;
+}
+.hnote .who{
+  display:block; font-family:var(--mono); font-size:10px; letter-spacing:.08em;
+  color:var(--yellow); margin-bottom:3px;
+}
+
+/* assistant prose */
+.step.text .body{
+  font-size:13px; color:var(--fg); max-width:72ch;
+  border-left:2px solid var(--rule); padding:2px 0 2px 12px;
+}
+
+/* attempt / end rules */
+.step.attempt,.step.end,.step.system{padding:14px 0 6px}
+.step.attempt .body,.step.end .body,.step.system .body{
+  display:flex; align-items:center; gap:11px;
+  font-family:var(--mono); font-size:11px; letter-spacing:.06em;
+  color:var(--fg-faint);
+}
+.step.attempt .body::after,.step.end .body::after,.step.system .body::after{
+  content:""; flex:1; height:1px; background:var(--rule);
+}
+.step.attempt .n{color:var(--yellow)}
+
+/* budget tick: a measured point, not an interpolation */
+.step.mark .dot{
+  background:var(--yellow); border-color:var(--yellow); width:11px; height:11px;
+  left:18px;
+}
+.step.mark .gut .pct{
+  color:var(--yellow); font-weight:700; display:block; font-size:12px;
+}
+
+/* filter states */
+.steps.only-tools .step:not(.call):not(.result):not(.attempt):not(.end),
+.steps.only-budget .step:not(.mark):not(.attempt):not(.end),
+.steps.only-errors .step:not(.err):not(.attempt):not(.end){display:none}
+
+/* --- ledger ------------------------------------------------------------- */
+.gauge{display:flex; flex-direction:column; gap:6px}
+.gauge .track{
+  height:8px; border-radius:2px; background:var(--rule-soft); position:relative;
+  overflow:hidden;
+}
+.gauge .fill{height:100%; background:var(--cyan)}
+.gauge .fill.over{background:var(--yellow)}
+.gauge .nums{
+  display:flex; justify-content:space-between; font-family:var(--mono);
+  font-size:11.5px; color:var(--fg-dim); font-variant-numeric:tabular-nums;
+}
+.gauge .nums b{color:var(--fg); font-weight:500}
+table.kv{width:100%; border-collapse:collapse; font-size:12px}
+table.kv th{
+  text-align:left; font-weight:400; color:var(--fg-dim); padding:4px 0;
+  font-size:11.5px;
+}
+table.kv td{
+  text-align:right; font-family:var(--mono); font-variant-numeric:tabular-nums;
+  padding:4px 0; white-space:nowrap;
+}
+table.kv tr + tr th,table.kv tr + tr td{border-top:1px solid var(--rule-soft)}
+td .approx{color:var(--yellow)}
+td .lo{color:var(--red)} td .hi{color:var(--cyan)}
+.note{font-size:11.5px; color:var(--fg-faint); line-height:1.5}
+.note b{color:var(--fg-dim); font-weight:500}
+.artifact{
+  font-family:var(--mono); font-size:11.5px; color:var(--fg-dim);
+  word-break:break-all; line-height:1.45;
+}
+.artifact .g{color:var(--cyan)}
+
+/* --- footnote ----------------------------------------------------------- */
+.foot{
+  grid-column:1/-1; border-top:1px solid var(--rule); padding:18px 26px 34px;
+  font-size:11.5px; color:var(--fg-faint); line-height:1.6;
+}
+.foot h3{
+  font-size:10.5px; letter-spacing:.14em; text-transform:uppercase;
+  color:var(--fg-dim); margin:0 0 7px; font-weight:600;
+}
+.foot ul{margin:0; padding-left:1.1em; max-width:96ch}
+.foot li + li{margin-top:3px}
+.foot code{color:var(--fg-dim); font-size:11px}
+
+.sr{
+  position:absolute; width:1px; height:1px; overflow:hidden;
+  clip:rect(0 0 0 0); white-space:nowrap;
+}
+.skip{
+  position:absolute; left:-9999px; top:0; background:var(--cyan);
+  color:var(--ground); padding:7px 13px; z-index:50;
+}
+.skip:focus{left:8px; top:8px}
+
+@media (max-width:1180px){
+  .app{grid-template-columns:1fr}
+  .rail,.ledger{position:static; max-height:none; border:none;
+    border-bottom:1px solid var(--rule)}
+  .trace{padding:18px 18px 60px}
+}
+@media (prefers-reduced-motion:no-preference){
+  .dnode{transition:background 140ms ease, border-color 140ms ease}
+  .filters button{transition:color 140ms ease, background 140ms ease,
+    border-color 140ms ease}
+}
+</style>
+
+<a class="skip" href="#trace">跳到軌跡</a>
+
+<header class="bar">
+  <h1><span class="hash">job </span><span id="jobid">—</span></h1>
+  <div class="stat"><span class="k">狀態</span><span class="v" id="jobstate">—</span></div>
+  <div class="stat"><span class="k">派工</span><span class="v" id="jobdisp">—</span></div>
+  <div class="stat"><span class="k">成本</span><span class="v" id="jobusd">—</span></div>
+  <div class="stat"><span class="k">context 峰值</span><span class="v" id="jobctx">—</span></div>
+  <div class="spacer"></div>
+  <div class="stat"><span class="k">異常</span><span class="v" id="jobanom">—</span></div>
+</header>
+
+<main class="app">
+  <aside class="rail" aria-label="資料流向">
+    <h2 class="sec">這個 job 被要求做什麼</h2>
+    <div class="block">
+      <div class="goal" id="goal"></div>
+      <button class="goal-more" id="goalmore" aria-expanded="false">展開全文</button>
+    </div>
+
+    <h2 class="sec">資料流異常</h2>
+    <div class="block" id="anoms"></div>
+
+    <h2 class="sec">流向</h2>
+    <div class="block" id="ingress"></div>
+    <div class="tree" id="tree" role="list"></div>
+  </aside>
+
+  <section class="trace" id="trace" tabindex="-1" aria-label="逐輪軌跡">
+    <div class="thead" id="thead"></div>
+    <div class="filters" id="filters" role="group" aria-label="篩選軌跡">
+      <button data-f="" aria-pressed="true">全部</button>
+      <button data-f="only-tools" aria-pressed="false">只看工具呼叫</button>
+      <button data-f="only-budget" aria-pressed="false">只看預算量測點</button>
+      <button data-f="only-errors" aria-pressed="false">只看錯誤</button>
+    </div>
+    <div class="steps" id="steps" aria-live="polite"></div>
+  </section>
+
+  <aside class="ledger" aria-label="帳">
+    <h2 class="sec">預算</h2>
+    <div class="block" id="gauge"></div>
+    <h2 class="sec">Token</h2>
+    <div class="block" id="tokens"></div>
+    <h2 class="sec">估計 vs 後端回報</h2>
+    <div class="block" id="estimate"></div>
+    <h2 class="sec">產出</h2>
+    <div class="block" id="produced"></div>
+  </aside>
+
+  <div class="foot">
+    <h3>這個視圖說不出來的三件事</h3>
+    <ul id="gaps"></ul>
+  </div>
+</main>
+
+<script>
+const DATA = /*__DATA__*/null;
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g,
+  (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const num = (n) => (n === null || n === undefined) ? "—" : n.toLocaleString("en-US");
+const tok = (n) => !n ? "—" : n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n);
+
+const byId = Object.fromEntries(DATA.dispatches.map((d) => [d.id, d]));
+const nodes = Object.fromEntries(DATA.nodes.map((n) => [n.id, n]));
+const order = DATA.dispatches.map((d) => d.id);
+let current = null;
+
+/* --- header --------------------------------------------------------------- */
+$("jobid").textContent = DATA.job_id;
+$("jobstate").textContent = DATA.finished
+  ? "完成" + (DATA.finish_reason ? "（" + DATA.finish_reason + "）" : "")
+  : "執行中";
+$("jobdisp").textContent = DATA.dispatch_count +
+  (DATA.failures ? "（" + DATA.failures + " 次未成功）" : "");
+$("jobusd").textContent = "$" + (DATA.usd || 0).toFixed(4);
+$("jobctx").textContent = num(DATA.context_peak);
+const crit = DATA.anomalies.filter((a) => a.severity === "critical").length;
+$("jobanom").innerHTML = DATA.anomalies.length
+  ? (crit ? '<span style="color:var(--red)">' + crit + " CRITICAL</span> · " : "") +
+    '<span style="color:var(--yellow)">' +
+    (DATA.anomalies.length - crit) + " WARNING</span>"
+  : '<span style="color:var(--green)">無</span>';
+
+/* --- goal ----------------------------------------------------------------- */
+$("goal").textContent = DATA.goal;
+$("goalmore").onclick = (e) => {
+  const open = $("goal").classList.toggle("open");
+  e.target.textContent = open ? "收合" : "展開全文";
+  e.target.setAttribute("aria-expanded", String(open));
+};
+
+/* --- anomalies ------------------------------------------------------------ */
+$("anoms").innerHTML = DATA.anomalies.length
+  ? DATA.anomalies.map((a) => `
+      <div class="anom ${esc(a.severity)}">
+        <span class="sev">${a.severity === "critical" ? "✖" : "▲"} ${esc(a.kind)}</span>
+        <span class="detail">${esc(a.detail)}</span>
+      </div>`).join("")
+  : '<div class="clean"><span>✓</span><span>無</span></div>';
+
+/* --- flow ----------------------------------------------------------------- */
+const label = (id) => {
+  const n = nodes[id];
+  if (!n) return esc(id);
+  const size = n.est_tokens ? ` ${tok(n.est_tokens)}t`
+    : n.bytes ? ` ${num(n.bytes)}B` : "";
+  return `<span class="name" title="${esc(id)}">${esc(n.glyph)} ${esc(n.label || id)}` +
+    `<span style="color:var(--fg-faint)">${size}</span></span>`;
+};
+
+const producedIds = new Set(DATA.dispatches.flatMap((d) => d.produced));
+const entering = DATA.nodes.filter((n) => n.kind === "blob" && !producedIds.has(n.id)
+  && !n.id.includes("/traces/"));
+$("ingress").innerHTML = entering.length
+  ? entering.map((n) => `<div class="ingress">${label(n.id)}<span class="chip">進入 job</span></div>`).join("")
+  : '<div class="note">沒有原始資料進入這個 job</div>';
+
+$("tree").innerHTML = DATA.dispatches.map((d) => {
+  const read = new Set(d.read || []);
+  const grants = d.granted.length
+    ? d.granted.map((a) => `
+        <div class="edge">
+          <span class="rel">←授權</span>${label(a)}
+          ${DATA.read_edges_available
+            ? (read.has(a) ? '<span class="chip read">已讀</span>'
+                           : '<span class="chip unread">未讀</span>')
+            : ""}
+        </div>`).join("")
+    : '<div class="edge none"><span class="rel">←授權</span><span class="name">（無）</span></div>';
+  const outs = d.produced.map((a) => `
+      <div class="edge produced"><span class="rel">→產出</span>${label(a)}
+      ${a === DATA.report ? '<span class="chip">最終報告</span>' : ""}</div>`).join("");
+  return `
+    <button class="dnode" role="listitem" data-id="${esc(d.id)}" aria-current="false">
+      <span class="head">
+        <span class="did">${esc(d.id)}</span>
+        <span class="lane">${esc(d.lane)}</span>
+        <span class="pill s-${esc(d.status)}">${esc(d.status)}</span>
+      </span>
+      <span class="task">${esc(d.task || "")}</span>
+      <span class="edges">${grants}${outs}</span>
+    </button>`;
+}).join("");
+
+$("tree").addEventListener("click", (e) => {
+  const b = e.target.closest(".dnode");
+  if (b) select(b.dataset.id);
+});
+
+/* --- the timeline --------------------------------------------------------- */
+function renderArg(k, v) {
+  const text = typeof v === "string" ? v : JSON.stringify(v, null, 1);
+  return `<div class="arg"><div class="k">${esc(k)}</div>
+    <div class="v"><pre>${esc(text)}</pre></div></div>`;
+}
+
+function renderStep(s, i, steps) {
+  const gutDot = '<span class="dot" aria-hidden="true"></span>';
+  if (s.kind === "attempt")
+    return `<div class="step attempt"><div class="gut"></div>
+      <div class="body"><span class="n">第 ${s.n} 次嘗試</span></div></div>`;
+  if (s.kind === "end")
+    return `<div class="step end${s.error ? " err" : ""}"><div class="gut"></div>
+      <div class="body"><span>執行結束 · ${esc(s.subtype || "")} · ${s.turns} turns</span></div></div>`;
+  if (s.kind === "system")
+    return `<div class="step system"><div class="gut"></div>
+      <div class="body"><span>${esc(s.subtype)}</span></div></div>`;
+
+  if (s.kind === "think") {
+    const absent = s.chars === 0
+      ? "後端回傳空的推理區塊（0 字元）"
+      : `內容未留存，只記了長度 ${num(s.chars)} 字元`;
+    return `<div class="step think">
+      <div class="gut">${gutDot}${s.turn}</div>
+      <div class="body"><span class="mark" aria-hidden="true">◈</span>
+        <span>思考</span><span class="absent">${absent}</span></div></div>`;
+  }
+
+  if (s.kind === "text")
+    return `<div class="step text"><div class="gut">${gutDot}${s.turn}</div>
+      <div class="body">${esc(s.text)}</div></div>`;
+
+  if (s.kind === "call") {
+    const short = s.name.replace(/^mcp__[^_]+__/, "");
+    const ns = s.name.slice(0, s.name.length - short.length);
+    const args = Object.entries(s.input || {}).map(([k, v]) => renderArg(k, v)).join("");
+    return `<div class="step call"><div class="gut">${gutDot}${s.turn}</div>
+      <div class="body">
+        <div class="name"><span aria-hidden="true" style="color:var(--cyan)">⚒</span>
+          <span><span class="ns">${esc(ns)}</span>${esc(short)}</span></div>
+        <div class="args">${args || '<div class="arg"><div class="k">（無參數）</div><div class="v"></div></div>'}</div>
+      </div></div>`;
+  }
+
+  if (s.kind === "result") {
+    const call = s.for !== null && steps[s.for] ? steps[s.for] : null;
+    const body = esc(s.body).replace(/…\[略過 (\d+) 字元\]…/g,
+      '<span class="cut">…[留存時略過 $1 字元]…</span>');
+    const note = s.harness
+      ? `<div class="hnote"><span class="who">harness 附加在工具結果之後</span>${
+          esc(s.harness.replace(/^\[harness\]\s*/, ""))}</div>` : "";
+    const gut = s.pct !== null && s.pct !== undefined
+      ? `${gutDot}<span class="pct">${s.pct}%</span>` : gutDot;
+    return `<div class="step result${s.error ? " err" : ""}${s.pct ? " mark" : ""}">
+      <div class="gut">${gut}</div>
+      <div class="body">
+        <div class="rhead">
+          <span class="${s.error ? "bad" : "ok"}">${s.error ? "✖ 錯誤" : "← 回傳"}</span>
+          <span>${call ? esc(call.name.replace(/^mcp__[^_]+__/, "")) : "（配不到呼叫）"}</span>
+          ${s.skipped ? `<span class="chip unread">節錄，略過 ${num(s.skipped)} 字元</span>` : ""}
+        </div>
+        <div class="rbody"><pre>${body}</pre></div>
+        ${note}
+      </div></div>`;
+  }
+  return "";
+}
+
+function renderTrace(id) {
+  const d = byId[id];
+  const t = DATA.traces[id];
+  $("thead").innerHTML = `
+    <div class="line1">
+      <span class="did">${esc(d.id)}</span>
+      <span class="lane">${esc(d.lane)}</span>
+      <span class="pill s-${esc(d.status)}">${esc(d.status)}</span>
+      <span class="meta">${esc(d.model || "")} · ${esc(d.backend || "")}
+        · 契約路徑 ${esc(d.contract || "—")}
+        · ${d.turns} turns · ${t ? t.attempts : "?"} 次嘗試</span>
+    </div>
+    <div class="task">${esc(d.task || "")}</div>`;
+
+  if (!t) {
+    $("steps").innerHTML = '<div class="note">這次派工沒有留存 transcript。</div>';
+    return;
+  }
+  $("steps").innerHTML = t.steps.map((s, i) => renderStep(s, i, t.steps)).join("");
+}
+
+/* --- ledger --------------------------------------------------------------- */
+function renderLedger(id) {
+  const d = byId[id];
+  const tk = d.tokens || {};
+  const est = d.estimate || {};
+
+  if (d.budget) {
+    const frac = Math.min(1, d.pct);
+    $("gauge").innerHTML = `
+      <div class="gauge">
+        <div class="track"><div class="fill${d.pct >= 1 ? " over" : ""}"
+          style="width:${(frac * 100).toFixed(1)}%"></div></div>
+        <div class="nums"><span><b>${num(d.spent)}</b> 已用</span>
+          <span>${(d.pct * 100).toFixed(1)}% / ${num(d.budget)}</span></div>
+      </div>
+      <div class="note">預算以<b>累計計費量</b>計，不是 context 長度 ——
+        每一次請求都重送整段對話，所以這個數字是 turn 數的二次式。</div>`;
+  } else {
+    $("gauge").innerHTML = '<div class="note">這次派工沒有預算紀錄。</div>';
+  }
+
+  const approx = tk.estimated ? '<span class="approx">~</span>' : "";
+  $("tokens").innerHTML = `
+    <table class="kv">
+      <tr><th>輸入</th><td>${approx}${num(tk.in)}</td></tr>
+      <tr><th>輸出</th><td>${approx}${num(tk.out)}</td></tr>
+      <tr><th>計費量</th><td>${num(tk.chargeable)}</td></tr>
+      <tr><th>cache 讀</th><td>${num(tk.cache_read)}</td></tr>
+      <tr><th>請求數</th><td>${num(est.requests)}</td></tr>
+      <tr><th>跨嘗試帶入</th><td>${num(est.carried_tokens)}</td></tr>
+    </table>
+    ${tk.estimated
+      ? '<div class="note"><b>~</b> 這些是 harness 的估計值 —— 執行被中途停止，' +
+        "後端從未送出帶 usage 的那則訊息。</div>"
+      : ""}`;
+
+  const err = (e, r) => {
+    if (!e || !r) return "—";
+    const p = ((e - r) / r) * 100;
+    const cls = p < -5 ? "lo" : p > 5 ? "hi" : "";
+    return `<span class="${cls}">${p > 0 ? "+" : ""}${p.toFixed(1)}%</span>`;
+  };
+  if (tk.estimated) {
+    $("estimate").innerHTML = `
+      <div class="note"><b>沒有可比的回報值。</b> 這次執行被中途停止，後端從未送出帶
+        usage 的訊息，所以上面那兩個數字<b>就是</b>估計值本身 —— 拿它跟自己比會得到
+        0.0%，那不是準確度。</div>`;
+  } else {
+  $("estimate").innerHTML = `
+    <table class="kv">
+      <tr><th>估計輸入</th><td>${num(est.tokens_in)}</td></tr>
+      <tr><th>回報輸入</th><td>${num(tk.in)}</td></tr>
+      <tr><th>誤差</th><td>${err(est.tokens_in, tk.in)}</td></tr>
+      <tr><th>估計輸出</th><td>${num(est.tokens_out)}</td></tr>
+      <tr><th>回報輸出</th><td>${num(tk.out)}</td></tr>
+      <tr><th>誤差</th><td>${err(est.tokens_out, tk.out)}</td></tr>
+    </table>
+    <div class="note">估計值是預算閘門實際看的數字。回報值只在執行走完時才拿得到 ——
+      所以閘門永遠是在估計值上做決定的。</div>`;
+  }
+
+  $("produced").innerHTML = d.produced.length
+    ? d.produced.map((a) => `<div class="artifact"><span class="g">→</span> ${esc(a)}${
+        a === DATA.report ? " ★ 最終報告" : ""}</div>`).join("")
+    : '<div class="note" style="color:var(--red)">這次派工沒有產出任何 artifact。</div>';
+}
+
+/* --- gaps ----------------------------------------------------------------- */
+const allThinks = Object.values(DATA.traces).flatMap((t) =>
+  t.steps.filter((s) => s.kind === "think"));
+const emptyThinks = allThinks.filter((s) => s.chars === 0).length;
+const unpaired = Object.values(DATA.traces).reduce((n, t) => n + t.unpaired_results, 0);
+$("gaps").innerHTML = [
+  `<b>推理的內容。</b> <code>_block_to_dict</code> 只留字元數，文字被刻意丟掉。
+   這個 job 的 ${allThinks.length} 個推理區塊裡有 ${emptyThinks} 個連字元數都是 0 ——
+   後端回傳的是空殼。所以上面標的是推理<b>發生的位置</b>，不是推理的內容，
+   而把工具呼叫排成一列稱作「推理過程」就是讓一份不存在的紀錄看起來存在。`,
+  `<b>呼叫與結果的配對。</b> 留存的 <code>tool_use</code> 沒有 id（只有 result 那側有
+   <code>tool_use_id</code>），所以上面是<b>照順序配</b>的。這份 job 配不到的有
+   ${unpaired} 個，因為沒有任何一輪同時發出兩個呼叫 —— 那是這幾次執行的性質，不是格式的保證。`,
+  `<b>兩個量測點之間的預算。</b> 左邊那條線是軌，不是進度條。只有 harness 實際發出警告的
+   那幾輪有真的數字；中間沒有量測，所以中間不畫。transcript 本身不帶任何 token 計數。`,
+].map((s) => `<li>${s}</li>`).join("");
+
+/* --- selection ------------------------------------------------------------ */
+function select(id, push) {
+  if (!byId[id]) return;
+  current = id;
+  document.querySelectorAll(".dnode").forEach((b) =>
+    b.setAttribute("aria-current", String(b.dataset.id === id)));
+  renderTrace(id);
+  renderLedger(id);
+  if (push !== false && location.hash !== "#" + id)
+    history.replaceState(null, "", "#" + id);
+}
+
+$("filters").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  $("filters").querySelectorAll("button").forEach((x) =>
+    x.setAttribute("aria-pressed", String(x === b)));
+  $("steps").className = "steps " + b.dataset.f;
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.target.matches("input,textarea") || e.metaKey || e.ctrlKey) return;
+  const i = order.indexOf(current);
+  if (e.key === "j" || e.key === "ArrowDown") {
+    if (i < order.length - 1) { select(order[i + 1]); e.preventDefault(); }
+  } else if (e.key === "k" || e.key === "ArrowUp") {
+    if (i > 0) { select(order[i - 1]); e.preventDefault(); }
+  }
+});
+
+select(location.hash.slice(1) || order[0]);
+</script>
