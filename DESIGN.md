@@ -205,6 +205,12 @@ analysis_drill(job_id, section_id)   → 章節全文
   與邊（**授權**／**產出**／**讀取**，三者分開），並偵測四種資料流異常。
 - `myharness/monitor/`：`myharness inspect <job>` 事後展開，
   `myharness monitor <job>` 即時跟蹤。唯讀，對執行中的 job 零影響。
+- `myharness/monitor/trace.py` + `viewer.py`：`inspect --html` 把流向與**逐輪軌跡**
+  放進同一個畫面 —— 推理標記、工具呼叫與其參數、回傳結果、以及預算在哪一輪見底。
+  單一自包檔案，零新增相依，打開時不發任何請求。
+  **推理的內容不在裡面**：`_block_to_dict` 只留字元數，而自架後端回的是空殼
+  （golden #24 的 21 個推理區塊字元數全為 0）。視圖標的是推理發生的位置，
+  並明說內容未留存 —— 同一條「授權邊不冒充讀取邊」的規則。
 
 資料流投影的價值有實例：golden job 第五次在所有紀律指標上都是綠的，
 但最終報告來自一次**沒有任何授權**的派工，並覆蓋掉了真正拿到 finding 的版本。

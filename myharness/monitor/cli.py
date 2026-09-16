@@ -17,15 +17,18 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from myharness.artifacts.ids import ArtifactId
 from myharness.artifacts.local import LocalArtifactStore
-from myharness.artifacts.types import ArtifactMeta
-from myharness.dataflow import build_dataflow, detect
+from myharness.artifacts.types import ArtifactMeta, GrantSet
+from myharness.dataflow import DataFlow, build_dataflow, detect
 from myharness.events.log import LocalEventLog
 from myharness.events.types import Event
 from myharness.local_layout import find_jobs
 from myharness.monitor.inspect import render_inspect
 from myharness.monitor.live import LiveView
 from myharness.monitor.render import colour_enabled, human_duration, pad, style
+from myharness.monitor.trace import Trace, parse_trace
+from myharness.monitor.viewer import render_html
 
 DEFAULT_ROOT = Path("jobs-scratch")
 POLL_INTERVAL_S = 1.0
@@ -72,6 +75,33 @@ async def load(root: Path, job_id: str) -> tuple[list[Event], Sequence[ArtifactM
     return events, artifacts
 
 
+async def load_traces(root: Path, job_id: str, flow: DataFlow) -> dict[str, Trace]:
+    """Each dispatch's stored transcript, by dispatch id.
+
+    The id comes off ``dispatch.end``; the bytes come through the store, not off
+    a composed path (design.md D6). A transcript is a blob, so the grant used is
+    the harness's own -- reporting is exactly what ``unrestricted`` is for. A
+    dispatch whose transcript is missing is skipped rather than fatal: a run
+    killed mid-stream never got to write one.
+    """
+    store = LocalArtifactStore(root)
+    grants = GrantSet.unrestricted(job_id)
+    traces: dict[str, Trace] = {}
+    for dispatch in flow.dispatches.values():
+        if not dispatch.transcript:
+            continue
+        try:
+            async with store.localize(ArtifactId.parse(dispatch.transcript),
+                                      grants=grants) as path:
+                text = path.read_text(encoding="utf-8")
+        except Exception:  # noqa: BLE001 - a missing transcript is not a reason to fail
+            continue
+        traces[dispatch.id] = parse_trace(
+            [json.loads(line) for line in text.splitlines() if line.strip()]
+        )
+    return traces
+
+
 def term_width(default: int = 78) -> int:
     return min(shutil.get_terminal_size((default, 24)).columns, 100)
 
@@ -109,15 +139,29 @@ def cmd_inspect(args: argparse.Namespace) -> int:
         return 1
     flow = build_dataflow(events, artifacts, job_id=args.job)
 
+    critical = any(a.severity == "critical" for a in detect(flow))
+
     if args.json:
         print(json.dumps(
             {**flow.to_dict(), "anomalies": [a.to_dict() for a in detect(flow)]},
             ensure_ascii=False, indent=2))
         return 0
 
+    if args.html:
+        html = render_html(flow, events,
+                           asyncio.run(load_traces(root, args.job, flow)))
+        # Never into the job store by default: the page embeds excerpts of
+        # transcripts, and a transcript is a blob whose whole contract is that
+        # it does not leak (spec: 輸出位置須被指定).
+        if args.out:
+            args.out.write_text(html, encoding="utf-8")
+        else:
+            sys.stdout.write(html)
+        return 2 if critical else 0
+
     print(render_inspect(flow, events, colour=colour_enabled(),
                          width=term_width()))
-    return 0 if not any(a.severity == "critical" for a in detect(flow)) else 2
+    return 2 if critical else 0
 
 
 def cmd_monitor(args: argparse.Namespace) -> int:
@@ -162,6 +206,10 @@ def build_parser() -> argparse.ArgumentParser:
     inspect = sub.add_parser("inspect", help="展開一個 job 的資料流")
     inspect.add_argument("job")
     inspect.add_argument("--json", action="store_true", help="結構化輸出")
+    inspect.add_argument("--html", action="store_true",
+                         help="逐輪軌跡視圖（單一自包檔案，預設寫到 stdout）")
+    inspect.add_argument("-o", "--out", type=Path,
+                         help="--html 的輸出檔案；不給就寫到 stdout")
     inspect.set_defaults(func=cmd_inspect)
 
     monitor = sub.add_parser("monitor", help="即時跟蹤一個執行中的 job")

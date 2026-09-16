@@ -3354,3 +3354,9 @@ d1 的 `tokens.estimated` 是 true —— 執行被中途停止，後端從未�
 - 調色盤是精煉過的 ANSI 16，`inspect` 的 cyan／green／yellow／red 對應一個沒改 ——
   讀者每天看那個輸出，換一套符號等於要他在兩套之間翻譯
 - 規格寫在 `openspec/changes/add-flow-viewer/`，22 項 tasks，尚未動工
+
+**已實作**（同一天）：`myharness/monitor/trace.py`（解析器，純函式）與 `viewer.py`
+（render），`myharness inspect <job> --html [-o out.html]`。27 個新測試，
+`DataFlow` 一行都沒改。實作時測試又抓到一個**我自己犯的注入**：payload 坐在
+`<script>` 裡而裡面每個字串都是模型寫的，一個 `</script>` 就把元素關掉 ——
+`_as_script_literal` 把 `<` 轉成 `<`。

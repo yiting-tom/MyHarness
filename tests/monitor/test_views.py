@@ -298,3 +298,44 @@ def test_a_granted_artifact_that_was_never_read_says_so():
     assert "已讀" in read_line, "the artifact the lane actually read must say so"
     assert "未讀" in unread_line, "and the one it never opened must say that"
     assert "不可得" not in out, "the read view is available in this run"
+
+
+# --- Requirement: 視覺輸出唯讀、離線、且不預設留在 job 目錄 ---------------
+
+
+def test_html_output_goes_to_stdout_by_default(tmp_path: Path, capsys):
+    """Scenario: 輸出位置須被指定
+
+    預設寫進 job 目錄會把一份含 transcript 節錄的檔案留在儲存區裡，
+    而 transcript 是 blob —— 它的整個契約就是不外流。
+    """
+    _write_job(tmp_path, healthy())
+    assert main(["--root", str(tmp_path), "inspect", JOB, "--html"]) == 0
+
+    out = capsys.readouterr().out
+    assert "<!doctype html>" in out.lower()
+    assert JOB in out
+    job_dir = (tmp_path / "jobs" / JOB)
+    assert not list(job_dir.glob("*.html"))
+
+
+def test_html_output_writes_the_file_it_was_given(tmp_path: Path, capsys):
+    _write_job(tmp_path, healthy())
+    target = tmp_path / "flow.html"
+    assert main(["--root", str(tmp_path), "inspect", JOB, "--html",
+                 "-o", str(target)]) == 0
+    capsys.readouterr()
+    assert "<!doctype html>" in target.read_text(encoding="utf-8").lower()
+
+
+def test_rendering_html_leaves_the_job_untouched(tmp_path: Path, capsys):
+    """Scenario: 產生輸出不改變 job"""
+    path = _write_job(tmp_path, healthy())
+    before = path.read_bytes()
+    listing_before = sorted(p.name for p in path.parent.iterdir())
+
+    main(["--root", str(tmp_path), "inspect", JOB, "--html"])
+    capsys.readouterr()
+
+    assert path.read_bytes() == before
+    assert sorted(p.name for p in path.parent.iterdir()) == listing_before
