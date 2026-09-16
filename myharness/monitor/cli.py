@@ -27,8 +27,10 @@ from myharness.local_layout import find_jobs
 from myharness.monitor.inspect import render_inspect
 from myharness.monitor.live import LiveView
 from myharness.monitor.render import colour_enabled, human_duration, pad, style
+from myharness.monitor.report import render_report
 from myharness.monitor.trace import Trace, parse_trace
 from myharness.monitor.viewer import render_html
+from myharness.orchestrator.delivery import build_delivery, drill
 
 DEFAULT_ROOT = Path("jobs-scratch")
 POLL_INTERVAL_S = 1.0
@@ -164,6 +166,51 @@ def cmd_inspect(args: argparse.Namespace) -> int:
     return 2 if critical else 0
 
 
+async def _provenance(root: Path, job_id: str, flow: DataFlow,
+                      events: Sequence[Event]) -> str:
+    """The report for whoever handed over the data.
+
+    `build_delivery` is reused rather than reimplemented: it is already the
+    contract this harness offers the outside world, and a second summary
+    written for the page would be a second truth that drifts.
+    """
+    store = LocalArtifactStore(root)
+    delivery = (await build_delivery(
+        store=store, events=events, job_id=job_id,
+        status="complete" if flow.finished else "running",
+        report_artifact=flow.report_artifact,
+    )).to_dict()
+
+    sections = []
+    for section in delivery.get("sections") or ():
+        text = ""
+        if flow.report_artifact:
+            try:
+                text = await drill(store, job_id, flow.report_artifact,
+                                   str(section["id"]), max_tokens=1_000_000)
+            except Exception:  # noqa: BLE001 - a section that will not open is
+                text = ""      # shown as empty, not as a crashed report
+        sections.append({**section, "text": text})
+
+    return render_report(flow, events, delivery, sections=sections)
+
+
+def cmd_report(args: argparse.Namespace) -> int:
+    root = resolve_root(args.root, args.job)
+    events, artifacts = asyncio.run(load(root, args.job))
+    if not events:
+        known = ", ".join(j.job_id for j in discover(args.root)) or "（無）"
+        print(f"{args.root} 下找不到 job {args.job}；已知的 job：{known}")
+        return 1
+    flow = build_dataflow(events, artifacts, job_id=args.job)
+    html = asyncio.run(_provenance(root, args.job, flow, events))
+    if args.out:
+        args.out.write_text(html, encoding="utf-8")
+    else:
+        sys.stdout.write(html)
+    return 0
+
+
 def cmd_monitor(args: argparse.Namespace) -> int:
     """Redraw until the job finishes, then leave the final frame on screen."""
     root = resolve_root(args.root, args.job)
@@ -211,6 +258,12 @@ def build_parser() -> argparse.ArgumentParser:
     inspect.add_argument("-o", "--out", type=Path,
                          help="--html 的輸出檔案；不給就寫到 stdout")
     inspect.set_defaults(func=cmd_inspect)
+
+    report = sub.add_parser("report", help="給資料提供者的來源報告（HTML）")
+    report.add_argument("job")
+    report.add_argument("-o", "--out", type=Path,
+                        help="輸出檔案；不給就寫到 stdout")
+    report.set_defaults(func=cmd_report)
 
     monitor = sub.add_parser("monitor", help="即時跟蹤一個執行中的 job")
     monitor.add_argument("job")

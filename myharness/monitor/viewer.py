@@ -16,10 +16,8 @@ that is a defect in this file, not a feature of it.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict
-from importlib import resources
 from typing import Any, Final
 
 from myharness.dataflow import DataFlow, EdgeKind, NodeKind, detect
@@ -31,6 +29,7 @@ from myharness.events.types import (
     JOB_START,
     Event,
 )
+from myharness.monitor.html import document, template
 from myharness.monitor.trace import Trace
 
 #: The same marks the terminal view uses. Someone who reads `inspect` every day
@@ -41,9 +40,6 @@ _GLYPH: Final = {
 }
 
 _TEMPLATE: Final = "viewer.html"
-#: Replaced with the payload. A JSON literal rather than a fetch, because the
-#: page has to open with no network at all.
-_SLOT: Final = "/*__DATA__*/null"
 
 
 def render_html(
@@ -52,30 +48,7 @@ def render_html(
     traces: Mapping[str, Trace],
 ) -> str:
     """One job as a standalone page. Writes nothing, fetches nothing."""
-    payload = _as_script_literal(_payload(flow, events, traces))
-    template = resources.files(__package__).joinpath(_TEMPLATE).read_text("utf-8")
-    return (
-        '<!doctype html>\n<html lang="zh-Hant">\n<head>\n'
-        '<meta charset="utf-8">\n'
-        '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
-        f"</head>\n<body>\n{template.replace(_SLOT, payload)}\n</body>\n</html>\n"
-    )
-
-
-def _as_script_literal(payload: dict[str, Any]) -> str:
-    """JSON safe to sit inside a `<script>` element.
-
-    Every string in here was written by a model -- the task, the SQL, the tool
-    results. A `</script>` anywhere in any of them closes the element early and
-    the rest of the page becomes markup the browser will happily run. Escaping
-    on the way out of `esc()` does not help: by then the damage is in the
-    document. So `<` never reaches the page as itself, and the two line
-    separators that are legal in JSON but not in a JS string literal go with it.
-    """
-    text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-    return (text.replace("<", "\\u003c")
-                .replace("\u2028", "\\u2028")
-                .replace("\u2029", "\\u2029"))
+    return document(template(_TEMPLATE), _payload(flow, events, traces))
 
 
 # --- payload --------------------------------------------------------------

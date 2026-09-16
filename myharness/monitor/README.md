@@ -23,9 +23,26 @@ d5(syn1)  ←授權 （無）        →產出 report   ← 覆蓋掉 d4
 myharness jobs                          # 有哪些 job 可以看
 myharness inspect <job>                 # 事後：資料流、異常、成本歸屬
 myharness inspect <job> --json          # 同上，機器可讀
-myharness inspect <job> --html -o x.html  # 同上 + 逐輪軌跡
+myharness inspect <job> --html -o x.html  # 同上 + 逐輪軌跡（給開發者）
+myharness report <job> -o x.html        # 來源報告（給交出資料的人）
 myharness monitor <job>                 # 即時：現在在做什麼
 ```
+
+## 兩個受眾，兩個視圖，刻意不合併
+
+| | `inspect --html` | `report` |
+|---|---|---|
+| 讀的人 | 在除錯這套 harness 的人 | 把資料交出去、正被要求相信結論的人 |
+| 主體 | 逐輪軌跡：推理標記、工具呼叫、回傳結果 | 資料流向：我的資料被誰讀了、報告根據什麼 |
+| 詞彙 | `budget_exceeded`、token、estimate | 「預算用完，沒做完」 |
+| 長相 | 深色、三欄、等寬 | 淺色、單欄、正文優先 |
+
+合成一個的結果是兩邊都不合適：使用者不需要看 transcript，而開發者不需要
+把 `orphan_output` 翻成一句話再讀回去。
+
+**`report.py` 的翻譯表是那個模組的內容，不是措辭。** `tests/monitor/test_report.py`
+會對每一個 `AnomalyKind`、每一個 caveat kind、每一個 dispatch status 檢查有沒有人話，
+並且掃過整頁確認沒有任何內部代碼漏到使用者面前。新增一種異常而忘了翻譯，測試會紅。
 
 `--root` 預設 `jobs-scratch`，會往下找兩層 —— **猜目錄不該是使用 monitor 的第一道門檻。**
 

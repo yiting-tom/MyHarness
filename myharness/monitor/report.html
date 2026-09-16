@@ -1,0 +1,469 @@
+<title>資料去了哪裡</title>
+<style>
+/* ---------------------------------------------------------------------------
+   給交出資料的人看的，不是給除錯的人看的。所以跟 inspect --html 的終端機深色
+   刻意不像：淺色、留白、正文優先。
+
+   只有一個強調色，而且不花在結構上 —— 流向是冷靜的骨架，燒赭色只留給
+   「這裡有話要說」。讀者的注意力應該落在沒做到的事情上。
+--------------------------------------------------------------------------- */
+:root{
+  --paper:#F4F7F8; --card:#FFFFFF; --sunk:#EDF2F4;
+  --ink:#121B23; --ink2:#53646E; --ink3:#8496A1;
+  --rule:#DAE3E8; --rule2:#EAF0F3;
+  --path:#33566B;            /* 流向：結構，不是狀態 */
+  --flag:#A8501E;            /* 唯一的強調色，只給需要注意的事 */
+  --ok:#2A6B46;
+  --faded:#A6B4BD;
+  --serif:"Noto Serif TC",Georgia,"Songti TC","Source Han Serif TC",serif;
+  --sans:"Noto Sans TC","Helvetica Neue",Arial,"PingFang TC",
+         "Microsoft JhengHei",sans-serif;
+  --mono:"IBM Plex Mono","SFMono-Regular",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#10171C; --card:#18222A; --sunk:#141D24;
+    --ink:#E3EAEE; --ink2:#9DAEB8; --ink3:#6F8090;
+    --rule:#28353E; --rule2:#1E2A32;
+    --path:#8FB4CC; --flag:#E29061; --ok:#6FBF90; --faded:#55646F;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#10171C; --card:#18222A; --sunk:#141D24;
+  --ink:#E3EAEE; --ink2:#9DAEB8; --ink3:#6F8090;
+  --rule:#28353E; --rule2:#1E2A32;
+  --path:#8FB4CC; --flag:#E29061; --ok:#6FBF90; --faded:#55646F;
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:var(--sans); font-size:16px; line-height:1.75;
+  -webkit-font-smoothing:antialiased;
+}
+:focus-visible{outline:3px solid var(--path); outline-offset:3px; border-radius:3px}
+button{font:inherit; color:inherit; background:none; border:none; cursor:pointer}
+.mono,code{font-family:var(--mono); font-variant-numeric:tabular-nums}
+p{margin:0}
+
+.page{max-width:920px; margin:0 auto; padding:0 24px 96px}
+.band{display:flex; flex-direction:column; gap:14px}
+.prose{max-width:64ch}
+
+/* --- opening ------------------------------------------------------------ */
+.top{padding:54px 0 34px; border-bottom:1px solid var(--rule)}
+.eyebrow{
+  font-family:var(--mono); font-size:12px; letter-spacing:.13em;
+  text-transform:uppercase; color:var(--ink3);
+  display:flex; gap:12px; align-items:center; flex-wrap:wrap;
+}
+.eyebrow .dot{width:6px; height:6px; border-radius:50%; background:var(--ok)}
+.eyebrow .dot.warn{background:var(--flag)}
+h1{
+  font-family:var(--serif); font-weight:600; font-size:clamp(25px,3.4vw,36px);
+  line-height:1.4; margin:14px 0 0; text-wrap:balance; max-width:22ch;
+  letter-spacing:.01em;
+}
+.asked{
+  margin-top:18px; font-size:15px; color:var(--ink2); max-width:62ch;
+  border-left:3px solid var(--rule); padding-left:16px; white-space:pre-wrap;
+  max-height:7.5em; overflow:hidden;
+}
+.asked.open{max-height:none}
+.morebtn{
+  font-size:13px; color:var(--path); margin-top:8px;
+  text-decoration:underline; text-underline-offset:3px;
+}
+
+/* --- sections ----------------------------------------------------------- */
+section{padding:44px 0; border-bottom:1px solid var(--rule)}
+section:last-of-type{border-bottom:none}
+h2{
+  font-family:var(--serif); font-weight:600; font-size:22px; margin:0 0 6px;
+  letter-spacing:.01em;
+}
+.lede{font-size:15px; color:var(--ink2); max-width:62ch; margin:0 0 26px}
+
+/* --- the flow ----------------------------------------------------------- */
+.flow{display:flex; flex-direction:column; align-items:stretch}
+.link{
+  width:2px; height:26px; background:var(--rule); margin:0 auto;
+  position:relative;
+}
+.link::after{
+  content:""; position:absolute; left:50%; bottom:0; width:7px; height:7px;
+  border-right:2px solid var(--rule); border-bottom:2px solid var(--rule);
+  transform:translate(-50%,2px) rotate(45deg);
+}
+.flow.trace .link.on{background:var(--path)}
+.flow.trace .link.on::after{border-color:var(--path)}
+
+.step{
+  border:1px solid var(--rule); border-radius:6px; background:var(--card);
+  padding:18px 20px; display:flex; flex-direction:column; gap:12px;
+}
+.step.origin{background:var(--sunk); border-style:dashed}
+.step.final{border-color:var(--path); border-width:2px}
+.flow.trace .step.off{opacity:.58; border-style:dashed}
+
+.steptop{display:flex; gap:12px; align-items:baseline; flex-wrap:wrap}
+.stepno{
+  font-family:var(--mono); font-size:11px; letter-spacing:.1em;
+  color:var(--ink3); text-transform:uppercase;
+}
+.stepname{font-weight:700; font-size:17px}
+.who{font-family:var(--mono); font-size:13px; color:var(--ink2)}
+.grow{flex:1}
+
+.tag{
+  font-size:12px; padding:2px 9px 3px; border-radius:99px; white-space:nowrap;
+  border:1px solid currentColor; line-height:1.5;
+}
+.tag.chain{color:var(--path)}
+.tag.offchain{color:var(--ink3)}
+.tag.bad{color:var(--flag)}
+.tag.ok{color:var(--ok)}
+
+.io{display:grid; grid-template-columns:76px minmax(0,1fr); gap:6px 14px}
+.io dt{
+  font-size:13px; color:var(--ink3); text-align:right; padding-top:3px;
+  white-space:nowrap;
+}
+.io dd{margin:0; display:flex; flex-wrap:wrap; gap:7px}
+
+.chip{
+  display:inline-flex; align-items:baseline; gap:7px; cursor:pointer;
+  border:1px solid var(--rule); border-radius:4px; padding:3px 10px 4px;
+  background:var(--paper); font-size:13.5px; text-align:left;
+  max-width:100%;
+}
+.chip:hover{border-color:var(--path)}
+.chip .gl{font-family:var(--mono); color:var(--path); flex:none}
+.chip .nm{overflow-wrap:anywhere}
+.chip .sz{font-family:var(--mono); font-size:11.5px; color:var(--ink3); flex:none}
+.chip.lit{border-color:var(--path); background:var(--sunk); box-shadow:inset 0 0 0 1px var(--path)}
+.chip.unopened{border-style:dashed}
+.chip.unopened .gl{color:var(--flag)}
+
+.none{font-size:13.5px; color:var(--flag); font-style:normal}
+.stepnote{font-size:13.5px; color:var(--ink2); max-width:62ch}
+.stepnote.flagged{color:var(--flag)}
+
+.switch{
+  display:flex; gap:10px; align-items:center; margin:0 0 22px;
+  font-size:13.5px; color:var(--ink2);
+}
+.switch button{
+  border:1px solid var(--rule); border-radius:99px; padding:4px 13px 5px;
+  font-size:13px;
+}
+.switch button[aria-pressed="true"]{
+  border-color:var(--path); color:var(--path); font-weight:500;
+}
+
+/* --- concerns ----------------------------------------------------------- */
+.concerns{display:flex; flex-direction:column; gap:14px}
+.concern{
+  border:1px solid var(--rule); border-left:4px solid var(--flag);
+  border-radius:5px; background:var(--card); padding:16px 19px;
+  display:flex; flex-direction:column; gap:7px;
+}
+.concern.note{border-left-color:var(--ink3)}
+.concern.critical{border-left-width:6px; background:var(--sunk)}
+.concern h3{font-size:16px; margin:0; font-weight:700; line-height:1.5}
+.concern .means{font-size:14.5px; color:var(--ink2); max-width:62ch}
+.concern .meta{
+  font-family:var(--mono); font-size:11.5px; color:var(--ink3);
+  display:flex; gap:10px; flex-wrap:wrap;
+}
+.allclear{
+  display:flex; gap:12px; align-items:flex-start; padding:18px 20px;
+  border:1px solid var(--rule); border-left:4px solid var(--ok);
+  border-radius:5px; background:var(--card);
+}
+.allclear .mk{color:var(--ok); font-size:18px; line-height:1.4}
+.allclear .t{font-weight:700}
+.allclear .s{font-size:14.5px; color:var(--ink2)}
+
+/* --- sections menu ------------------------------------------------------ */
+.menu{border-top:1px solid var(--rule)}
+details{border-bottom:1px solid var(--rule)}
+summary{
+  display:flex; gap:14px; align-items:baseline; cursor:pointer;
+  padding:15px 2px; list-style:none; font-size:16px;
+}
+summary::-webkit-details-marker{display:none}
+summary::before{
+  content:"＋"; font-family:var(--mono); color:var(--path); flex:none;
+  font-size:14px; width:1em;
+}
+details[open] > summary::before{content:"−"}
+details[open] > summary{font-weight:700}
+summary .price{
+  margin-left:auto; font-family:var(--mono); font-size:12.5px; color:var(--ink3);
+  white-space:nowrap;
+}
+.body{padding:2px 2px 26px 1.9em; max-width:64ch}
+.body pre{
+  white-space:pre-wrap; word-break:break-word; font-family:var(--sans);
+  font-size:15px; line-height:1.85; margin:0;
+}
+
+/* --- findings ----------------------------------------------------------- */
+.findings{display:flex; flex-direction:column; gap:12px; margin-top:22px}
+.finding{
+  display:grid; grid-template-columns:auto minmax(0,1fr); gap:14px;
+  font-size:14.5px; color:var(--ink2);
+}
+.finding .b{
+  width:6px; height:6px; border-radius:50%; background:var(--path);
+  margin-top:.62em;
+}
+
+/* --- footer ------------------------------------------------------------- */
+.foot{
+  padding:34px 0 0; display:flex; gap:32px; flex-wrap:wrap;
+  font-size:13.5px; color:var(--ink3); border-top:1px solid var(--rule);
+}
+.foot div{display:flex; flex-direction:column}
+.foot b{
+  font-family:var(--mono); font-size:16px; color:var(--ink); font-weight:500;
+  font-variant-numeric:tabular-nums;
+}
+.sr{position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0)}
+
+@media (prefers-reduced-motion:no-preference){
+  .chip,.step,.switch button{transition:border-color 160ms ease,
+    opacity 200ms ease, background 160ms ease}
+}
+@media (max-width:620px){
+  .page{padding:0 16px 64px}
+  .io{grid-template-columns:1fr; gap:4px}
+  .io dt{text-align:left}
+}
+</style>
+
+<main class="page">
+  <header class="top">
+    <div class="eyebrow" id="eyebrow"></div>
+    <h1 id="headline">資料去了哪裡</h1>
+    <div class="asked" id="asked"></div>
+    <button class="morebtn" id="askedmore" aria-expanded="false" hidden>讀完整的問題</button>
+  </header>
+
+  <section aria-labelledby="h-flow">
+    <h2 id="h-flow">你的資料去了哪裡</h2>
+    <p class="lede" id="flowlede"></p>
+    <div class="switch">
+      <span>顯示</span>
+      <button id="btn-chain" aria-pressed="true">只看報告的來源</button>
+      <button id="btn-all" aria-pressed="false">全部經手的人</button>
+    </div>
+    <div class="flow trace" id="flow"></div>
+  </section>
+
+  <section aria-labelledby="h-concerns">
+    <h2 id="h-concerns">這次沒做到的事</h2>
+    <p class="lede">這一段不是模型自己申報的，是系統從執行紀錄裡算出來的 ——
+      因為「沒做完的事」正是最容易在總結時被漏掉的東西。</p>
+    <div class="concerns" id="concerns"></div>
+  </section>
+
+  <section aria-labelledby="h-answer">
+    <h2 id="h-answer">結論</h2>
+    <p class="lede" id="conf"></p>
+    <p class="prose" id="summary"></p>
+    <div class="findings" id="findings"></div>
+  </section>
+
+  <section aria-labelledby="h-full">
+    <h2 id="h-full">報告全文</h2>
+    <p class="lede">每一節先標出大約的長度，你看到之後再決定要不要讀。</p>
+    <div class="menu" id="menu"></div>
+  </section>
+
+  <div class="foot" id="foot"></div>
+</main>
+
+<script>
+const DATA = /*__DATA__*/null;
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g,
+  (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const n0 = (n) => (n === null || n === undefined) ? "" : n.toLocaleString("en-US");
+/* 報告是 markdown 寫的。把 **粗體** 當成粗體，而不是把星號印給讀者看。
+   先 esc 再轉，所以轉出來的標籤只可能是這裡放的這一種。 */
+const rich = (s) => esc(s).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+
+const GLYPH = {blob:"▣", finding:"▪", report:"★", state:"◇", plan:"◆"};
+const ORD = ["第一段","第二段","第三段","第四段","第五段","第六段","第七段","第八段"];
+
+/* --- opening -------------------------------------------------------------- */
+const worst = DATA.concerns.find((c) => c.level === "critical")
+  || DATA.concerns.find((c) => c.level === "warning");
+$("eyebrow").innerHTML = `
+  <span class="dot${worst ? " warn" : ""}"></span>
+  <span>分析 ${esc(DATA.job_id)}</span>
+  <span>${DATA.finished ? "已完成" : "進行中"}</span>
+  <span>${DATA.dispatch_count} 段工作</span>`;
+
+const firstLine = (DATA.goal || "").split("\n").find((l) => l.trim()) || "這份分析的來源";
+$("headline").textContent = firstLine.replace(/^[「"']|["'」]$/g, "");
+/* 標題已經是問題的第一句了，底下再印一次只是佔位置。 */
+const rest = (DATA.goal || "").split("\n").slice(
+  (DATA.goal || "").split("\n").indexOf(firstLine) + 1).join("\n").trim();
+$("asked").textContent = rest || DATA.goal;
+if (!rest) $("asked").hidden = true;
+if (rest.length > 120) {
+  $("askedmore").hidden = false;
+  $("askedmore").onclick = (e) => {
+    const open = $("asked").classList.toggle("open");
+    e.target.textContent = open ? "收合" : "讀完整的問題";
+    e.target.setAttribute("aria-expanded", String(open));
+  };
+}
+
+/* --- the flow ------------------------------------------------------------- */
+function chip(a, opened, dim) {
+  const size = a.bytes ? `${n0(a.bytes)} B`
+    : a.est_tokens ? `約 ${n0(a.est_tokens)} 字詞` : "";
+  const unopened = opened === false;
+  return `<button class="chip${unopened ? " unopened" : ""}" data-a="${esc(a.id)}"
+      title="${esc(a.id)}">
+    <span class="gl" aria-hidden="true">${GLYPH[a.kind] || "·"}</span>
+    <span class="nm">${esc(a.label)}<span class="sr">（${esc(a.kind_says)}${
+      unopened ? "，授權了但沒有開啟" : ""}）</span></span>
+    ${size ? `<span class="sz">${size}</span>` : ""}
+  </button>`;
+}
+
+function originCard() {
+  const rows = DATA.inputs.map((a) => {
+    const n = a.read_by.length;
+    return `<div class="io"><dt>${esc(a.kind_says)}</dt><dd>${chip(a)}
+      <span class="tag ${n ? "ok" : "bad"}">${
+        n ? `${n} 段分析讀了它` : "沒有任何分析讀到它"}</span></dd></div>`;
+  }).join("");
+  return `<div class="step origin">
+    <div class="steptop"><span class="stepno">起點</span>
+      <span class="stepname">你交出的資料</span></div>
+    ${rows || '<p class="none">這個分析沒有原始資料進來。</p>'}
+  </div>`;
+}
+
+function stepCard(s, i) {
+  const opened = new Set(s.opened);
+  const reads = s.reads.length
+    ? s.reads.map((a) => chip(a, DATA.read_edges_available ? opened.has(a.id) : undefined)).join("")
+    : '<span class="none">沒有讀到任何東西</span>';
+  const writes = s.writes.length
+    ? s.writes.map((a) => chip(a)).join("")
+    : '<span class="none">沒有寫出任何東西</span>';
+  const unopened = DATA.read_edges_available
+    && s.reads.some((a) => !opened.has(a.id));
+  return `<div class="step${s.in_chain ? "" : " off"}" data-step="${esc(s.id)}">
+    <div class="steptop">
+      <span class="stepno">${ORD[i] || "第 " + (i + 1) + " 段"}</span>
+      <span class="stepname">${esc(s.lane)}</span>
+      <span class="grow"></span>
+      <span class="tag ${s.ok ? "ok" : "bad"}">${esc(s.status_says)}</span>
+      <span class="tag ${s.in_chain ? "chain" : "offchain"}">${
+        s.in_chain ? "報告用到了它" : "沒有進入報告"}</span>
+    </div>
+    <dl class="io"><dt>讀了</dt><dd>${reads}</dd>
+      <dt>寫出</dt><dd>${writes}</dd></dl>
+    ${unopened ? '<p class="stepnote flagged">虛線的那幾份是「有權限讀、但實際上沒有打開」。</p>' : ""}
+    ${s.in_chain ? "" : '<p class="stepnote">這段工作的結果沒有被後面的人用到，也沒有進最終報告。</p>'}
+  </div>`;
+}
+
+function finalCard() {
+  if (!DATA.report) return "";
+  return `<div class="step final">
+    <div class="steptop"><span class="stepno">終點</span>
+      <span class="stepname">你手上這份報告</span>
+      <span class="grow"></span>
+      <span class="tag chain">${DATA.chain.length} 段工作貢獻了它</span></div>
+    <dl class="io"><dt>就是這份</dt><dd>${chip(DATA.report)}</dd></dl>
+  </div>`;
+}
+
+const cards = [originCard(), ...DATA.stages.map(stepCard), finalCard()].filter(Boolean);
+$("flow").innerHTML = cards.join(
+  '<div class="link on" aria-hidden="true"></div>');
+
+const inChain = DATA.stages.filter((s) => s.in_chain).length;
+const offChain = DATA.stages.length - inChain;
+const unused = DATA.inputs.filter((a) => !a.used).length;
+$("flowlede").textContent =
+  `你交出 ${DATA.inputs.length} 份資料，經過 ${DATA.stages.length} 段工作。`
+  + (inChain ? `其中 ${inChain} 段的結果進了最終報告` : "沒有任何一段的結果進了最終報告")
+  + (offChain ? `，另外 ${offChain} 段沒有。` : "。")
+  + (unused ? ` 有 ${unused} 份資料完全沒有被讀到。` : "");
+
+/* 預設只把來源鏈畫實 —— 讀者的第一個問題是「這份結論根據什麼」，
+   給他一張要自己找路的圖等於沒回答。 */
+function setMode(chainOnly) {
+  $("flow").classList.toggle("trace", chainOnly);
+  $("btn-chain").setAttribute("aria-pressed", String(chainOnly));
+  $("btn-all").setAttribute("aria-pressed", String(!chainOnly));
+}
+$("btn-chain").onclick = () => setMode(true);
+$("btn-all").onclick = () => setMode(false);
+/* 每一段都在來源鏈上時，這個切換什麼也不會改變。留一個按了沒反應的控制項
+   比沒有控制項更糟。 */
+if (!offChain) document.querySelector(".switch").hidden = true;
+
+/* 點一份資料，它出現過的每一個地方都亮起來 —— 「這份誰看過」的直接答案。 */
+let lit = null;
+$("flow").addEventListener("click", (e) => {
+  const b = e.target.closest(".chip");
+  if (!b) return;
+  lit = lit === b.dataset.a ? null : b.dataset.a;
+  document.querySelectorAll(".chip").forEach((c) =>
+    c.classList.toggle("lit", lit !== null && c.dataset.a === lit));
+});
+
+/* --- concerns ------------------------------------------------------------- */
+$("concerns").innerHTML = DATA.concerns.length
+  ? DATA.concerns.map((c) => `
+      <article class="concern ${esc(c.level)}">
+        <h3>${esc(c.headline)}</h3>
+        <p class="means">${esc(c.means)}</p>
+        <p class="meta"><span>${esc(c.source)}</span>${
+          c.where ? `<span>${esc(c.where)}</span>` : ""}</p>
+      </article>`).join("")
+  : `<div class="allclear"><span class="mk" aria-hidden="true">✓</span>
+      <div><div class="t">沒有發現問題</div>
+      <div class="s">每一份進來的資料都被讀到了，每一段分析的結果都有去處，
+        也沒有任何一段工作中途停下。</div></div></div>`;
+
+/* --- conclusion ----------------------------------------------------------- */
+const CONF = {high: "高", medium: "中等", low: "低"};
+$("conf").textContent = DATA.confidence
+  ? `系統自評的信心度：${CONF[DATA.confidence] || DATA.confidence}。`
+  : "";
+$("summary").innerHTML = DATA.summary
+  ? rich(DATA.summary) : "這次分析沒有產出結論。";
+$("findings").innerHTML = DATA.findings.map((f) => `
+  <div class="finding"><span class="b" aria-hidden="true"></span>
+    <span>${rich(String(f))}</span></div>`).join("");
+
+/* --- full text ------------------------------------------------------------ */
+$("menu").innerHTML = DATA.sections.length
+  ? DATA.sections.map((s) => `
+      <details>
+        <summary>${esc(s.title)}
+          <span class="price">約 ${n0(s.est_tokens)} 字詞</span></summary>
+        <div class="body"><pre>${rich(s.text || "（這一節沒有內容）")}</pre></div>
+      </details>`).join("")
+  : `<p class="lede" style="margin:18px 0 0">這份報告沒有分節，全文在上面的結論裡。</p>`;
+
+/* --- footer --------------------------------------------------------------- */
+$("foot").innerHTML = [
+  ["工作段數", DATA.dispatch_count],
+  ["來源鏈長度", DATA.chain.length + " 段"],
+  ["累計金額", "$" + (DATA.cost_usd || 0).toFixed(4)],
+].map(([k, v]) => `<div><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join("");
+</script>
