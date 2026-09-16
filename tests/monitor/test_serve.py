@@ -128,7 +128,7 @@ def test_a_real_dispatch_id_still_passes():
 
 
 def test_a_traversal_on_the_wire_is_refused(running_job):
-    root, url = running_job
+    _, url = running_job
     status, body = get(url + "trace/..%2F..%2Fetc%2Fpasswd")
     assert status == 400
     assert "bad_id" in body
