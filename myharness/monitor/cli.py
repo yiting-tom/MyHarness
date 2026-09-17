@@ -251,6 +251,15 @@ def _serve_web(root: Path, args: argparse.Namespace) -> int:
     process that started it is the one that has to be killed to stop it -- no
     daemon, no pidfile, nothing left listening after Ctrl-C.
     """
+    known = [j.job_id for j in discover(args.root)]
+    if args.job not in known and not args.wait:
+        # A page that can only ever say "not found" is a worse way to learn the
+        # name was wrong than a line here. --wait is for starting the monitor
+        # before the job, which is legitimate.
+        print(f"{args.root} 下找不到 job {args.job}；已知的 job："
+              f"{', '.join(known) or '（無）'}")
+        print("如果這個 job 還沒開始，加上 --wait 先把監看頁開起來。")
+        return 1
     httpd, url = serve(root, args.job, host=args.host, port=args.port)
     print(f"monitor: {url}")
     print("Ctrl-C 停止")
@@ -295,6 +304,8 @@ def build_parser() -> argparse.ArgumentParser:
     monitor.add_argument("--once", action="store_true", help="只畫一次就結束")
     monitor.add_argument("--web", action="store_true",
                          help="改在瀏覽器裡看（起一個只綁 loopback 的唯讀 server）")
+    monitor.add_argument("--wait", action="store_true",
+                         help="--web：job 還不存在也先開頁面，等它出現")
     monitor.add_argument("--host", default="127.0.0.1",
                          help="--web 的繫結位址；非 loopback 會被拒絕")
     monitor.add_argument("--port", type=int, default=0,

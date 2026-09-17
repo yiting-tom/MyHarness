@@ -132,7 +132,13 @@ h2{
 .chip.open{border-color:var(--live); color:var(--live)}
 .chip.shut{border-style:dashed; color:var(--faint)}
 .chip.out{border-color:var(--done); color:var(--done)}
-.nothing{font-size:12.5px; color:var(--faint)}
+.nothing{font-size:12.5px; color:var(--dim); margin:0}
+.card.empty{border-style:dashed; background:transparent; gap:8px}
+.card.empty .why{margin:0; font-size:14.5px; color:var(--fg); line-height:1.7; max-width:62ch}
+.legend{font-size:12px; color:var(--dim); margin:-6px 0 12px; display:flex;
+  gap:6px; align-items:baseline; flex-wrap:wrap}
+.legend b{color:var(--fg); font-weight:500}
+.feedempty{padding:10px 0}
 
 .expand{
   font-size:12px; color:var(--dim); border:1px solid var(--rule);
@@ -221,6 +227,7 @@ h2{
   <main class="left">
     <div class="anoms" id="anoms"></div>
     <h2>資料流</h2>
+    <p class="legend" id="legend"></p>
     <div class="flow" id="flow"></div>
   </main>
   <aside class="right">
@@ -267,6 +274,7 @@ const isStale = () => !DATA.finished && lagSeconds() > STALE_S;
 
 /* --- render --------------------------------------------------------------- */
 function render() {
+  if (DATA.error) return renderMissing();
   const stale = isStale();
   const tone = DATA.finished ? "done" : stale ? "stall" : toneOf(DATA.activity.state);
   document.documentElement.style.setProperty("--now", `var(--${tone})`);
@@ -314,6 +322,25 @@ function chip(id, cls) {
     GLYPH[n.kind] || "·"} ${esc(n.label || id)}</span>`;
 }
 
+/* job 不存在時，以前 render() 讀 DATA.activity 直接炸掉，整頁空白 ——
+   正好是最需要說明的那一刻什麼都沒說。 */
+function renderMissing() {
+  document.documentElement.style.setProperty("--now", "var(--wait)");
+  $("bar").className = "bar";
+  $("state").textContent = "找不到這個 job";
+  $("detail").textContent = DATA.why;
+  $("job").textContent = DATA.job_id || "";
+  $("stats").innerHTML = "";
+  $("anoms").innerHTML = "";
+  const known = DATA.known || [];
+  $("flow").innerHTML = `<div class="card empty">
+    <p class="nothing">查找位置 <span class="mono">${esc(DATA.root || "")}</span></p>
+    <p class="nothing">${known.length
+      ? "那裡現有的 job：" + known.map((k) => `<span class="chip">${esc(k)}</span>`).join(" ")
+      : "那裡一個 job 都沒有。"}</p></div>`;
+  $("feed").innerHTML = '<p class="nothing feedempty">還沒有事件 —— 因為還找不到這個 job 的事件流。</p>';
+}
+
 function renderFlow() {
   const produced = new Set(DATA.dispatches.flatMap((d) => d.produced));
   const origins = DATA.nodes.filter(
@@ -328,12 +355,14 @@ function renderFlow() {
   for (const d of DATA.dispatches) {
     const opened = new Set(d.opened);
     const mk = d.running ? "▸" : d.ok ? "✓" : "✗";
+    const known = DATA.read_edges_available;
     const reads = d.granted.length
-      ? d.granted.map((a) => chip(a, opened.has(a) ? "open" : "shut")).join("")
-      : '<span class="nothing">（沒有授權任何輸入）</span>';
+      ? d.granted.map((a) => chip(a, !known ? "" : opened.has(a) ? "open" : "shut")).join("")
+      : `<span class="nothing">${esc(d.nothing_granted_why)}</span>`;
+    /* 6. 「沒有產出」有好幾種原因，而它們對讀者的意思不一樣。 */
     const writes = d.produced.length
       ? d.produced.map((a) => chip(a, "out")).join("")
-      : `<span class="nothing">${d.running ? "還沒寫出東西" : "沒有產出"}</span>`;
+      : `<span class="nothing">${esc(d.nothing_written_why)}</span>`;
     cards.push(`<div class="card${d.running ? " running" : ""}" data-d="${esc(d.id)}">
       <div class="head">
         <span class="mk">${mk}</span>
@@ -355,10 +384,19 @@ function renderFlow() {
     </div>`);
   }
 
+  if (DATA.flow_empty_why) cards.push(`<div class="card empty">
+    <p class="why">${esc(DATA.flow_empty_why)}</p></div>`);
+  if (DATA.dispatches.length && !origins.length) cards.unshift(`<div class="card empty">
+    <p class="nothing">沒有看到原始資料進入：事件流裡沒有 ingress，派工也沒有被授權任何原始資料。</p></div>`);
+
   if (DATA.report) cards.push(`<div class="card final">
     <div class="head"><span class="mk">★</span><span class="lane">報告</span></div>
     <div class="io"><span class="k">　</span>${chip(DATA.report, "out")}</div></div>`);
 
+  $("legend").innerHTML = !DATA.dispatches.length ? ""
+    : DATA.read_edges_available
+      ? '<span class="chip open">實線</span> 打開過　<span class="chip shut">虛線</span> 有權限但沒打開'
+      : "這份事件流沒有讀取紀錄，所以只看得到每段<b>被允許</b>讀什麼，看不到它實際有沒有打開。";
   $("flow").innerHTML = cards.join('<div class="wire"></div>');
   tick();
 }
@@ -366,7 +404,8 @@ function renderFlow() {
 function renderTrace(t) {
   if (!t) return '<div class="trace"><span class="nothing">讀取中…</span></div>';
   if (t.state !== "ready")
-    return `<div class="trace"><p class="notyet">${esc(t.why)}</p></div>`;
+    return `<div class="trace"><p class="notyet">${esc(t.why
+      || "伺服器沒有給出逐輪紀錄，也沒有說明原因。")}</p></div>`;
 
   const steps = t.steps.map((s, i) => {
     if (s.kind === "think")
@@ -417,6 +456,10 @@ function renderFeed() {
     if (last && last.line === line && last.t === e.t) { last.n += 1; last.seq = e.seq; }
     else rows.push({...e, line, n: 1});
   }
+  if (!rows.length) {
+    $("feed").innerHTML = '<p class="nothing feedempty">事件流還是空的：job 還沒寫下任何事件。</p>';
+    return;
+  }
   $("feed").innerHTML = rows.map((e) => {
     const cls = e.t.startsWith("dispatch") ? "dispatch"
       : e.t.startsWith("throttle") ? "throttle"
@@ -453,9 +496,9 @@ async function poll() {
   try {
     const r = await fetch("state", {cache: "no-store"});
     if (!r.ok) throw new Error(r.status);
-    const next = await r.json();
-    if (next.error) throw new Error(next.error);
-    DATA = next;
+    /* job 不存在是伺服器的答案，不是連線斷了 —— 以前這裡把它當成「連不上 monitor」，
+       而那是相反的診斷。 */
+    DATA = await r.json();
     stamps();
     render();
     link(true);
@@ -475,7 +518,7 @@ function link(ok, note) {
 }
 
 function stamps() {
-  const ts = DATA.events.map((e) => Date.parse(e.ts)).filter((t) => !isNaN(t));
+  const ts = (DATA.events || []).map((e) => Date.parse(e.ts)).filter((t) => !isNaN(t));
   if (ts.length) { firstTs = firstTs || Math.min(...ts); lastTs = Math.max(...ts); }
 }
 

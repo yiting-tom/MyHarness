@@ -62,9 +62,12 @@ def safe_id(value: str) -> str | None:
 
 def build_state(root: Path, job_id: str) -> dict[str, Any]:
     """The whole current picture, re-derived from the stream on every call."""
-    layout = next((j for j in find_jobs(root) if j.job_id == job_id), None)
+    jobs = find_jobs(root)
+    layout = next((j for j in jobs if j.job_id == job_id), None)
     if layout is None:
-        return {"error": "no_such_job", "job_id": job_id}
+        # Two stores under one root can hold jobs with the same id; listing it
+        # twice reads as a bug in the list, not as two stores.
+        return missing_job(root, job_id, list(dict.fromkeys(j.job_id for j in jobs)))
 
     events = _read_events(layout.events_path)
     flow = build_dataflow(events, job_id=job_id)
@@ -81,6 +84,12 @@ def build_state(root: Path, job_id: str) -> dict[str, Any]:
         "activity": {"state": activity.state, "detail": activity.detail},
         "running": [d.id for d in flow.running()],
         "report": flow.report_artifact,
+        # Granted and actually-opened only differ in meaning when the stream
+        # records openings at all. Without artifact.read events, drawing every
+        # grant as "not opened" would be an unrecorded fact impersonating a
+        # recorded one.
+        "read_edges_available": flow.read_edges_available,
+        "flow_empty_why": explain_empty_flow(events, flow),
         "usd": summary.total_usd,
         "context_peak": summary.context_peak,
         "throttle_seconds": summary.throttle_seconds,
@@ -95,6 +104,9 @@ def build_state(root: Path, job_id: str) -> dict[str, Any]:
                 "tokens_in": d.tokens_in, "tokens_out": d.tokens_out,
                 "usd": d.usd, "turns": d.turns,
                 "has_trace": bool(d.transcript),
+                "nothing_granted_why": ("" if d.granted else
+                                        "沒有被授權任何輸入 —— 它讀不到 job 裡的任何資料"),
+                "nothing_written_why": "" if d.produced else explain_no_output(d.status),
                 "started": _stamp(events, "dispatch.start", d.id),
                 "ended": _stamp(events, "dispatch.end", d.id),
             }
@@ -122,13 +134,15 @@ def build_trace(root: Path, job_id: str, dispatch_id: str) -> dict[str, Any]:
     """
     layout = next((j for j in find_jobs(root) if j.job_id == job_id), None)
     if layout is None:
-        return {"error": "no_such_job"}
+        return {"error": "no_such_job", "state": "absent",
+                "why": f"找不到 job {job_id}，所以也沒有它的派工紀錄。"}
 
     events = _read_events(layout.events_path)
     flow = build_dataflow(events, job_id=job_id)
     dispatch = flow.dispatches.get(dispatch_id)
     if dispatch is None:
-        return {"error": "no_such_dispatch"}
+        return {"error": "no_such_dispatch", "state": "absent",
+                "why": f"事件流裡沒有派工 {dispatch_id}。"}
     if dispatch.running:
         return {"state": "running", "why": "這段還在跑。逐輪紀錄是在派工結束時才寫下的，"
                                            "所以現在不是還沒載入 —— 是還不存在。"}
@@ -145,6 +159,9 @@ def build_trace(root: Path, job_id: str, dispatch_id: str) -> dict[str, Any]:
     rows = [json.loads(line) for line
             in path.read_text(encoding="utf-8").splitlines() if line.strip()]
     trace = parse_trace(rows)
+    if not trace.steps:
+        return {"state": "absent",
+                "why": "逐輪紀錄存在，但裡面一輪都沒有 —— 這段派工在送出第一個請求之前就結束了。"}
     return {
         "state": "ready",
         "turns": trace.turns,
@@ -160,6 +177,63 @@ def build_trace(root: Path, job_id: str, dispatch_id: str) -> dict[str, Any]:
             for s in trace.steps
         ],
     }
+
+
+# --- why something is empty -----------------------------------------------
+#
+# An empty region on a monitor has at least four causes that call for opposite
+# responses: the job has not started, it has started but not dispatched yet, it
+# finished having dispatched nothing, or the monitor is pointed at the wrong
+# place. A blank panel says none of them, and the reader is left to guess which
+# -- which is exactly the question a monitor exists to answer.
+
+
+def missing_job(root: Path, job_id: str, known: Sequence[str]) -> dict[str, Any]:
+    """No stream for this id -- say where we looked and what is there instead.
+
+    Not an error the page gives up on: a monitor started before its job is a
+    normal thing to do, so the page keeps polling and fills in when the first
+    event lands.
+    """
+    return {
+        "error": "no_such_job",
+        "job_id": job_id,
+        "root": str(root),
+        "known": list(known),
+        "why": (f"在 {root} 底下找不到 job {job_id} 的事件流。"
+                "如果它還沒開始，這頁會在它寫下第一個事件時自己長出來；"
+                "如果它早就該在跑了，多半是 job 名稱或 --root 指錯了。"),
+    }
+
+
+def explain_empty_flow(events: Sequence[Any], flow: Any) -> str:
+    """Why the flow has nothing in it, or "" when it has something."""
+    if not events:
+        return "事件流是空的：這個 job 還沒寫下任何事件。它一開始，這裡就會長出東西。"
+    if flow.dispatches:
+        return ""
+    if flow.finished:
+        reason = f"（{flow.finish_reason}）" if flow.finish_reason else ""
+        return (f"這個 job 已經結束{reason}，但一次派工都沒有發出 —— "
+                "所以沒有任何資料被讀、也沒有任何分析被寫。")
+    planned = any(e.t == "plan.update" for e in events)
+    return ("orchestrator 還沒派出任何工作。"
+            + ("計畫已經排好了，" if planned else "它還在讀目標、排計畫，")
+            + "第一個派工出現時會長在這裡。")
+
+
+_NO_OUTPUT: Final[dict[str, str]] = {
+    "running": "還在跑，還沒寫出東西",
+    "ok": "回報完成，但沒有寫出任何 artifact",
+    "budget_exceeded": "預算在寫出任何東西之前就用完了",
+    "max_turns": "來回次數在寫出任何東西之前就用完了",
+    "tool_failure": "工具出錯，在寫出任何東西之前就中止了",
+    "duplicate": "跟前一次派工重複，沒有重跑，所以沒有產出",
+}
+
+
+def explain_no_output(status: str) -> str:
+    return _NO_OUTPUT.get(status, f"以 {status} 結束，沒有寫出任何東西")
 
 
 # --- helpers --------------------------------------------------------------
@@ -317,4 +391,5 @@ def serve(root: Path, job_id: str, *, host: str = "127.0.0.1",
     return httpd, f"http://{shown}:{bound_port}/"
 
 
-__all__ = ["build_state", "build_trace", "make_server", "safe_id", "serve"]
+__all__ = ["build_state", "build_trace", "explain_empty_flow", "explain_no_output",
+           "make_server", "missing_job", "safe_id", "serve"]

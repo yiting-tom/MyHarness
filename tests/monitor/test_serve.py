@@ -255,3 +255,120 @@ def test_the_page_arrives_with_the_first_frame_already_in_it(running_job):
 def test_an_unknown_route_is_a_404(running_job):
     _, url = running_job
     assert get(url + "wat")[0] == 404
+
+
+# --- 空的地方要說為什麼 ---------------------------------------------------
+#
+# 監看頁上一塊空白至少有四種原因，而它們要的反應正好相反：job 還沒開始、
+# 開始了但還沒派工、結束了卻一次都沒派、或者 monitor 指錯了地方。
+# 空白一種都沒說。
+
+
+def test_a_missing_job_says_where_it_looked_and_what_is_there(tmp_path: Path):
+    write_job(tmp_path, finished())
+    state = build_state(tmp_path, "typo")
+    assert state["error"] == "no_such_job"
+    assert str(tmp_path) in state["why"]
+    assert "--root" in state["why"], "最常見的原因要被點名"
+    assert state["known"] == [JOB]
+
+
+def test_an_empty_stream_says_the_job_has_not_started(tmp_path: Path):
+    path = tmp_path / "jobs" / JOB / "events.jsonl"
+    path.parent.mkdir(parents=True)
+    path.write_text("", encoding="utf-8")
+    assert "還沒寫下任何事件" in build_state(tmp_path, JOB)["flow_empty_why"]
+
+
+def test_no_dispatch_yet_is_explained(tmp_path: Path):
+    write_job(tmp_path, Stream().start())
+    why = build_state(tmp_path, JOB)["flow_empty_why"]
+    assert "還沒派出任何工作" in why
+
+
+def test_finishing_without_a_single_dispatch_is_not_the_same_as_not_yet(tmp_path: Path):
+    write_job(tmp_path, Stream().start().finish(None, reason="limit"))
+    why = build_state(tmp_path, JOB)["flow_empty_why"]
+    assert "已經結束" in why and "一次派工都沒有" in why
+    assert "還沒" not in why
+
+
+def test_a_flow_with_dispatches_has_nothing_to_explain(tmp_path: Path):
+    write_job(tmp_path, mid_flight())
+    assert build_state(tmp_path, JOB)["flow_empty_why"] == ""
+
+
+@pytest.mark.parametrize(("status", "says"), [
+    ("running", "還在跑"),
+    ("ok", "回報完成，但沒有寫出"),
+    ("budget_exceeded", "預算"),
+    ("max_turns", "來回次數"),
+    ("tool_failure", "工具出錯"),
+    ("something_new", "something_new"),
+])
+def test_no_output_says_which_kind_of_no_output(status: str, says: str):
+    """「沒有產出」有好幾種，而預算用完跟回報完成卻沒寫，對讀者是相反的事。"""
+    from myharness.monitor.serve import explain_no_output
+    assert says in explain_no_output(status)
+
+
+def test_a_dispatch_that_wrote_nothing_carries_its_reason(tmp_path: Path):
+    stream = (Stream().start().ingress(BLOB).dispatch("d1", "a", [BLOB])
+              .done("d1", "a", None, status="budget_exceeded"))
+    write_job(tmp_path, stream)
+    d1 = build_state(tmp_path, JOB)["dispatches"][0]
+    assert "預算" in d1["nothing_written_why"]
+    assert d1["nothing_granted_why"] == ""
+
+
+def test_every_trace_answer_that_is_not_ready_has_a_reason(tmp_path: Path):
+    write_job(tmp_path, mid_flight())
+    for answer in (build_trace(tmp_path, JOB, "d1"),
+                   build_trace(tmp_path, JOB, "d99"),
+                   build_trace(tmp_path, "typo", "d1")):
+        assert answer["state"] != "ready"
+        assert answer["why"], answer
+
+
+def test_an_empty_transcript_is_explained_not_rendered_as_nothing(tmp_path: Path):
+    stream = (Stream().start().ingress(BLOB).dispatch("d1", "a", [BLOB]))
+    stream._add("dispatch.end", id="d1", lane="a", status="tool_failure",
+                transcript=f"{JOB}/blob/traces/d1", tokens={})
+    write_job(tmp_path, stream)
+    blob = tmp_path / "jobs" / JOB / "blobs" / "traces" / "d1"
+    blob.parent.mkdir(parents=True)
+    blob.write_text('{"role": "system", "subtype": "init"}\n', encoding="utf-8")
+
+    # One init row is one ATTEMPT step, so this one is not empty -- write a
+    # truly empty file for the case under test.
+    blob.write_text("", encoding="utf-8")
+    answer = build_trace(tmp_path, JOB, "d1")
+    assert answer["state"] == "absent"
+    assert "一輪都沒有" in answer["why"]
+
+
+def test_without_read_records_grants_are_not_drawn_as_unopened(tmp_path: Path):
+    """沒有 artifact.read 的舊事件流：把每個授權都畫成「沒打開」是冒充。"""
+    stream = (Stream().start().ingress(BLOB).dispatch("d1", "a", [BLOB])
+              .done("d1", "a", F1))
+    write_job(tmp_path, stream)
+    assert build_state(tmp_path, JOB)["read_edges_available"] is False
+
+
+def test_the_cli_refuses_to_serve_a_job_that_is_not_there(tmp_path: Path, capsys):
+    """一個只會說「找不到」的頁面，比終端機上一行字更糟。"""
+    from myharness.monitor.cli import main
+    write_job(tmp_path, finished())
+    assert main(["--root", str(tmp_path), "monitor", "typo", "--web"]) == 1
+    out = capsys.readouterr().out
+    assert JOB in out and "--wait" in out
+
+
+def test_the_page_never_shows_a_blank_where_a_reason_belongs(running_job):
+    """頁面上每一種空的狀態都有對應的文字。"""
+    _, url = running_job
+    _, body = get(url)
+    for reason in ("renderMissing", "flow_empty_why", "nothing_written_why",
+                   "nothing_granted_why", "事件流還是空的", "沒有說明原因",
+                   "沒有讀取紀錄"):
+        assert reason in body, reason
