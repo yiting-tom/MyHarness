@@ -20,7 +20,7 @@ from myharness.backends.profile import BackendProfile, ModelTier, registry
 
 #: Defaults; design.md leaves these open pending real calibration data.
 DEFAULT_STATE_MAX_TOKENS: Final = 8_000
-DEFAULT_TOKEN_BUDGET: Final = 80_000
+DEFAULT_TOKEN_BUDGET: Final = 150_000
 DEFAULT_MAX_TURNS: Final = 25
 DEFAULT_INPUT_TOKEN_BUDGET: Final = 12_000
 

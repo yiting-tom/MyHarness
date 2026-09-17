@@ -646,7 +646,7 @@ LaneType(
            "localize_blob", "inspect_blob", "duckdb_query"),
     model_tier="strong",        # 能力層級，不是供應商的模型名稱
     backend="openrouter",
-    token_budget=60_000, max_turns=12, state_max_tokens=2_000,
+    token_budget=150_000, max_turns=12, state_max_tokens=2_000,
     description="表格與交易資料的統計分析",   # orchestrator 看得到這句
 )
 ```

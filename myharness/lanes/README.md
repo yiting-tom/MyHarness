@@ -28,7 +28,7 @@ LaneType(
            "localize_blob", "inspect_blob", "duckdb_query"),
     model_tier="strong",          # 能力層級，不是供應商的模型名稱
     backend="openrouter",
-    token_budget=80_000,
+    token_budget=150_000,
     max_turns=25,
     state_max_tokens=8_000,
 )

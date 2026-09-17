@@ -119,7 +119,7 @@ LaneType(
     tools=("read_note", "write_finding", "update_state", "localize_blob"),
     model_tier="strong",        # 能力層級，由 backend 解析成實際模型
     backend="openrouter",
-    token_budget=80_000, max_turns=25, state_max_tokens=8_000,
+    token_budget=150_000, max_turns=25, state_max_tokens=8_000,
 )
 ```
 
