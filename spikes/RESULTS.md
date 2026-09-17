@@ -3360,3 +3360,65 @@ d1 的 `tokens.estimated` 是 true —— 執行被中途停止，後端從未�
 `DataFlow` 一行都沒改。實作時測試又抓到一個**我自己犯的注入**：payload 坐在
 `<script>` 裡而裡面每個字串都是模型寫的，一個 `</script>` 就把元素關掉 ——
 `_as_script_literal` 把 `<` 轉成 `<`。
+
+---
+
+## Golden #25 —— budget 改成 150k：預算不再是瓶頸，`max_turns` 變成了
+
+`1990241` 把三條 lane 的 `token_budget` 全改成 150,000（analyst 原 60k，critic／synth 原 40k），
+其他一律不動。自架後端，與 #24 同設定。
+
+```
+golden25  complete  dispatches=4  failures=1  報告缺少：無（765、app 都對）  wall 6.1 min
+
+d   lane       status      turns    in      out    spent    pct   att  req  artifact
+d1  analyst-1  max_turns     44   95,006   5,138  133,876  0.893   1   23   -
+d2  analyst-2  ok            58   31,444   3,514  125,690  0.838   2   16   Y
+d3  critic     ok             8   11,026   8,533   38,495  0.257   2    3   Y
+d4  synth      ok             9   14,568   2,311   41,091  0.274   2    4   Y
+```
+
+**orchestrator 這次一開始就平行派了兩個 analyst**（d2 在 seq 4 就派出，不是 d1 失敗後的補救）。
+所以報告救得回來，是因為有第二個 analyst，不是因為 d1 自己撐住了。
+
+### d1：查了 22 次，一個字都沒寫下來
+
+```
+call #1–#19   無任何警告（turns_affordable 一直 ≥ 6）
+call #20      71%  「只夠再 5 次請求，而你還沒有寫任何 finding」
+call #21      77%  「只夠再 3 次請求」
+call #22      83%  閘門關上：取用類工具停止受理
+              → SDK 回報 error_max_turns（13 turns，max_turns=12）
+```
+
+閘門在第 22 次呼叫把查詢擋下、叫它去寫 finding —— **而下一回合已經不存在了**。
+預算還剩 17%，回合數先用完。
+
+**這是改預算直接造成的，而且是可預測的**：`_turns_affordable` 只看預算，不看 `max_turns`。
+60k 時，預算警告在回合還夠的時候就先響了（#24 的 d1 在 57% 被警告、下一輪就寫完）；
+150k 時，第一次警告延後到第 20 次呼叫，剛好撞上回合上限。
+**兩道上限，只有其中一道會警告。**
+
+### d2：150k 真的救了它
+
+d2 兩次嘗試共 25 次查詢，花掉 125,690 —— 在 60k 底下它會是 `budget_exceeded`。
+critic 與 synth 只用了 26%／27%，對它們來說 150k 只是空間，沒有造成傷害。
+
+### 資料流異常：五條裡有三條是偵測器的問題
+
+- `unused_input` ×3（`analyst-1:tail_full`、`tail_ge_40k`、`analyst-2:daily`）：這些是 analyst
+  自己用 `duckdb_query` 存到**自己命名空間**的中間表，自己也讀了。偵測器把它們當成「進入 job
+  卻沒人授權」的原始資料。它已經排除 lane state 與 transcript，**lane 自己的衍生表應該同理排除**
+- `orphan_output` ×2：`analyst-2:cross_validate_txn2024`（第二份 finding，沒交給 critic）與
+  `synth:aggregate_state`（又一次用 `write_finding` 寫 state，同 #24）—— 真陽性
+
+### 順帶
+
+報告摘要是**簡體中文**（#24 是繁體），而 synth 的任務沒有像 #24 那樣寫明「繁體中文」。
+
+### 下一步（未做）
+
+1. **`_turns_affordable` 要同時看 `max_turns` 剩幾回合**，取兩者較小的。否則預算越大，
+   警告越晚，越容易被回合上限先截斷 —— 正是 #25 d1
+2. 或者把 `max_turns` 跟著預算調高（analyst 12 → ?）。但 1 不做的話，2 只是把同一個撞牆點往後移
+3. `unused_input` 排除 lane 自己命名空間底下的衍生 blob
