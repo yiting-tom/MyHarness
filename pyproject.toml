@@ -25,7 +25,8 @@ dev = [
 a2a = ["a2a-sdk[http-server]>=1.1.2", "uvicorn>=0.30"]
 
 [project.scripts]
-myharness = "myharness.monitor.cli:main"
+myharness = "myharness.cli:main"
+# Kept for MCP client configs that already spawn it; `myharness mcp` is the same thing.
 myharness-mcp = "myharness.mcp.server:main"
 
 [tool.hatch.build.targets.wheel]

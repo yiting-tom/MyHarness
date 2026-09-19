@@ -16,6 +16,7 @@ import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from myharness.artifacts.ids import ArtifactId
 from myharness.artifacts.local import LocalArtifactStore
@@ -278,8 +279,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="myharness", description=__doc__)
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT,
                         help="job 儲存根目錄")
-    sub = parser.add_subparsers(dest="command", required=True)
+    add_view_commands(parser.add_subparsers(dest="command", required=True))
+    return parser
 
+
+def add_view_commands(sub: Any) -> None:
+    """The read-only views, mountable under any parser (see ``myharness.cli``)."""
     jobs = sub.add_parser("jobs", help="列出可觀察的 job")
     jobs.set_defaults(func=cmd_jobs)
 
@@ -311,7 +316,6 @@ def build_parser() -> argparse.ArgumentParser:
     monitor.add_argument("--port", type=int, default=0,
                          help="--web 的 port；0 表示讓系統挑一個")
     monitor.set_defaults(func=cmd_monitor)
-    return parser
 
 
 def main(argv: list[str] | None = None) -> int:

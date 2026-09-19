@@ -7,11 +7,14 @@ unchanged (expose-any-a2a D3).
 
 Two things this module does NOT do, on purpose:
 
-- **It is not in any default startup path.** There is no console script for it,
-  and nothing else in the package imports it. `myharness-mcp` starts an endpoint
-  that is reachable only by whoever can spawn the process; this one is reachable
-  by whoever can open a socket. Those are not the same risk, and the second one
-  should start only when somebody says so.
+- **It is not in any default startup path.** It starts only as
+  ``myharness a2a`` (or ``python -m myharness.a2a.server``) -- a subcommand
+  somebody has to type, which ``myharness.cli`` imports only when that
+  subcommand is chosen; nothing else in the package imports it. ``myharness mcp``
+  starts an endpoint reachable only by whoever can spawn the process; this one
+  is reachable by whoever can open a socket. Those are not the same risk, and
+  the second one should start only when somebody says so. It has no console
+  script of its own for the same reason.
 - **It binds loopback and refuses to be talked out of it.** Authentication,
   multi-tenancy and rate limiting are all out of scope for this change, and a
   boundary with none of them has no business listening on a public interface.
@@ -94,16 +97,16 @@ def serve(service: AnalysisService, *, host: str = DEFAULT_HOST,
     uvicorn.run(app, host=host, port=port, log_level="info")
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Deliberately not a console script -- see the module docstring.
+def main(argv: list[str] | None = None, *,
+         prog: str = "python -m myharness.a2a.server") -> int:
+    """Deliberately not a console script of its own -- see the module docstring.
 
-    Run it as ``python -m myharness.a2a.server``, which is a sentence somebody
-    has to type.
+    Run it as ``myharness a2a``, which is a sentence somebody has to type.
     """
     from myharness.mcp.server import DEFAULT_CHARTERS, DEFAULT_ROOT, default_lanes
 
     parser = argparse.ArgumentParser(
-        prog="python -m myharness.a2a.server",
+        prog=prog,
         description="MyHarness over A2A. Loopback only; no authentication yet.",
     )
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT)

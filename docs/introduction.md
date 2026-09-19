@@ -125,8 +125,10 @@ HARNESS_PROXY_KEY=sk-...            # 端點不需認證就留空
 
 ```bash
 claude mcp add myharness -- \
-  myharness-mcp --root ./myharness-jobs --backend openrouter
+  myharness mcp --root ./myharness-jobs --backend openrouter
 ```
+
+（`myharness-mcp` 是舊名字，仍然可用。）
 
 `--root` 是 job 的存放位置，預設 `./myharness-jobs`。**刻意不叫 `jobs`**：layout
 本身會在 root 底下放一層 `jobs/`，取那個名字會得到 `jobs/jobs/<job_id>/`。
@@ -238,7 +240,7 @@ protocol-free 的程式碼知道有兩種協定，讓第二條邊界變便宜的
 
 ```bash
 uv pip install -e ".[a2a]"
-python -m myharness.a2a.server --root ./myharness-jobs --backend openrouter
+myharness a2a --root ./myharness-jobs --backend openrouter
 ```
 
 ### 預設回價目表，全文要明說
@@ -283,7 +285,7 @@ comply」：**不認得這個約定的客戶端會被告知它不認得**，而�
 
 **沒有認證。** 這條邊界是網路可達的，MCP stdio 不是。認證、多租戶、速率限制
 一律還沒有，所以它**只綁 loopback**，而且對非 loopback 的位址是拒絕而不是警告。
-沒有 console script，也沒有別的模組 import 它 —— 它只在有人親自打那行指令時才起來。
+它沒有自己的 console script，`myharness` 也只在選了 `a2a` 這個子命令時才 import 它 —— 它只在有人親自打 `myharness a2a` 時才起來。
 
 **進行中的 task 接不回來。** job 只活在啟動它的那個 process 裡。讀結果換 process
 照樣答（只碰事件流與 store），但 A2A 的 `TaskState` 九個值裡沒有一個表示
@@ -681,7 +683,7 @@ Charter 是 worker 的全部人格。它會被放在 prompt 的穩定前綴，�
 
 ```bash
 # 端到端跑一次 golden job（會花錢）
-python -m myharness.goldens --backend openrouter
+myharness golden --backend openrouter
 
 # 列出所有 job
 myharness --root jobs-scratch/golden jobs

@@ -127,9 +127,9 @@ async def serve(service: AnalysisService) -> None:
         )
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, prog: str = "myharness-mcp") -> int:
     parser = argparse.ArgumentParser(
-        prog="myharness-mcp", description="MyHarness as an MCP server over stdio."
+        prog=prog, description="MyHarness as an MCP server over stdio."
     )
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT,
                         help=f"where jobs are stored (default: ./{DEFAULT_ROOT})")

@@ -6,8 +6,10 @@
 ## 連接
 
 ```bash
-claude mcp add myharness -- myharness-mcp --root ./myharness-jobs --backend openrouter
+claude mcp add myharness -- myharness mcp --root ./myharness-jobs --backend openrouter
 ```
+
+`myharness-mcp` 是同一個入口的舊名字，保留給已經設定好的 client。
 
 `--root` 預設 `./myharness-jobs`。**不叫 `jobs`** —— layout 本身會在 root 底下放一層
 `jobs/`，取名 `jobs` 會得到 `jobs/jobs/<job_id>/`。這個命名衝突是 layout privacy

@@ -213,8 +213,8 @@ async def run_golden(
                         flow, detect(flow), report_text)
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    parser = argparse.ArgumentParser(prog=prog, description=__doc__)
     parser.add_argument("--root", type=Path, default=Path("jobs-scratch/golden"))
     parser.add_argument("--backend", default="openrouter")
     parser.add_argument("--job-id", default="golden")

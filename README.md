@@ -43,8 +43,10 @@ HARNESS_PROXY_KEY=sk-...            # 端點不需認證就留空
 ## 從 Claude Code 連接
 
 ```bash
-claude mcp add myharness -- myharness-mcp --root ./myharness-jobs --backend openrouter
+claude mcp add myharness -- myharness mcp --root ./myharness-jobs --backend openrouter
 ```
+
+（舊的 `myharness-mcp` 仍然可用，是同一個東西 —— 已經設定好的 MCP client 不必改。）
 
 然後在對話裡：
 
@@ -67,10 +69,10 @@ MCP over stdio 要求客戶端把 `myharness-mcp` spawn 成子程序，所以只
 
 ```bash
 uv pip install -e ".[a2a]"
-python -m myharness.a2a.server --root ./myharness-jobs --backend openrouter
+myharness a2a --root ./myharness-jobs --backend openrouter
 ```
 
-沒有 console script，而且**只綁 loopback**：這條邊界目前沒有認證、沒有多租戶、
+沒有自己的 console script，只在有人打 `myharness a2a` 時才起來，而且**只綁 loopback**：這條邊界目前沒有認證、沒有多租戶、
 沒有速率限制，所以它拒絕聽在任何非 loopback 的位址上。要對外開之前，那三題
 得先有答案。
 
@@ -96,10 +98,21 @@ agent card 在 `/.well-known/agent-card.json`，宣告兩個 skill：
 所以被丟下的 job 回報 `FAILED` 加一段說明——種類上是錯的，但它是終局狀態，
 呼叫方應該停止等待（spikes/RESULTS.md，spike #23）。
 
+## 所有入口都在 `myharness` 底下
+
+| 命令 | 做什麼 |
+|---|---|
+| `myharness jobs` / `inspect` / `report` / `monitor` | 唯讀檢視一個 job（`monitor --web` 開瀏覽器版） |
+| `myharness mcp` | 以 MCP（stdio）提供分析服務 |
+| `myharness a2a` | 以 A2A（只綁 loopback）提供分析服務，需要 `[a2a]` extra |
+| `myharness golden` | 跑端到端的 golden job（會花錢） |
+
+`--root` 放在子命令前面，所有子命令共用；不給時各自用原本的預設。`mcp`／`a2a`／`golden` 的其他選項看 `myharness <command> --help`。
+
 ## 不用 MCP 直接跑
 
 ```bash
-python -m myharness.goldens --backend openrouter   # 端到端的 golden job
+myharness golden --backend openrouter             # 端到端的 golden job
 myharness --root jobs-scratch/golden jobs          # 列出 job
 myharness --root jobs-scratch/golden inspect golden # 資料流與異常
 myharness --root jobs-scratch/golden monitor golden # 即時追蹤
