@@ -138,6 +138,10 @@ h2{font-size:12px; letter-spacing:.12em; color:var(--faint); font-weight:600; ma
 .node.data.made .g{color:var(--out)}
 .node.data.report{border-color:var(--out); border-width:2px; font-weight:600}
 .node.data.report .g{color:var(--out)}
+.node.data{cursor:pointer; transition:border-color .15s, box-shadow .15s}
+.node.data:hover{border-color:var(--dim)}
+.node.data.sel{border-color:var(--data); box-shadow:0 0 0 2px color-mix(in srgb,var(--data) 30%,transparent)}
+.node.data.rewritten .meta{color:var(--agent)}
 
 .node.agent{padding:10px 12px 10px; gap:5px; transition:border-color .2s, box-shadow .2s}
 .node.agent:hover{border-color:var(--dim)}
@@ -257,6 +261,37 @@ h2{font-size:12px; letter-spacing:.12em; color:var(--faint); font-weight:600; ma
 .trace .err{color:var(--stall)}
 .trace .harness{color:var(--agent); margin-top:3px}
 
+.who .id{word-break:break-all}
+.vers{display:flex; flex-direction:column; gap:6px; margin:4px 0 12px}
+.ver{font-family:var(--mono); font-size:12px; border:1px solid var(--rule); border-radius:5px;
+  padding:6px 10px; min-height:34px; color:var(--dim); background:var(--sunk)}
+.ver:hover{border-color:var(--dim)}
+.ver.on{border-color:var(--data); color:var(--fg); background:var(--panel)}
+.ver b{color:var(--fg); margin-right:4px}
+.add{color:var(--out); font-weight:600} .del{color:var(--stall); font-weight:600}
+.seg{display:inline-flex; border:1px solid var(--rule); border-radius:5px; overflow:hidden; margin-bottom:10px}
+.seg button{padding:5px 14px; font-size:12.5px; color:var(--dim); min-height:32px; text-align:center}
+.seg button + button{border-left:1px solid var(--rule)}
+.seg button.on{background:var(--data); color:var(--panel); font-weight:600}
+pre.content{font-size:12.5px; line-height:1.65; background:var(--sunk); border:1px solid var(--rule);
+  border-radius:5px; padding:10px 12px; font-family:var(--mono); color:var(--fg)}
+pre.content.added{border-left:3px solid var(--out)}
+.diff{border:1px solid var(--rule); border-radius:5px; overflow:hidden; font-family:var(--mono);
+  font-size:12.5px; line-height:1.6}
+.dl{display:grid; grid-template-columns:22px minmax(0,1fr); padding:1px 8px 1px 0}
+.dl .sym{text-align:center; color:var(--faint); user-select:none}
+.dl .t{white-space:pre-wrap; overflow-wrap:anywhere}
+.dl.add{background:color-mix(in srgb,var(--out) 13%,transparent)}
+.dl.add .sym{color:var(--out); font-weight:700}
+.dl.del{background:color-mix(in srgb,var(--stall) 13%,transparent)}
+.dl.del .sym{color:var(--stall); font-weight:700}
+.dl.same .t{color:var(--dim)}
+.dl.skip{display:block; padding:3px 12px; color:var(--faint); background:var(--sunk); font-size:12px}
+.tablewrap{overflow-x:auto; border:1px solid var(--rule); border-radius:5px}
+table.preview{border-collapse:collapse; font-family:var(--mono); font-size:12px; font-variant-numeric:tabular-nums}
+table.preview th,table.preview td{padding:4px 10px; border-bottom:1px solid var(--rule); white-space:nowrap; text-align:left}
+table.preview th{color:var(--dim); background:var(--sunk); position:sticky; top:0}
+.chip[data-a]{cursor:pointer}
 .feed{display:flex; flex-direction:column-reverse}
 .ev{display:grid; grid-template-columns:58px minmax(0,1fr); gap:10px; padding:4px 0;
   border-bottom:1px solid var(--rule); font-size:12px; line-height:1.5}
@@ -318,7 +353,7 @@ h2{font-size:12px; letter-spacing:.12em; color:var(--faint); font-weight:600; ma
   <aside class="side">
     <div class="tabs" role="tablist">
       <button class="tab" role="tab" id="tab-agent" aria-selected="true"
-        aria-controls="pane-agent">Agent</button>
+        aria-controls="pane-agent">詳情</button>
       <button class="tab" role="tab" id="tab-events" aria-selected="false"
         aria-controls="pane-events">事件</button>
     </div>
@@ -364,6 +399,7 @@ const clock = (s) => {
 let firstTs = null, lastTs = null;
 let selected = null, follow = true, tab = "agent";
 let traceOpen = {}, traceCache = {}, taskFull = false, anomOpen = false;
+let selArt = null, artCache = {}, artVer = {}, artMode = {};
 let prevEdges = null, prevSteps = {}, prevSeq = null, prevStepSeq = {};
 let GEOM = {pos: new Map(), edges: []};
 
@@ -414,6 +450,22 @@ function buildModel() {
   }
   if (DATA.report) addArt(DATA.report);
 
+  /* 逐輪紀錄裡的寫入。dispatch.end 只帶一份 artifact，所以一條 lane 寫了兩份、
+     只回報一份時，另一份以前根本不在圖上（golden #26 的 d3）。lane 自己的
+     state 不畫 —— 它是 lane 的記憶，不是這個 job 的產出。 */
+  const versions = new Map();
+  for (const w of DATA.writes || []) {
+    if (/\/state$/.test(w.artifact) || isTrace(w.artifact)) continue;
+    versions.set(w.artifact, (versions.get(w.artifact) || 0) + 1);
+    if (!nodes.has("d:" + w.dispatch)) continue;
+    addArt(w.artifact);
+    const n = nodes.get("a:" + w.artifact);
+    if (!n.producer) n.producer = w.dispatch;
+    if (!edges.some((e) => e.from === "d:" + w.dispatch && e.to === n.key))
+      edges.push({from: "d:" + w.dispatch, to: n.key, kind: "write", hot: false});
+  }
+  for (const [a, c] of versions) if (nodes.has("a:" + a)) nodes.get("a:" + a).versions = c;
+
   /* lanes/<lane>/derived/ 底下的表是 agent 自己查出來、存起來再讀的中間結果。
      畫在「資料」列會讓它看起來像進來的原始資料 —— 它不是。事件流沒有記錄
      它是哪一次派工寫的，所以這條邊是依路徑推定的，畫成虛線、圖例照說。 */
@@ -459,7 +511,7 @@ const narrow = () => innerWidth < 640;
 let W, H, GAP_X, GAP_Y, PAD, GUTTER;
 function geometry() {
   const n = narrow();
-  W = n ? {data: 164, agent: 214} : {data: 196, agent: 256};
+  W = n ? {data: 164, agent: 214} : {data: 214, agent: 256};
   H = {data: 38, agent: 136, done: 112};
   GAP_X = n ? 12 : 20; GAP_Y = n ? 44 : 50; PAD = n ? 14 : 24; GUTTER = n ? 8 : 80;
 }
@@ -661,14 +713,16 @@ function spark(e) {
 function dataNode(n, style) {
   const cls = n.report ? " report" : n.producer ? " made" : "";
   const glyph = n.report ? "★" : n.derived ? "▤" : n.producer ? "▪" : "▣";
-  const meta = n.rereads ? "讀回 ↺" : kTok(n.info.est_tokens);
+  const meta = n.versions > 1 ? `改寫 ×${n.versions}` : n.rereads ? "讀回 ↺" : kTok(n.info.est_tokens);
   const title = `${n.id}${n.derived ? `\n${n.producer} 查詢後自己存下的中間表（依路徑判斷）`
     : n.producer ? `\n由 ${n.producer} 寫出` : "\n進來的資料"}${
     n.rereads ? "\n寫出它的 agent 之後又讀了它" : ""}`;
-  return `<div class="node data${cls}" style="${style}" title="${esc(title)}">
+  const on = selArt === n.id;
+  return `<button class="node data${cls}${on ? " sel" : ""}${n.versions > 1 ? " rewritten" : ""}"
+      style="${style}" title="${esc(title + "\n點一下看內容")}" data-a="${esc(n.id)}" aria-pressed="${on}">
     <span class="g" aria-hidden="true">${glyph}</span>
     <span class="lbl">${esc(n.info.label || n.id)}</span>
-    ${meta ? `<span class="meta">${esc(meta)}</span>` : ""}</div>`;
+    ${meta ? `<span class="meta">${esc(meta)}</span>` : ""}</button>`;
 }
 
 function agentNode(d, style) {
@@ -741,7 +795,7 @@ function renderLegend() {
 
 /* --- side panel ------------------------------------------------------------ */
 function pickFollowed() {
-  if (!follow) return;
+  if (!follow || selArt) return;
   const running = DATA.dispatches.filter((d) => d.running);
   const pool = running.length ? running : DATA.dispatches;
   const pick = pool.reduce((a, d) => (!a || (d.started || "") > (a.started || "")) ? d : a, null);
@@ -750,6 +804,16 @@ function pickFollowed() {
 
 function renderSide() {
   pickFollowed();
+  document.querySelectorAll(".node.data").forEach((el) => {
+    const on = el.dataset.a === selArt;
+    el.classList.toggle("sel", on); el.setAttribute("aria-pressed", on);
+  });
+  if (selArt) {
+    document.querySelectorAll(".node.agent").forEach((el) => {
+      el.classList.remove("sel"); el.setAttribute("aria-pressed", "false");
+    });
+    return renderArtifact();
+  }
   document.querySelectorAll(".node.agent").forEach((el) => {
     const on = el.dataset.d === selected;
     el.classList.toggle("sel", on); el.setAttribute("aria-pressed", on);
@@ -767,11 +831,11 @@ function renderSide() {
   const pct = lastPct(d);
   const label = (a) => esc(nodeInfo(a).label || a);
   const opened = new Set(d.opened);
-  const reads = d.granted.length ? d.granted.map((a) => `<span class="chip" title="${esc(a)}">${label(a)}${
+  const reads = d.granted.length ? d.granted.map((a) => `<span class="chip" role="button" tabindex="0" data-a="${esc(a)}" title="${esc(a)}">${label(a)}${
       DATA.read_edges_available ? (opened.has(a) ? " · 讀過" : " · 沒打開") : ""}</span>`).join("")
     : esc(d.nothing_granted_why);
   const writes = d.produced.length
-    ? d.produced.map((a) => `<span class="chip" title="${esc(a)}">${label(a)}</span>`).join("")
+    ? d.produced.map((a) => `<span class="chip" role="button" tabindex="0" data-a="${esc(a)}" title="${esc(a)}">${label(a)}</span>`).join("")
     : esc(d.nothing_written_why);
 
   pane.innerHTML = `
@@ -802,6 +866,107 @@ function renderSide() {
     ${traceOpen[d.id] ? renderTrace(traceCache[d.id]) : ""}`;
   if (atBottom && d.running) pane.scrollTop = pane.scrollHeight;
   tick();
+}
+
+/* --- one artifact: content, versions, and what each version changed --------- */
+const KIND_SAYS = (n) => !n ? "" : n.report ? "報告" : n.derived ? "agent 的中間表"
+  : n.producer ? "產出" : "進來的資料";
+
+async function loadArtifact(id) {
+  try {
+    const r = await fetch("artifact?id=" + encodeURIComponent(id), {cache: "no-store"});
+    artCache[id] = {seq: DATA.seq, view: await r.json()};
+  } catch (err) {
+    artCache[id] = {seq: DATA.seq, view: {error: "fetch", why: "讀不到這份 artifact：" + err}};
+  }
+  if (selArt === id) renderArtifact();
+}
+
+function renderArtifact() {
+  const pane = $("pane-agent"), id = selArt;
+  const cached = artCache[id];
+  /* 事件流動了就重抓：執行中的 lane 可能剛改寫了它。 */
+  if (!cached || (cached.seq !== DATA.seq && !cached.loading)) {
+    if (!cached) pane.innerHTML = '<p class="say">讀取中…</p>';
+    artCache[id] = {...(cached || {}), loading: true};
+    loadArtifact(id);
+    if (!cached) return;
+  }
+  const v = (artCache[id] || cached).view;
+  if (!v) return;
+  const node = buildModel().nodes.get("a:" + id);
+  const label = node ? node.info.label : id.split("/").pop();
+  const back = `<button class="follow" id="backagent">← 回到 agent</button>`;
+  if (v.error) {
+    pane.innerHTML = `${back}<div class="who"><div class="t1"><span class="lane">${esc(label)}</span></div></div>
+      <p class="say warn">${esc(v.why)}</p>`;
+    return;
+  }
+  const readers = DATA.dispatches.filter((d) => d.opened.includes(id));
+  const granted = DATA.dispatches.filter((d) => d.granted.includes(id) && !d.opened.includes(id));
+  const who = (ds) => ds.map((d) => `<span class="chip">${esc(d.lane)} · ${esc(d.id)}</span>`).join("");
+  const head = `${back}
+    <div class="who">
+      <div class="t1"><span class="lane">${esc(label)}</span>
+        <span class="pill">${esc(KIND_SAYS(node))}</span></div>
+      <div class="id">${esc(id)}</div>
+    </div>
+    <div class="kv">
+      <div><span class="k">大小</span><span class="v">${n0(v.bytes)} B</span></div>
+      <div><span class="k">估計 token</span><span class="v">${v.est_tokens ? n0(v.est_tokens) : "—"}</span></div>
+      <div><span class="k">${v.kind === "note" ? "紀錄中的版本" : "寫入者"}</span><span class="v">${
+        v.kind === "note" ? (v.versions || []).length : esc((v.produced_by || "").replace(/^lane:/, ""))}</span></div>
+    </div>
+    ${readers.length || granted.length ? `<div class="io"><span class="k">讀過它的 agent</span>${
+      readers.length ? who(readers) : "還沒有"}${granted.length && DATA.read_edges_available
+        ? `<span class="k" style="margin-top:6px">被允許但沒打開</span>${who(granted)}` : ""}</div>` : ""}`;
+
+  if (v.kind === "blob") {
+    const cols = (v.schema && v.schema.columns) || [];
+    const rows = v.schema && v.schema.rows;
+    const table = v.preview && v.preview.length && !v.preview.some((l) => l.includes('"'))
+      ? `<div class="tablewrap"><table class="preview">${v.preview.map((l, i) =>
+          `<tr>${l.split(",").map((c) => i ? `<td>${esc(c)}</td>` : `<th>${esc(c)}</th>`).join("")}</tr>`).join("")}</table></div>`
+      : v.preview ? `<pre class="content">${esc(v.preview.join("\n"))}</pre>` : "";
+    pane.innerHTML = `${head}
+      ${cols.length ? `<div class="io"><span class="k">欄位${rows ? `（${n0(rows)} 列）` : ""}</span>${
+        cols.map((c) => `<span class="chip">${esc(c)}</span>`).join("")}</div>` : ""}
+      <h2>預覽</h2>${table}
+      ${v.preview_why ? `<p class="say" style="margin-top:8px">${esc(v.preview_why)}</p>` : ""}`;
+    return;
+  }
+
+  const vs = v.versions || [];
+  const pick = Math.min(artVer[id] ?? vs.length - 1, vs.length - 1);
+  const mode = artMode[id] || (vs.length > 1 ? "diff" : "text");
+  const cur = vs[pick];
+  const chips = vs.length ? `<div class="vers" role="group" aria-label="版本">${vs.map((x, i) =>
+      `<button class="ver${i === pick ? " on" : ""}" data-ver="${i}" aria-pressed="${i === pick}">
+        <b>v${i + 1}</b> ${esc(x.dispatch)} · ${n0(x.chars)} 字${
+        i ? ` <span class="add">+${x.diff.added}</span> <span class="del">−${x.diff.removed}</span>` : " · 新建"}</button>`).join("")}</div>` : "";
+  const seg = vs.length ? `<div class="seg" role="group" aria-label="顯示方式">
+      <button data-mode="diff" aria-pressed="${mode === "diff"}"${mode === "diff" ? ' class="on"' : ""}>變更</button>
+      <button data-mode="text" aria-pressed="${mode === "text"}"${mode === "text" ? ' class="on"' : ""}>全文</button></div>` : "";
+  let body;
+  if (!cur) {
+    body = `<pre class="content">${esc(v.content)}</pre>`;
+  } else if (mode === "text") {
+    body = `<pre class="content">${esc(cur.text)}</pre>${cur.cut ? '<p class="say">太長，只顯示前段。</p>' : ""}`;
+  } else if (cur.first) {
+    body = `<p class="say">第一版：${esc(cur.lane)}（${esc(cur.dispatch)}）新建立了它，共 ${n0(cur.chars)} 字 —— 整份都是新增的。</p>
+      <pre class="content added">${esc(cur.text)}</pre>`;
+  } else {
+    body = `<p class="say">相對 v${pick}：新增 <span class="add">${cur.diff.added} 行</span>、刪除 <span class="del">${
+      cur.diff.removed} 行</span>。由 ${esc(cur.lane)}（${esc(cur.dispatch)}）的第 ${cur.n} 次寫入。</p>
+      <div class="diff">${cur.diff.lines.map(([op, t]) => op === "skip"
+        ? `<div class="dl skip">⋯ 未變動 ${t} 行</div>`
+        : `<div class="dl ${op}"><span class="sym" aria-label="${op === "add" ? "新增" : op === "del" ? "刪除" : "未變動"}">${
+            op === "add" ? "+" : op === "del" ? "−" : " "}</span><span class="t">${esc(t) || "&nbsp;"}</span></div>`).join("")}</div>`;
+  }
+  const lastNote = vs.length && pick === vs.length - 1 && v.matches_last
+    ? `<p class="say" style="margin-top:8px">這一版就是存放區目前的內容。</p>` : "";
+  pane.innerHTML = `${head}${v.history_why ? `<p class="say warn" style="margin-bottom:12px">${esc(v.history_why)}</p>` : ""}
+    ${chips}${seg}${body}${lastNote}`;
 }
 
 function stepRows(d) {
@@ -982,9 +1147,21 @@ function showTab(name) {
 $("tab-agent").onclick = () => showTab("agent");
 $("tab-events").onclick = () => showTab("events");
 
+document.addEventListener("keydown", (e) => {
+  if ((e.key === "Enter" || e.key === " ") && e.target.matches('.chip[role="button"]')) {
+    e.preventDefault(); e.target.click();
+  }
+});
 document.addEventListener("click", async (e) => {
   const node = e.target.closest(".node.agent");
-  if (node) { selected = node.dataset.d; follow = false; showTab("agent"); renderSide(); return; }
+  if (node) { selected = node.dataset.d; selArt = null; follow = false; showTab("agent"); renderSide(); return; }
+  const art = e.target.closest(".node.data, .chip[data-a]");
+  if (art) { selArt = art.dataset.a; follow = false; showTab("agent"); renderSide(); return; }
+  const ver = e.target.closest("[data-ver]");
+  if (ver) { artVer[selArt] = Number(ver.dataset.ver); renderArtifact(); return; }
+  const mode = e.target.closest("[data-mode]");
+  if (mode) { artMode[selArt] = mode.dataset.mode; renderArtifact(); return; }
+  if (e.target.closest("#backagent")) { selArt = null; renderSide(); return; }
   if (e.target.closest("#anommore")) { anomOpen = !anomOpen; renderBar(); return; }
   if (e.target.closest("#task")) { taskFull = !taskFull; $("task").classList.toggle("full", taskFull); return; }
   if (e.target.closest("#follow")) { follow = true; renderSide(); return; }

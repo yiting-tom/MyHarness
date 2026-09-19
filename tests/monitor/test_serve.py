@@ -432,3 +432,10 @@ def test_a_dispatch_that_ended_before_its_first_turn_says_so(tmp_path: Path):
               .done("d1", "a", None, status="tool_failure", turns=0))
     write_job(tmp_path, stream)
     assert "第一輪回應之前" in build_state(tmp_path, JOB)["dispatches"][0]["steps_why"]
+
+
+def test_the_artifact_route_refuses_traversal_over_http(running_job):
+    _, url = running_job
+    status, body = get(url + "artifact?id=" + JOB + "/note/..%2F..%2Fsecret")
+    assert status == 200 and json.loads(body)["error"] == "bad_id"
+    assert json.loads(get(url + "artifact?id=")[1])["error"] == "bad_id"

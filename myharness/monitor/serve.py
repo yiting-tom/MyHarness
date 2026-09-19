@@ -31,13 +31,14 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Final
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from myharness.dataflow import EdgeKind, build_dataflow, detect
 from myharness.events.query import summarize
 from myharness.events.types import LANE_STEP
 from myharness.local_layout import find_jobs
 from myharness.loopback import require_loopback
+from myharness.monitor.content import artifact_view, writes_summary
 from myharness.monitor.html import SLOT, script_literal, template
 from myharness.monitor.live import current_activity
 from myharness.monitor.trace import parse_trace
@@ -95,6 +96,10 @@ def build_state(root: Path, job_id: str) -> dict[str, Any]:
         # The same rule for steps: a stream written before lane.step existed has
         # none, and an agent drawn without steps must not read as an idle one.
         "steps_recorded": recorded,
+        # Writes the transcripts recorded, including findings a lane wrote but
+        # did not name in its handle -- dispatch.end carries one artifact, and
+        # golden #26's d3 wrote two.
+        "writes": writes_summary(layout, flow),
         "flow_empty_why": explain_empty_flow(events, flow),
         "usd": summary.total_usd,
         "context_peak": summary.context_peak,
@@ -188,6 +193,22 @@ def build_trace(root: Path, job_id: str, dispatch_id: str) -> dict[str, Any]:
             for s in trace.steps
         ],
     }
+
+
+def build_artifact(root: Path, job_id: str, raw_id: str) -> dict[str, Any]:
+    """One artifact's content and recorded versions (see ``content.py``).
+
+    The id arrives on a query string and is untrusted: ``ArtifactId.parse``
+    refuses traversal and illegal segments, and an id from another job is
+    refused before the store is asked anything.
+    """
+    layout = next((j for j in find_jobs(root) if j.job_id == job_id), None)
+    if layout is None:
+        return {"error": "no_such_job", "why": f"找不到 job {job_id}。"}
+    if not raw_id or len(raw_id) > 512:
+        return {"error": "bad_id", "why": "沒有給 artifact id，或它長得不合理。"}
+    events = _read_events(layout.events_path)
+    return artifact_view(layout, build_dataflow(events, job_id=job_id), raw_id)
 
 
 # --- why something is empty -----------------------------------------------
@@ -366,6 +387,9 @@ class _Handler(BaseHTTPRequestHandler):
             self._page()
         elif path == "/state":
             self._json(build_state(self.root, self.job_id))
+        elif path == "/artifact":
+            raw = (parse_qs(urlparse(self.path).query).get("id") or [""])[0]
+            self._json(build_artifact(self.root, self.job_id, raw))
         elif path.startswith("/trace/"):
             dispatch_id = safe_id(path[len("/trace/"):])
             if dispatch_id is None:
@@ -445,6 +469,6 @@ def serve(root: Path, job_id: str, *, host: str = "127.0.0.1",
     return httpd, f"http://{shown}:{bound_port}/"
 
 
-__all__ = ["build_state", "build_trace", "explain_empty_flow", "explain_no_output",
-           "explain_no_steps",
+__all__ = ["build_artifact", "build_state", "build_trace", "explain_empty_flow",
+           "explain_no_output", "explain_no_steps",
            "make_server", "missing_job", "safe_id", "serve"]
