@@ -15,7 +15,7 @@
 --------------------------------------------------------------------------- */
 :root{
   --ground:#F4F6FA; --panel:#FFFFFF; --sunk:#EBEFF5; --rule:#D5DCE7; --grid:#E3E8F0;
-  --fg:#0F1522; --dim:#4A566B; --faint:#6E7A8F;
+  --fg:#0F1522; --dim:#46526A; --faint:#5A667C;
   --data:#1D5FD6; --agent:#A35F00; --out:#0A7A5A; --stall:#BF3328; --done:#3B5B85;
   --glow:0 0 0 transparent;
   --sans:"Fira Sans","Noto Sans TC","PingFang TC","Microsoft JhengHei",
@@ -25,14 +25,14 @@
 @media (prefers-color-scheme:dark){
   :root:not([data-theme="light"]){
     --ground:#090C12; --panel:#10151F; --sunk:#0C1018; --rule:#212A3A; --grid:#151C28;
-    --fg:#E4E9F2; --dim:#9AA6BA; --faint:#66728A;
+    --fg:#E6EAF2; --dim:#A9B4C6; --faint:#8C97AB;
     --data:#5E9BFF; --agent:#F3AA3C; --out:#3ED3A4; --stall:#F2655A; --done:#8AA5CC;
     --glow:0 0 14px color-mix(in srgb,var(--now) 45%,transparent);
   }
 }
 :root[data-theme="dark"]{
   --ground:#090C12; --panel:#10151F; --sunk:#0C1018; --rule:#212A3A; --grid:#151C28;
-  --fg:#E4E9F2; --dim:#9AA6BA; --faint:#66728A;
+  --fg:#E6EAF2; --dim:#A9B4C6; --faint:#8C97AB;
   --data:#5E9BFF; --agent:#F3AA3C; --out:#3ED3A4; --stall:#F2655A; --done:#8AA5CC;
   --glow:0 0 14px color-mix(in srgb,var(--now) 45%,transparent);
 }
@@ -41,6 +41,7 @@
 html,body{height:100%}
 body{
   margin:0; background:var(--ground); color:var(--fg);
+  display:flex; flex-direction:column; height:100dvh; overflow:hidden;
   font-family:var(--sans); font-size:14px; line-height:1.55;
   -webkit-font-smoothing:antialiased;
 }
@@ -52,8 +53,8 @@ pre{margin:0; white-space:pre-wrap; word-break:break-word; font-family:var(--mon
 
 /* --- status bar --------------------------------------------------------- */
 .bar{
-  position:sticky; top:0; z-index:20; background:var(--panel);
-  border-bottom:1px solid var(--rule); padding:14px 24px 12px;
+  flex:none; z-index:20; background:var(--panel);
+  border-bottom:1px solid var(--rule); padding:12px 24px 11px;
 }
 .row1{display:flex; align-items:center; gap:16px; flex-wrap:wrap}
 .pulse{width:12px; height:12px; border-radius:50%; background:var(--now);
@@ -69,27 +70,32 @@ pre{margin:0; white-space:pre-wrap; word-break:break-word; font-family:var(--mon
 .grow{flex:1}
 .clock{font-family:var(--mono); font-size:24px; font-variant-numeric:tabular-nums;
   text-align:right}
-.job{font-family:var(--mono); font-size:11.5px; color:var(--faint);
+.job{font-family:var(--mono); font-size:12px; color:var(--faint);
   letter-spacing:.08em; text-align:right}
 .stats{display:flex; gap:24px; flex-wrap:wrap; margin-top:9px}
 .stat{display:flex; gap:8px; align-items:baseline}
-.stat .k{font-size:11px; letter-spacing:.08em; color:var(--faint)}
+.stat .k{font-size:12px; letter-spacing:.08em; color:var(--faint)}
 .stat .v{font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:13.5px}
 
 /* --- page layout -------------------------------------------------------- */
-.shell{display:grid; grid-template-columns:minmax(0,1fr) 400px;
-  min-height:calc(100dvh - 96px)}
-.main{min-width:0; padding:18px 24px 40px; display:flex; flex-direction:column; gap:14px}
-.side{border-left:1px solid var(--rule); background:var(--panel);
-  position:sticky; top:96px; height:calc(100dvh - 96px);
+/* 標頭多高由內容決定；下面兩欄各自捲動。以前側欄用 calc(100dvh - 96px)
+   猜標頭的高度，標頭一換行，側欄底部的連線狀態就被切掉。 */
+.shell{flex:1; min-height:0; display:grid; grid-template-columns:minmax(0,1fr) 400px}
+.main{min-width:0; min-height:0; overflow-y:auto; padding:18px 24px 40px;
+  display:flex; flex-direction:column; gap:14px}
+.side{border-left:1px solid var(--rule); background:var(--panel); min-height:0;
   display:flex; flex-direction:column; min-width:0}
-h2{font-size:11px; letter-spacing:.12em; color:var(--faint); font-weight:600; margin:0}
+h2{font-size:12px; letter-spacing:.12em; color:var(--faint); font-weight:600; margin:0}
 
 .anoms{display:flex; flex-direction:column; gap:6px}
 .anom{font-size:13px; border:1px solid var(--rule); border-left:3px solid var(--agent);
   border-radius:4px; padding:7px 12px; background:var(--panel)}
 .anom.critical{border-left-color:var(--stall)}
-.anom .k{font-family:var(--mono); font-size:10.5px; color:var(--faint); margin-right:8px}
+.anom{display:flex; flex-wrap:wrap; gap:4px 10px; align-items:baseline}
+.anom .h{font-weight:600; color:var(--agent)}
+.anom.critical .h{color:var(--stall)}
+.anom .k{font-family:var(--mono); font-size:12px; color:var(--faint); margin-left:auto}
+.more.anommore{align-self:flex-start; margin-top:0}
 
 /* --- the graph ---------------------------------------------------------- */
 .stagewrap{
@@ -97,12 +103,14 @@ h2{font-size:11px; letter-spacing:.12em; color:var(--faint); font-weight:600; ma
   background:
     radial-gradient(circle, var(--grid) 1px, transparent 1.2px) 0 0/22px 22px,
     var(--sunk);
-  min-height:320px;
+  min-height:320px; flex:none;
 }
+.main > *{flex:none}
 .stage{position:relative; margin:0 auto}
 .stage svg{position:absolute; inset:0; overflow:visible; pointer-events:none}
-.colhead{position:absolute; left:18px; font-size:10.5px; letter-spacing:.12em;
-  color:var(--faint); white-space:nowrap}
+.colhead{position:absolute; left:14px; font-size:12px; letter-spacing:.1em;
+  color:var(--dim); white-space:nowrap; padding:1px 8px; border:1px solid var(--rule);
+  border-radius:10px; background:var(--panel)}
 
 .edge{fill:none; stroke-width:1.6}
 .edge.read{stroke:var(--data)}
@@ -125,7 +133,7 @@ h2{font-size:11px; letter-spacing:.12em; color:var(--faint); font-weight:600; ma
   border-color:color-mix(in srgb,var(--data) 45%,var(--rule)); font-size:12.5px}
 .node.data .g{color:var(--data); font-family:var(--mono); flex:none}
 .node.data .meta{margin-left:auto; flex:none; font-family:var(--mono);
-  font-size:10.5px; color:var(--faint)}
+  font-size:12px; color:var(--faint)}
 .node.data.made{border-color:color-mix(in srgb,var(--out) 55%,var(--rule))}
 .node.data.made .g{color:var(--out)}
 .node.data.report{border-color:var(--out); border-width:2px; font-weight:600}
@@ -143,18 +151,20 @@ h2{font-size:11px; letter-spacing:.12em; color:var(--faint); font-weight:600; ma
 .ok .a1 .mk{color:var(--out)}
 .bad .a1 .mk{color:var(--stall)}
 .a1 .lane{font-weight:600; font-size:14px}
-.a1 .when{margin-left:auto; font-family:var(--mono); font-size:11.5px; color:var(--faint); flex:none}
+.a1 .nth{font-size:12px; color:var(--dim); border:1px solid var(--rule); border-radius:9px;
+  padding:0 6px; flex:none; line-height:1.5}
+.a1 .when{margin-left:auto; font-family:var(--mono); font-size:12px; color:var(--faint); flex:none}
 .running .a1 .when{color:var(--agent)}
 .a1 .when.stalled{color:var(--stall)}
-.a2{font-family:var(--mono); font-size:11px; color:var(--faint); display:flex; gap:10px}
-.now{font-family:var(--mono); font-size:11.5px; color:var(--dim);
+.a2{font-family:var(--mono); font-size:12px; color:var(--faint); display:flex; gap:10px}
+.now{font-family:var(--mono); font-size:12px; color:var(--dim);
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
 .now b{color:var(--fg); font-weight:500}
 .running .now b{color:var(--agent)}
 .now.why{font-family:var(--sans); color:var(--faint); white-space:normal;
-  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; font-size:11.5px}
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; font-size:12px}
 .meter{display:flex; align-items:center; gap:8px; font-family:var(--mono);
-  font-size:10.5px; color:var(--faint)}
+  font-size:12px; color:var(--faint)}
 .meter .track{flex:1; height:4px; border-radius:2px; background:var(--sunk); overflow:hidden}
 .meter .fill{display:block; height:100%; background:var(--data); border-radius:2px;
   transition:width .5s ease-out}
@@ -174,6 +184,7 @@ h2{font-size:11px; letter-spacing:.12em; color:var(--faint); font-weight:600; ma
 .chip{font-family:var(--mono); font-size:12px; padding:1px 7px; border:1px solid var(--rule);
   border-radius:3px; background:var(--sunk); margin:2px 4px 2px 0; display:inline-block}
 
+.panhint{margin:-6px 0 0; font-size:12px; color:var(--dim)}
 .legend{display:flex; flex-wrap:wrap; gap:6px 18px; font-size:12px; color:var(--dim);
   align-items:center}
 .legend .it{display:flex; gap:7px; align-items:center}
@@ -188,7 +199,7 @@ h2{font-size:11px; letter-spacing:.12em; color:var(--faint); font-weight:600; ma
 .tab:hover{color:var(--fg)}
 .pane{overflow-y:auto; flex:1; padding:16px 18px 30px; min-height:0}
 .pane[hidden]{display:none}
-.link{font-size:11.5px; color:var(--faint); font-family:var(--mono);
+.link{font-size:12px; color:var(--faint); font-family:var(--mono);
   display:flex; gap:7px; align-items:center; padding:8px 18px;
   border-top:1px solid var(--rule); flex:none}
 .link .d{width:6px; height:6px; border-radius:50%; background:var(--out)}
@@ -201,17 +212,17 @@ h2{font-size:11px; letter-spacing:.12em; color:var(--faint); font-weight:600; ma
 .who .task{font-size:13px; color:var(--dim); line-height:1.6; cursor:pointer;
   display:-webkit-box; -webkit-line-clamp:4; -webkit-box-orient:vertical; overflow:hidden}
 .who .task.full{display:block}
-.pill{font-family:var(--mono); font-size:11px; padding:1px 8px; border-radius:10px;
+.pill{font-family:var(--mono); font-size:12px; padding:1px 8px; border-radius:10px;
   border:1px solid currentColor; white-space:nowrap}
 .pill.running{color:var(--agent)} .pill.ok{color:var(--out)} .pill.bad{color:var(--stall)}
 .kv{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:1px;
   background:var(--rule); border:1px solid var(--rule); border-radius:5px;
   overflow:hidden; margin-bottom:14px}
 .kv div{background:var(--panel); padding:7px 10px}
-.kv .k{font-size:10.5px; color:var(--faint); letter-spacing:.06em; display:block}
+.kv .k{font-size:12px; color:var(--faint); letter-spacing:.06em; display:block}
 .kv .v{font-family:var(--mono); font-size:13.5px; font-variant-numeric:tabular-nums}
 .io{font-size:12.5px; color:var(--dim); margin-bottom:12px; line-height:1.7}
-.io .k{color:var(--faint); font-size:11px; letter-spacing:.06em; display:block}
+.io .k{color:var(--faint); font-size:12px; letter-spacing:.06em; display:block}
 .follow{font-size:12px; color:var(--data); border:1px solid var(--rule); border-radius:4px;
   padding:4px 10px; margin-bottom:12px; min-height:30px}
 .follow:hover{border-color:var(--data)}
@@ -219,17 +230,18 @@ h2{font-size:11px; letter-spacing:.12em; color:var(--faint); font-weight:600; ma
 .say.warn{color:var(--agent); border-left:2px solid var(--agent); padding-left:10px}
 
 .steps{display:flex; flex-direction:column; gap:2px; margin-top:6px}
-.st{display:grid; grid-template-columns:34px minmax(0,1fr) 40px; gap:8px;
+.st{display:grid; grid-template-columns:40px minmax(0,1fr) 40px; gap:8px;
   font-size:12px; padding:3px 0; align-items:baseline}
-.st .n{font-family:var(--mono); font-size:10.5px; color:var(--faint); text-align:right}
+.st .n{font-family:var(--mono); font-size:12px; color:var(--faint); text-align:right}
 .st .b{min-width:0; overflow-wrap:anywhere}
-.st .p{font-family:var(--mono); font-size:10.5px; color:var(--faint); text-align:right}
-.st.call .b{font-family:var(--mono); font-size:11.5px}
+.st .p{font-family:var(--mono); font-size:12px; color:var(--faint); text-align:right}
+.st.call .b{font-family:var(--mono); font-size:12px; display:-webkit-box;
+  -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; word-break:break-all}
 .st.call .fn{color:var(--data); font-weight:500}
-.st.res .b{font-family:var(--mono); font-size:11px; color:var(--dim)}
+.st.res .b{font-family:var(--mono); font-size:12px; color:var(--dim)}
 .st.res.err .b{color:var(--stall)}
-.st.think .b{color:var(--faint); font-size:11.5px}
-.st.rule .b{color:var(--faint); font-size:10.5px; letter-spacing:.08em;
+.st.think .b{color:var(--faint); font-size:12px}
+.st.rule .b{color:var(--faint); font-size:12px; letter-spacing:.08em;
   border-top:1px solid var(--rule); padding-top:5px}
 @media (prefers-reduced-motion:no-preference){ .st.fresh{animation:slide 380ms ease-out} }
 @keyframes slide{from{opacity:0; transform:translateY(4px)} to{opacity:1}}
@@ -239,32 +251,38 @@ h2{font-size:11px; letter-spacing:.12em; color:var(--faint); font-weight:600; ma
 .trace{margin-top:12px; border-top:1px solid var(--rule); padding-top:10px;
   display:flex; flex-direction:column; gap:6px}
 .trace .step{display:grid; grid-template-columns:34px minmax(0,1fr); gap:8px; font-size:12px}
-.trace .step .n{font-family:var(--mono); color:var(--faint); text-align:right; font-size:10.5px}
+.trace .step .n{font-family:var(--mono); color:var(--faint); text-align:right; font-size:12px}
 .trace .fn{color:var(--data); font-family:var(--mono)}
-.trace .args,.trace .res{color:var(--dim); font-size:11px; max-height:8em; overflow:auto}
+.trace .args,.trace .res{color:var(--dim); font-size:12px; max-height:8em; overflow:auto}
 .trace .err{color:var(--stall)}
 .trace .harness{color:var(--agent); margin-top:3px}
 
 .feed{display:flex; flex-direction:column-reverse}
 .ev{display:grid; grid-template-columns:58px minmax(0,1fr); gap:10px; padding:4px 0;
   border-bottom:1px solid var(--rule); font-size:12px; line-height:1.5}
-.ev .t{font-family:var(--mono); font-size:10.5px; color:var(--faint)}
+.ev .t{font-family:var(--mono); font-size:12px; color:var(--faint)}
 .ev .m{overflow-wrap:anywhere}
-.ev .rep{font-family:var(--mono); font-size:10px; color:var(--faint); margin-left:6px;
+.ev .rep{font-family:var(--mono); font-size:12px; color:var(--faint); margin-left:6px;
   border:1px solid var(--rule); border-radius:2px; padding:0 4px}
 .ev.dispatch .m{color:var(--data)} .ev.throttle .m{color:var(--agent)}
 .ev.bad .m{color:var(--stall)} .ev.read .m{color:var(--dim)}
 @media (prefers-reduced-motion:no-preference){ .ev.fresh{animation:slide 380ms ease-out} }
 
+/* 窄螢幕改回整頁捲動：圖在上、側欄在下。兩個各自捲動的區塊疊在手機上，
+   手指永遠不知道自己在捲哪一個。 */
 @media (max-width:1060px){
-  .shell{grid-template-columns:1fr}
-  .side{position:static; height:auto; max-height:none; border-left:none;
-    border-top:1px solid var(--rule)}
-  .pane{max-height:70vh}
+  body{height:auto; overflow:visible; display:block}
+  .bar{position:sticky; top:0}
+  .shell{display:block}
+  .main{overflow:visible}
+  .side{border-left:none; border-top:1px solid var(--rule)}
+  .pane{max-height:none; overflow:visible}
 }
 @media (max-width:640px){
-  .bar{padding:12px 16px 10px} .main{padding:14px 16px 28px}
-  .clock{font-size:19px}
+  .bar{padding:10px 16px 9px} .main{padding:14px 16px 24px; gap:12px}
+  .clock{font-size:19px} .state{font-size:19px}
+  .stats{gap:6px 16px}
+  .pane{padding:14px 16px 24px}
 }
 </style>
 
@@ -294,6 +312,7 @@ h2{font-size:11px; letter-spacing:.12em; color:var(--faint); font-weight:600; ma
         <div id="nodes"></div>
       </div>
     </div>
+    <p class="panhint" id="panhint" hidden>圖比螢幕寬，可以在圖上左右滑動。</p>
     <div class="legend" id="legend"></div>
   </main>
   <aside class="side">
@@ -330,6 +349,10 @@ const STATUS = {running: "執行中", ok: "完成", budget_exceeded: "預算用�
   max_turns: "回合用完", tool_failure: "工具失敗", duplicate: "重複派工",
   state_rejected: "狀態未存", backend_unavailable: "後端不可用"};
 const statusOf = (d) => STATUS[d.status] || d.status;
+const FINISH = {finished: "完成", handoff_limit: "交接次數用完", session_error: "session 出錯",
+  backend_unavailable: "後端不可用", max_turns: "orchestrator 回合用完",
+  refused: "orchestrator 拒絕繼續", idle: "orchestrator 沒有下一步"};
+const finishOf = (r) => FINISH[r] || r;
 
 const clock = (s) => {
   s = Math.max(0, Math.floor(s));
@@ -340,7 +363,7 @@ const clock = (s) => {
 
 let firstTs = null, lastTs = null;
 let selected = null, follow = true, tab = "agent";
-let traceOpen = {}, traceCache = {}, taskFull = false;
+let traceOpen = {}, traceCache = {}, taskFull = false, anomOpen = false;
 let prevEdges = null, prevSteps = {}, prevSeq = null, prevStepSeq = {};
 let GEOM = {pos: new Map(), edges: []};
 
@@ -431,8 +454,18 @@ function buildModel() {
 /* --- layout ---------------------------------------------------------------- */
 /* 由上往下：一列是一層流向深度。平行的 lane 很少超過四條，流向卻會一直變深 ——
    所以深度走可以捲動的方向，寬度只取決於同時有幾條 lane。 */
-const W = {data: 196, agent: 256}, H = {data: 38, agent: 140};
-const GAP_X = 20, GAP_Y = 54, PAD = 24, GUTTER = 78;
+/* 窄螢幕上節點縮一點、左側的列標籤收掉 —— 手機上那 78px 比標籤本身值錢。 */
+const narrow = () => innerWidth < 640;
+let W, H, GAP_X, GAP_Y, PAD, GUTTER;
+function geometry() {
+  const n = narrow();
+  W = n ? {data: 164, agent: 214} : {data: 196, agent: 256};
+  H = {data: 38, agent: 136, done: 112};
+  GAP_X = n ? 12 : 20; GAP_Y = n ? 44 : 50; PAD = n ? 14 : 24; GUTTER = n ? 8 : 80;
+}
+geometry();
+/* 結束的 agent 少一行「此刻在做什麼」，卡片跟著變矮，不留一塊空白。 */
+const hOf = (n) => n.type === "agent" ? (n.d.running ? H.agent : H.done) : H.data;
 
 function layout(m) {
   const rows = [];
@@ -455,24 +488,25 @@ function layout(m) {
     row.forEach((k, i) => order.set(k, i + 0.001 * i));
   }
   const rowW = rows.map((row) => row.reduce((s, k) => s + W[m.nodes.get(k).type] + GAP_X, -GAP_X));
-  const rowH = rows.map((row) => Math.max(H.data, ...row.map((k) => H[m.nodes.get(k).type])));
+  const rowH = rows.map((row) => Math.max(H.data, ...row.map((k) => hOf(m.nodes.get(k)))));
   const wide = Math.max(W.agent * 2 + GAP_X, ...rowW);
   let y = PAD;
   const heads = [];
   rows.forEach((row, r) => {
     const agents = row.some((k) => m.nodes.get(k).type === "agent");
-    heads.push({y: y + rowH[r] / 2, label: r === 0 ? "資料" : agents ? "Agent" : "產出"});
+    heads.push({y: y + rowH[r] / 2, label: r === 0 ? "資料" : agents ? "處理" : "產出"});
     let x = GUTTER + (wide - rowW[r]) / 2;
     for (const k of row) {
       const t = m.nodes.get(k).type;
-      pos.set(k, {x, y: y + (rowH[r] - H[t]) / 2, w: W[t], h: H[t], row: r});
+      const h = hOf(m.nodes.get(k));
+      pos.set(k, {x, y: y + (rowH[r] - h) / 2, w: W[t], h, row: r});
       x += W[t] + GAP_X;
     }
     y += rowH[r] + GAP_Y;
   });
   /* 每一列最右邊在哪裡 —— 跨過好幾列的邊要從旁邊繞，不能穿過中間那列的卡片。 */
   const right = rows.map((row) => Math.max(0, ...row.map((k) => pos.get(k).x + pos.get(k).w)));
-  return {pos, heads, right, width: GUTTER + wide + PAD * 2 + 40, height: y - GAP_Y + PAD};
+  return {pos, heads, right, width: GUTTER + wide + PAD * 2 + 30, height: y - GAP_Y + PAD};
 }
 
 const pathOf = (a, b) => {
@@ -505,7 +539,7 @@ function renderBar() {
   document.documentElement.style.setProperty("--now", `var(--${tone})`);
   $("bar").className = "bar" + (!DATA.finished && !stale ? " live" : "");
   $("state").textContent = DATA.finished
-    ? "已結束" + (DATA.finish_reason ? ` · ${DATA.finish_reason}` : "")
+    ? "已結束" + (DATA.finish_reason ? ` · ${finishOf(DATA.finish_reason)}` : "")
     : stale ? "事件流沒有動靜" : DATA.activity.state;
   $("detail").textContent = DATA.finished
     ? (DATA.activity.detail && DATA.activity.detail !== DATA.finish_reason ? DATA.activity.detail : "")
@@ -522,8 +556,15 @@ function renderBar() {
     ...(DATA.throttle_seconds ? [["限流等待", clock(DATA.throttle_seconds)]] : []),
     ["報告", DATA.report ? "已產出" : DATA.finished ? "沒有產出" : "還沒有"],
   ].map(([k, v]) => `<div class="stat"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join("");
-  $("anoms").innerHTML = DATA.anomalies.map((a) =>
-    `<div class="anom ${esc(a.severity)}"><span class="k">${esc(a.kind)}</span>${esc(a.detail)}</div>`).join("");
+  const ANOM = {unused_input: "進來了但沒人用", orphan_output: "寫出了但沒人讀",
+    overwritten_output: "同一份產出被改寫", ungranted_production: "寫到了沒被授權的地方",
+    suggestion_ignored: "建議沒被採納"};
+  const all = DATA.anomalies, shown = anomOpen ? all : all.slice(0, 2);
+  $("anoms").innerHTML = shown.map((a) =>
+    `<div class="anom ${esc(a.severity)}"><span class="h">${esc(ANOM[a.kind] || a.kind)}</span>${
+      esc(a.detail)}<span class="k">${esc(a.kind)}</span></div>`).join("")
+    + (all.length > 2 ? `<button class="more anommore" id="anommore">${
+      anomOpen ? "收合" : `另外 ${all.length - 2} 個異常`}</button>` : "");
 }
 
 function renderGraph() {
@@ -557,7 +598,8 @@ function renderGraph() {
     return a && b ? `<path class="edge ${e.kind}${e.hot ? " hot" : ""}" d="${pathOf(a, b)}"/>` : "";
   }).join("");
 
-  const heads = g.heads.map((h) => `<div class="colhead" style="top:${h.y - 8}px">${esc(h.label)}</div>`);
+  const heads = narrow() ? [] : g.heads.map((h) =>
+    `<div class="colhead" style="top:${h.y - 10}px">${esc(h.label)}</div>`);
   const cards = [...m.nodes.values()].map((n) => {
     const p = g.pos.get(n.key);
     const style = `left:${p.x}px;top:${p.y}px;width:${p.w}px;height:${p.h}px`;
@@ -587,9 +629,15 @@ function renderGraph() {
 function fit() {
   if (!GEOM.width) { $("stage").style.zoom = 1; return; }
   const room = $("wrap").clientWidth - 2;
-  $("stage").style.zoom = Math.min(1, Math.max(0.75, room / GEOM.width));
+  const z = Math.min(1, Math.max(narrow() ? 0.88 : 0.75, room / GEOM.width));
+  $("stage").style.zoom = z;
+  $("panhint").hidden = GEOM.width * z <= room + 1;
 }
-addEventListener("resize", fit);
+let lastNarrow = narrow();
+addEventListener("resize", () => {
+  if (narrow() !== lastNarrow) { lastNarrow = narrow(); geometry(); if (!DATA.error) renderGraph(); }
+  fit();
+});
 
 function spark(e) {
   const a = GEOM.pos.get(e.from), b = GEOM.pos.get(e.to);
@@ -638,10 +686,16 @@ function agentNode(d, style) {
   } else if (d.running) {
     now = `<div class="now why">${esc(d.steps_why)}</div>`;
   } else {
-    now = `<div class="now">${d.produced.length
-      ? `寫出 ${d.produced.length} 份` : esc(d.nothing_written_why)}</div>`;
+    const took = d.started && d.ended ? clock((Date.parse(d.ended) - Date.parse(d.started)) / 1000) : "";
+    now = `<div class="now${d.produced.length ? "" : " why"}">${d.produced.length
+      ? `寫出 ${d.produced.length} 份${took ? ` · 花了 ${took}` : ""}`
+      : esc(d.nothing_written_why)}</div>`;
   }
   const turn = t ? t.turn : d.turns;
+  /* 同一條 lane 被派了兩次，兩張卡片以前只差一個 d1/d3 —— 讀者分不出來
+     哪一張是重派的。 */
+  const same = DATA.dispatches.filter((x) => x.lane === d.lane);
+  const nth = same.length > 1 ? same.findIndex((x) => x.id === d.id) + 1 : 0;
   const meter = pct == null ? `<div class="meter"><span>${
       d.running ? "預算：還沒有步驟紀錄" : `${n0(d.tokens_in)} in · ${n0(d.tokens_out)} out`}</span></div>`
     : `<div class="meter${pct >= .9 ? " hot" : pct >= .7 ? " warn" : ""}">
@@ -651,7 +705,8 @@ function agentNode(d, style) {
       data-d="${esc(d.id)}" aria-pressed="${selected === d.id}"
       aria-label="${esc(`${d.lane} ${d.id}，${statusOf(d)}`)}">
     <div class="a1"><span class="mk" aria-hidden="true">${mk}</span>
-      <span class="lane lbl">${esc(d.lane)}</span>
+      <span class="lane lbl">${esc(d.lane)}</span>${
+        nth ? `<span class="nth" title="這條 lane 的第 ${nth} 次派工">第 ${nth} 次</span>` : ""}
       <span class="when"${d.running ? ` data-since="${esc(d.started || "")}"` : ""}>${
         d.running ? "—" : esc(statusOf(d))}</span></div>
     <div class="a2"><span>${esc(d.id)}</span>${turn ? `<span>第 ${turn} 輪</span>` : ""}${
@@ -724,7 +779,7 @@ function renderSide() {
     <div class="who">
       <div class="t1"><span class="lane">${esc(d.lane)}</span><span class="id">${esc(d.id)}</span>
         <span class="pill ${state}">${esc(statusOf(d))}</span></div>
-      <div class="task${taskFull ? " full" : ""}" id="task" title="點一下展開或收合任務全文">${esc(d.task || "")}</div>
+      <div class="task${taskFull ? " full" : ""}" id="task" title="點一下展開或收合任務全文">${esc((d.task || "").replace(/\*\*/g, ""))}</div>
     </div>
     <div class="kv">
       <div><span class="k">經過</span><span class="v"${d.running ? ` data-since="${esc(d.started || "")}"` : ""}>${
@@ -930,6 +985,7 @@ $("tab-events").onclick = () => showTab("events");
 document.addEventListener("click", async (e) => {
   const node = e.target.closest(".node.agent");
   if (node) { selected = node.dataset.d; follow = false; showTab("agent"); renderSide(); return; }
+  if (e.target.closest("#anommore")) { anomOpen = !anomOpen; renderBar(); return; }
   if (e.target.closest("#task")) { taskFull = !taskFull; $("task").classList.toggle("full", taskFull); return; }
   if (e.target.closest("#follow")) { follow = true; renderSide(); return; }
   const more = e.target.closest(".more[data-trace]");
