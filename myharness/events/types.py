@@ -33,12 +33,15 @@ PEEK: Final = "peek"
 LIMIT_REACHED: Final = "limit.reached"
 NO_PROGRESS: Final = "no_progress"
 HANDOFF_RESTART: Final = "handoff.restart"
+#: One model turn or one batch of tool results, written *while* a lane runs.
+#: High-frequency by design, so readers built for rare events filter it out.
+LANE_STEP: Final = "lane.step"
 
 KNOWN_TYPES: Final = frozenset({
     JOB_START, JOB_FINISH, PLAN_UPDATE, INGRESS, PROXY_ROUTE,
     DISPATCH_START, DISPATCH_END, ARTIFACT_READ, CTX, ASK_USER, ASK_ANSWER,
     THROTTLE_COOLDOWN, THROTTLE_WAIT, THROTTLE_GAVE_UP,
-    PEEK, LIMIT_REACHED, NO_PROGRESS, HANDOFF_RESTART,
+    PEEK, LIMIT_REACHED, NO_PROGRESS, HANDOFF_RESTART, LANE_STEP,
 })
 
 # --- dispatch outcomes ---------------------------------------------------

@@ -22,6 +22,7 @@ from myharness.events.query import JobSummary, summarize
 from myharness.events.types import (
     ASK_USER,
     HANDOFF_RESTART,
+    LANE_STEP,
     LIMIT_REACHED,
     NO_PROGRESS,
     THROTTLE_COOLDOWN,
@@ -57,7 +58,10 @@ def current_activity(events: Sequence[Event], flow: DataFlow) -> Activity:
     if flow.finished:
         return Activity("已結束", flow.finish_reason)
 
-    tail = list(events)[-6:]
+    # Steps are excluded before the window is taken, not after: one lane writes
+    # two per turn, and six of them would push another lane's throttle wait
+    # out of view -- a job waiting on a rate limit reported as simply running.
+    tail = [e for e in events if e.t != LANE_STEP][-6:]
     for event in reversed(tail):
         if event.t in (THROTTLE_COOLDOWN, THROTTLE_WAIT):
             waited = event.get("seconds")

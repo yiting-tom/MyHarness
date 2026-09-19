@@ -41,6 +41,7 @@ from myharness.events.types import (
     CTX,
     DISPATCH_END,
     DISPATCH_START,
+    LANE_STEP,
     THROTTLE_COOLDOWN,
     THROTTLE_GAVE_UP,
     THROTTLE_WAIT,
@@ -553,6 +554,79 @@ def _consume(message: Any, acc: Accumulated) -> None:
         acc.transcript.append({"role": type(message).__name__})
 
 
+#: How much of a tool call's arguments a step event carries. Enough to tell
+#: one query from the next while it scrolls past; the transcript has the rest.
+STEP_ARG_CHARS: Final = 160
+
+
+def _arg_excerpt(value: Any) -> str:
+    """A tool call's input on one line, bounded.
+
+    ``key=value`` rather than JSON: a monitor shows this in a node a few hundred
+    pixels wide, and quotes and braces are most of what JSON would spend it on.
+    """
+    if isinstance(value, dict):
+        text = " ".join(
+            f"{k}={v if isinstance(v, str | int | float | bool) else _compact(v)}"
+            for k, v in value.items()
+        )
+    else:
+        text = str(value)
+    text = " ".join(text.split())
+    return text if len(text) <= STEP_ARG_CHARS else text[: STEP_ARG_CHARS - 1] + "…"
+
+
+def _compact(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str)
+
+
+def _short_tool(name: str) -> str:
+    """``mcp__lane__run_query`` -> ``run_query``."""
+    return name.rsplit("__", 1)[-1] if name.startswith("mcp__") else name
+
+
+def step_event(message: Any, acc: Accumulated, budget: int) -> dict[str, Any] | None:
+    """What one streamed message did, as a ``lane.step`` payload -- or None.
+
+    Written while the lane runs, because the transcript is written when it
+    ends: golden #25's d1 spent six minutes and 22 queries and wrote nothing,
+    and all anyone watching could see for those six minutes was a timer.
+
+    Sizes, never contents. Reasoning text is not kept anywhere, and a tool
+    result's body belongs to the transcript -- the event stream is for watching
+    and auditing, not a second copy of the conversation.
+    """
+    spent = acc.budget_tokens
+    common: dict[str, Any] = {
+        "attempt": acc.attempt, "turn": acc.turns, "spent": spent,
+        "pct": round(spent / budget, 3) if budget else None,
+    }
+    if isinstance(message, AssistantMessage):
+        blocks = list(message.content)
+        return {
+            "phase": "turn", **common,
+            "calls": [{"tool": _short_tool(b.name), "arg": _arg_excerpt(b.input)}
+                      for b in blocks if isinstance(b, ToolUseBlock)],
+            "thinking_chars": sum(len(b.thinking) for b in blocks
+                                  if isinstance(b, ThinkingBlock)),
+            # Counted apart from the characters: the self-hosted backend sends
+            # thinking blocks with nothing in them, and "0 characters" alone
+            # cannot tell an empty block from no block at all.
+            "thinking_blocks": sum(isinstance(b, ThinkingBlock) for b in blocks),
+            "text_chars": sum(len(b.text) for b in blocks if isinstance(b, TextBlock)),
+        }
+    if isinstance(message, UserMessage):
+        results = [b for b in _content_blocks(message) if isinstance(b, ToolResultBlock)]
+        if not results:
+            return None
+        return {
+            "phase": "results", **common,
+            "results": [{"chars": len(_tool_result_text(b)),
+                         "error": bool(getattr(b, "is_error", False))} for b in results],
+        }
+    return None
+
+
 def _content_blocks(message: Any) -> list[Any]:
     """A message's blocks, tolerating a plain string body."""
     content = getattr(message, "content", None)
@@ -659,6 +733,10 @@ async def _run_once(
     try:
         async for message in transport.stream(prompt, options):
             _consume(message, acc)
+            if toolbox.on_step is not None:
+                step = step_event(message, acc, budget)
+                if step is not None:
+                    await toolbox.on_step(step)
             # The lane cannot see its own consumption; the toolbox attaches
             # this to tool results so it can stop and write before it is cut
             # off. Golden run #9 spent a whole budget on 24 queries and never
@@ -737,6 +815,14 @@ async def _run_with_toolbox(
     # Set here rather than at construction: which dispatch a read belongs to is
     # a property of the run, and the toolbox outlives neither.
     toolbox.on_read = emit_read
+
+    async def emit_step(step: dict[str, Any]) -> None:
+        """What the lane is doing, while it is doing it (see ``step_event``)."""
+        await event_log.append(
+            request.job_id, LANE_STEP, dispatch=request.dispatch_id, lane=lane.id, **step,
+        )
+
+    toolbox.on_step = emit_step
     profile = lane_type.backend_profile()
     charter = lane_type.charter()
 

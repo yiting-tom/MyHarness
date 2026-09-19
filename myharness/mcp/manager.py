@@ -36,6 +36,7 @@ from myharness.events.types import (
     INGRESS,
     JOB_FINISH,
     JOB_START,
+    LANE_STEP,
     LIMIT_REACHED,
     PLAN_UPDATE,
 )
@@ -59,7 +60,8 @@ MEANINGFUL: frozenset[str] = frozenset({
 #: Deliberately excluded. ``ctx`` fires every orchestrator turn, so treating it
 #: as news would turn a 30-second wait into a periodic empty poll (design.md
 #: D2). Named here so the omission reads as a decision, not an oversight.
-NOT_NEWS: frozenset[str] = frozenset({CTX})
+#: ``lane.step`` for the same reason, twice per lane turn.
+NOT_NEWS: frozenset[str] = frozenset({CTX, LANE_STEP})
 
 
 class RunState(StrEnum):

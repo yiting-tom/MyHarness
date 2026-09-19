@@ -3422,3 +3422,17 @@ critic 與 synth 只用了 26%／27%，對它們來說 150k 只是空間，沒�
    警告越晚，越容易被回合上限先截斷 —— 正是 #25 d1
 2. 或者把 `max_turns` 跟著預算調高（analyst 12 → ?）。但 1 不做的話，2 只是把同一個撞牆點往後移
 3. `unused_input` 排除 lane 自己命名空間底下的衍生 blob
+
+
+## Golden #26 — 第一次有 `lane.step` 的跑（2026-09-19）
+
+目的是驗證 `add-live-agent-activity`：job 跑的同時開著 `monitor --web`。
+`complete`，765 帳戶、app 最低兩個數字都在，4 次派工、7.5 分鐘、$0.5077。
+
+- 事件流 63 KB，其中 **155 筆 `lane.step`**。d1 跑到第 43 輪時，頁面上即時看得到它
+  在 88% 呼叫 `write_finding`、95% 時「模型回應中」—— 這些在 #25 之前要等派工結束才知道。
+- d1 以 `budget_exceeded`（102%）結束，但 finding 已經寫了；orchestrator 再派 d3
+  （同一條 analyst1）改寫同一份 finding → `overwritten_output`。critic d2 讀的是 d1 的版本。
+- **SDK 把一次回應拆成多則訊息**（思考、文字、工具呼叫各一則），所以 `turns`
+  數的是訊息不是請求。頁面把沒有工具呼叫的連續訊息收成一行；
+  `thinking_blocks` 在這次跑之後才加，所以 #26 的那幾行明說「無法確定是不是空的推理區塊」。

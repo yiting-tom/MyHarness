@@ -1,209 +1,270 @@
 <title>Job 即時監看</title>
 <style>
 /* ---------------------------------------------------------------------------
-   第三個表面，第三個受眾：盯著它跑的人。
+   盯著它跑的人要回答兩個問題：資料往哪裡流、每個 agent 這一刻在對資料做什麼。
 
-   所以這一頁的設計重點是**時間**，不是版面 —— 計時器要走、事件要捲、活著的東西
-   要有脈搏。一個完全靜止的畫面，分不出「在等」跟「死了」，而那正是 monitor
-   唯一要回答的問題。
+   所以主畫面是一張由左到右長出來的圖：資料 → agent → 產出 → 下一個 agent →
+   報告。欄位是**流向的深度**，不是型別 —— critic 讀的是 analyst 的產出，所以
+   它就排在那份產出的右邊。
 
-   顏色編碼狀態，不編碼結構：薄荷=正在跑、琥珀=在等什麼、紅=卡住或失敗、
-   藍=已經定案。底色偏暖，跟 inspect --html 的冷灰刻意不同 —— 這是兩個
-   不同的東西，不該長得像同一個工具的兩個分頁。
+   顏色只編碼角色與狀態，而且每一種都有文字等價物（圖例、節點上的字）：
+     藍＝資料與讀取　琥珀＝正在處理的 agent　綠＝產出　紅＝失敗或卡住
+   設計系統取自 ui-ux-pro-max 對「即時營運監看」的建議（深底、藍色資料、
+   琥珀強調、Fira 字族），字型不從外部載入 —— 這是本機的 monitor，
+   不該為了字型對外發請求。
 --------------------------------------------------------------------------- */
 :root{
-  --ground:#12100E; --panel:#1B1815; --sunk:#171411; --rule:#2F2A25;
-  --fg:#EAE4DB; --dim:#9C9189; --faint:#6B6159;
-  --live:#5FD3A0; --wait:#E3A33D; --stall:#E0655B; --done:#86A9C7;
-  --sans:"Noto Sans TC","Helvetica Neue",Arial,"PingFang TC",
-         "Microsoft JhengHei",sans-serif;
-  --mono:"JetBrains Mono","SFMono-Regular",Menlo,Consolas,monospace;
+  --ground:#F4F6FA; --panel:#FFFFFF; --sunk:#EBEFF5; --rule:#D5DCE7; --grid:#E3E8F0;
+  --fg:#0F1522; --dim:#4A566B; --faint:#6E7A8F;
+  --data:#1D5FD6; --agent:#A35F00; --out:#0A7A5A; --stall:#BF3328; --done:#3B5B85;
+  --glow:0 0 0 transparent;
+  --sans:"Fira Sans","Noto Sans TC","PingFang TC","Microsoft JhengHei",
+         system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"Fira Code","JetBrains Mono","SFMono-Regular",Menlo,Consolas,monospace;
 }
-@media (prefers-color-scheme:light){
-  :root:not([data-theme="dark"]){
-    --ground:#F7F5F2; --panel:#FFFFFF; --sunk:#EFEBE6; --rule:#DFD8D0;
-    --fg:#1C1713; --fg2:#4A423B; --dim:#6B6159; --faint:#948A81;
-    --live:#0E7A52; --wait:#8A5B10; --stall:#AE3A31; --done:#2F5F84;
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ground:#090C12; --panel:#10151F; --sunk:#0C1018; --rule:#212A3A; --grid:#151C28;
+    --fg:#E4E9F2; --dim:#9AA6BA; --faint:#66728A;
+    --data:#5E9BFF; --agent:#F3AA3C; --out:#3ED3A4; --stall:#F2655A; --done:#8AA5CC;
+    --glow:0 0 14px color-mix(in srgb,var(--now) 45%,transparent);
   }
 }
-:root[data-theme="light"]{
-  --ground:#F7F5F2; --panel:#FFFFFF; --sunk:#EFEBE6; --rule:#DFD8D0;
-  --fg:#1C1713; --dim:#6B6159; --faint:#948A81;
-  --live:#0E7A52; --wait:#8A5B10; --stall:#AE3A31; --done:#2F5F84;
+:root[data-theme="dark"]{
+  --ground:#090C12; --panel:#10151F; --sunk:#0C1018; --rule:#212A3A; --grid:#151C28;
+  --fg:#E4E9F2; --dim:#9AA6BA; --faint:#66728A;
+  --data:#5E9BFF; --agent:#F3AA3C; --out:#3ED3A4; --stall:#F2655A; --done:#8AA5CC;
+  --glow:0 0 14px color-mix(in srgb,var(--now) 45%,transparent);
 }
 
 *{box-sizing:border-box}
+html,body{height:100%}
 body{
   margin:0; background:var(--ground); color:var(--fg);
-  font-family:var(--sans); font-size:14px; line-height:1.6;
+  font-family:var(--sans); font-size:14px; line-height:1.55;
   -webkit-font-smoothing:antialiased;
 }
-:focus-visible{outline:2px solid var(--now,var(--live)); outline-offset:2px}
+:focus-visible{outline:2px solid var(--data); outline-offset:2px}
 button{font:inherit; color:inherit; background:none; border:none; cursor:pointer;
-  text-align:left}
-.mono,.num{font-family:var(--mono); font-variant-numeric:tabular-nums}
-pre{margin:0; white-space:pre-wrap; word-break:break-word}
+  text-align:left; padding:0}
+.mono{font-family:var(--mono); font-variant-numeric:tabular-nums}
+pre{margin:0; white-space:pre-wrap; word-break:break-word; font-family:var(--mono)}
 
 /* --- status bar --------------------------------------------------------- */
 .bar{
-  position:sticky; top:0; z-index:10; background:var(--panel);
-  border-bottom:1px solid var(--rule); padding:16px 24px 14px;
+  position:sticky; top:0; z-index:20; background:var(--panel);
+  border-bottom:1px solid var(--rule); padding:14px 24px 12px;
 }
-.bar .row1{display:flex; align-items:center; gap:16px; flex-wrap:wrap}
-.pulse{
-  width:13px; height:13px; border-radius:50%; background:var(--now);
-  flex:none; position:relative;
-}
-.pulse::after{
-  content:""; position:absolute; inset:-5px; border-radius:50%;
-  border:2px solid var(--now); opacity:0;
-}
+.row1{display:flex; align-items:center; gap:16px; flex-wrap:wrap}
+.pulse{width:12px; height:12px; border-radius:50%; background:var(--now);
+  flex:none; position:relative; box-shadow:var(--glow)}
+.pulse::after{content:""; position:absolute; inset:-5px; border-radius:50%;
+  border:2px solid var(--now); opacity:0}
 @media (prefers-reduced-motion:no-preference){
   .live .pulse::after{animation:ping 1.9s cubic-bezier(0,0,.2,1) infinite}
 }
-@keyframes ping{0%{transform:scale(.55); opacity:.9} 80%,100%{transform:scale(1.35); opacity:0}}
-.state{
-  font-size:clamp(21px,2.6vw,29px); font-weight:900; letter-spacing:.01em;
-  color:var(--now); line-height:1.25;
-}
-.detail{color:var(--dim); font-size:14.5px}
-.bar .grow{flex:1}
-.clock{font-family:var(--mono); font-size:25px; font-variant-numeric:tabular-nums}
-.job{font-family:var(--mono); font-size:12px; color:var(--faint);
-  letter-spacing:.09em; text-transform:uppercase}
-
-.stats{display:flex; gap:26px; flex-wrap:wrap; margin-top:11px}
+@keyframes ping{0%{transform:scale(.55); opacity:.9} 80%,100%{transform:scale(1.4); opacity:0}}
+.state{font-size:clamp(19px,2.3vw,25px); font-weight:700; color:var(--now); line-height:1.25}
+.detail{color:var(--dim); font-size:14px}
+.grow{flex:1}
+.clock{font-family:var(--mono); font-size:24px; font-variant-numeric:tabular-nums;
+  text-align:right}
+.job{font-family:var(--mono); font-size:11.5px; color:var(--faint);
+  letter-spacing:.08em; text-align:right}
+.stats{display:flex; gap:24px; flex-wrap:wrap; margin-top:9px}
 .stat{display:flex; gap:8px; align-items:baseline}
-.stat .k{font-size:11px; letter-spacing:.09em; text-transform:uppercase; color:var(--faint)}
-.stat .v{font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:14px}
+.stat .k{font-size:11px; letter-spacing:.08em; color:var(--faint)}
+.stat .v{font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:13.5px}
 
-.link{
-  font-size:12px; color:var(--faint); font-family:var(--mono);
-  display:flex; gap:7px; align-items:center;
+/* --- page layout -------------------------------------------------------- */
+.shell{display:grid; grid-template-columns:minmax(0,1fr) 400px;
+  min-height:calc(100dvh - 96px)}
+.main{min-width:0; padding:18px 24px 40px; display:flex; flex-direction:column; gap:14px}
+.side{border-left:1px solid var(--rule); background:var(--panel);
+  position:sticky; top:96px; height:calc(100dvh - 96px);
+  display:flex; flex-direction:column; min-width:0}
+h2{font-size:11px; letter-spacing:.12em; color:var(--faint); font-weight:600; margin:0}
+
+.anoms{display:flex; flex-direction:column; gap:6px}
+.anom{font-size:13px; border:1px solid var(--rule); border-left:3px solid var(--agent);
+  border-radius:4px; padding:7px 12px; background:var(--panel)}
+.anom.critical{border-left-color:var(--stall)}
+.anom .k{font-family:var(--mono); font-size:10.5px; color:var(--faint); margin-right:8px}
+
+/* --- the graph ---------------------------------------------------------- */
+.stagewrap{
+  position:relative; overflow:auto; border:1px solid var(--rule); border-radius:6px;
+  background:
+    radial-gradient(circle, var(--grid) 1px, transparent 1.2px) 0 0/22px 22px,
+    var(--sunk);
+  min-height:320px;
 }
-.link .d{width:6px; height:6px; border-radius:50%; background:var(--live)}
+.stage{position:relative; margin:0 auto}
+.stage svg{position:absolute; inset:0; overflow:visible; pointer-events:none}
+.colhead{position:absolute; left:18px; font-size:10.5px; letter-spacing:.12em;
+  color:var(--faint); white-space:nowrap}
+
+.edge{fill:none; stroke-width:1.6}
+.edge.read{stroke:var(--data)}
+.edge.grant{stroke:var(--faint); stroke-dasharray:2 4}
+.edge.unopened{stroke:var(--faint); stroke-dasharray:5 5; opacity:.7}
+.edge.write{stroke:var(--out)}
+.edge.derived{stroke:var(--out); stroke-dasharray:3 4; opacity:.8}
+.edge.hot{stroke-dasharray:6 7}
+@media (prefers-reduced-motion:no-preference){
+  .edge.hot{animation:flow 900ms linear infinite}
+}
+@keyframes flow{to{stroke-dashoffset:-13}}
+.spark{filter:drop-shadow(0 0 4px currentColor)}
+
+.node{position:absolute; border:1px solid var(--rule); background:var(--panel);
+  border-radius:6px; display:flex; flex-direction:column; min-width:0}
+.node .lbl{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0}
+
+.node.data{flex-direction:row; align-items:center; gap:8px; padding:0 11px;
+  border-color:color-mix(in srgb,var(--data) 45%,var(--rule)); font-size:12.5px}
+.node.data .g{color:var(--data); font-family:var(--mono); flex:none}
+.node.data .meta{margin-left:auto; flex:none; font-family:var(--mono);
+  font-size:10.5px; color:var(--faint)}
+.node.data.made{border-color:color-mix(in srgb,var(--out) 55%,var(--rule))}
+.node.data.made .g{color:var(--out)}
+.node.data.report{border-color:var(--out); border-width:2px; font-weight:600}
+.node.data.report .g{color:var(--out)}
+
+.node.agent{padding:10px 12px 10px; gap:5px; transition:border-color .2s, box-shadow .2s}
+.node.agent:hover{border-color:var(--dim)}
+.node.agent.sel{border-color:var(--data); box-shadow:0 0 0 2px color-mix(in srgb,var(--data) 30%,transparent)}
+.node.agent.running{border-color:var(--agent); --now:var(--agent); box-shadow:var(--glow)}
+.node.agent.running.sel{box-shadow:0 0 0 2px color-mix(in srgb,var(--data) 35%,transparent), var(--glow)}
+.node.agent.bad{border-color:color-mix(in srgb,var(--stall) 60%,var(--rule))}
+.a1{display:flex; align-items:center; gap:7px; min-width:0}
+.a1 .mk{font-family:var(--mono); font-size:12px; flex:none; width:12px; text-align:center}
+.running .a1 .mk{color:var(--agent)}
+.ok .a1 .mk{color:var(--out)}
+.bad .a1 .mk{color:var(--stall)}
+.a1 .lane{font-weight:600; font-size:14px}
+.a1 .when{margin-left:auto; font-family:var(--mono); font-size:11.5px; color:var(--faint); flex:none}
+.running .a1 .when{color:var(--agent)}
+.a1 .when.stalled{color:var(--stall)}
+.a2{font-family:var(--mono); font-size:11px; color:var(--faint); display:flex; gap:10px}
+.now{font-family:var(--mono); font-size:11.5px; color:var(--dim);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.now b{color:var(--fg); font-weight:500}
+.running .now b{color:var(--agent)}
+.now.why{font-family:var(--sans); color:var(--faint); white-space:normal;
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; font-size:11.5px}
+.meter{display:flex; align-items:center; gap:8px; font-family:var(--mono);
+  font-size:10.5px; color:var(--faint)}
+.meter .track{flex:1; height:4px; border-radius:2px; background:var(--sunk); overflow:hidden}
+.meter .fill{display:block; height:100%; background:var(--data); border-radius:2px;
+  transition:width .5s ease-out}
+.meter.warn .fill{background:var(--agent)} .meter.hot .fill{background:var(--stall)}
+@media (prefers-reduced-motion:no-preference){
+  .node.agent.blip::after{content:""; position:absolute; inset:-1px; border-radius:6px;
+    border:2px solid var(--agent); animation:blip 650ms ease-out forwards; pointer-events:none}
+}
+@keyframes blip{from{opacity:.9; transform:scale(1)} to{opacity:0; transform:scale(1.06)}}
+
+.empty{position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  padding:32px}
+.empty .why{max-width:58ch; font-size:15px; line-height:1.75; color:var(--fg);
+  border:1px dashed var(--rule); border-radius:6px; padding:18px 22px; background:var(--panel)}
+.empty .why p{margin:0 0 6px}
+.empty .why .sub{font-size:13px; color:var(--dim)}
+.chip{font-family:var(--mono); font-size:12px; padding:1px 7px; border:1px solid var(--rule);
+  border-radius:3px; background:var(--sunk); margin:2px 4px 2px 0; display:inline-block}
+
+.legend{display:flex; flex-wrap:wrap; gap:6px 18px; font-size:12px; color:var(--dim);
+  align-items:center}
+.legend .it{display:flex; gap:7px; align-items:center}
+.legend svg{flex:none}
+.legend .note{flex-basis:100%; color:var(--faint)}
+
+/* --- side panel --------------------------------------------------------- */
+.tabs{display:flex; border-bottom:1px solid var(--rule); flex:none}
+.tab{flex:1; padding:12px 16px 10px; font-size:13px; color:var(--dim);
+  border-bottom:2px solid transparent; text-align:center}
+.tab[aria-selected="true"]{color:var(--fg); border-bottom-color:var(--data)}
+.tab:hover{color:var(--fg)}
+.pane{overflow-y:auto; flex:1; padding:16px 18px 30px; min-height:0}
+.pane[hidden]{display:none}
+.link{font-size:11.5px; color:var(--faint); font-family:var(--mono);
+  display:flex; gap:7px; align-items:center; padding:8px 18px;
+  border-top:1px solid var(--rule); flex:none}
+.link .d{width:6px; height:6px; border-radius:50%; background:var(--out)}
 .link.bad{color:var(--stall)} .link.bad .d{background:var(--stall)}
 
-/* --- two columns -------------------------------------------------------- */
-.grid{display:grid; grid-template-columns:minmax(0,1fr) 352px; align-items:start}
-.left{padding:22px 24px 80px; min-width:0}
-.right{
-  position:sticky; top:104px; max-height:calc(100dvh - 104px); overflow-y:auto;
-  border-left:1px solid var(--rule); padding:22px 20px 40px;
-}
-h2{
-  font-size:11px; letter-spacing:.14em; text-transform:uppercase;
-  color:var(--faint); font-weight:700; margin:0 0 13px;
-}
+.who{display:flex; flex-direction:column; gap:6px; margin-bottom:14px}
+.who .t1{display:flex; align-items:baseline; gap:10px; flex-wrap:wrap}
+.who .lane{font-size:18px; font-weight:700}
+.who .id{font-family:var(--mono); font-size:12px; color:var(--faint)}
+.who .task{font-size:13px; color:var(--dim); line-height:1.6; cursor:pointer;
+  display:-webkit-box; -webkit-line-clamp:4; -webkit-box-orient:vertical; overflow:hidden}
+.who .task.full{display:block}
+.pill{font-family:var(--mono); font-size:11px; padding:1px 8px; border-radius:10px;
+  border:1px solid currentColor; white-space:nowrap}
+.pill.running{color:var(--agent)} .pill.ok{color:var(--out)} .pill.bad{color:var(--stall)}
+.kv{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:1px;
+  background:var(--rule); border:1px solid var(--rule); border-radius:5px;
+  overflow:hidden; margin-bottom:14px}
+.kv div{background:var(--panel); padding:7px 10px}
+.kv .k{font-size:10.5px; color:var(--faint); letter-spacing:.06em; display:block}
+.kv .v{font-family:var(--mono); font-size:13.5px; font-variant-numeric:tabular-nums}
+.io{font-size:12.5px; color:var(--dim); margin-bottom:12px; line-height:1.7}
+.io .k{color:var(--faint); font-size:11px; letter-spacing:.06em; display:block}
+.follow{font-size:12px; color:var(--data); border:1px solid var(--rule); border-radius:4px;
+  padding:4px 10px; margin-bottom:12px; min-height:30px}
+.follow:hover{border-color:var(--data)}
+.say{font-size:13px; color:var(--dim); line-height:1.7; margin:0}
+.say.warn{color:var(--agent); border-left:2px solid var(--agent); padding-left:10px}
 
-/* --- flow --------------------------------------------------------------- */
-.flow{display:flex; flex-direction:column; gap:0}
-.wire{width:2px; height:20px; background:var(--rule); margin-left:27px}
-.card{
-  border:1px solid var(--rule); border-radius:5px; background:var(--panel);
-  padding:13px 16px; display:flex; flex-direction:column; gap:10px;
-}
-.card.origin{background:var(--sunk); border-style:dashed}
-.card.running{border-color:var(--now)}
-.card.final{border-color:var(--done)}
-.head{display:flex; gap:11px; align-items:baseline; flex-wrap:wrap}
-.mk{
-  font-family:var(--mono); width:16px; flex:none; text-align:center;
-  font-size:13px;
-}
-.did{font-family:var(--mono); font-weight:700; font-size:14px}
-.lane{font-size:15px; font-weight:700}
-.elapsed{font-family:var(--mono); font-size:13px; color:var(--now)}
-.elapsed.stalled{color:var(--stall)}
-.pill{
-  font-family:var(--mono); font-size:10.5px; padding:1px 7px 2px;
-  border:1px solid currentColor; border-radius:2px; white-space:nowrap;
-}
-.task{
-  font-size:12.5px; color:var(--faint); overflow:hidden;
-  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
-}
-.io{display:flex; gap:9px; flex-wrap:wrap; align-items:baseline}
-.io .k{font-size:11.5px; color:var(--faint); flex:none; width:44px}
-.chip{
-  font-family:var(--mono); font-size:12px; padding:2px 8px 3px;
-  border:1px solid var(--rule); border-radius:3px; background:var(--sunk);
-}
-.chip.open{border-color:var(--live); color:var(--live)}
-.chip.shut{border-style:dashed; color:var(--faint)}
-.chip.out{border-color:var(--done); color:var(--done)}
-.nothing{font-size:12.5px; color:var(--dim); margin:0}
-.card.empty{border-style:dashed; background:transparent; gap:8px}
-.card.empty .why{margin:0; font-size:14.5px; color:var(--fg); line-height:1.7; max-width:62ch}
-.legend{font-size:12px; color:var(--dim); margin:-6px 0 12px; display:flex;
-  gap:6px; align-items:baseline; flex-wrap:wrap}
-.legend b{color:var(--fg); font-weight:500}
-.feedempty{padding:10px 0}
+.steps{display:flex; flex-direction:column; gap:2px; margin-top:6px}
+.st{display:grid; grid-template-columns:34px minmax(0,1fr) 40px; gap:8px;
+  font-size:12px; padding:3px 0; align-items:baseline}
+.st .n{font-family:var(--mono); font-size:10.5px; color:var(--faint); text-align:right}
+.st .b{min-width:0; overflow-wrap:anywhere}
+.st .p{font-family:var(--mono); font-size:10.5px; color:var(--faint); text-align:right}
+.st.call .b{font-family:var(--mono); font-size:11.5px}
+.st.call .fn{color:var(--data); font-weight:500}
+.st.res .b{font-family:var(--mono); font-size:11px; color:var(--dim)}
+.st.res.err .b{color:var(--stall)}
+.st.think .b{color:var(--faint); font-size:11.5px}
+.st.rule .b{color:var(--faint); font-size:10.5px; letter-spacing:.08em;
+  border-top:1px solid var(--rule); padding-top:5px}
+@media (prefers-reduced-motion:no-preference){ .st.fresh{animation:slide 380ms ease-out} }
+@keyframes slide{from{opacity:0; transform:translateY(4px)} to{opacity:1}}
+.more{font-size:12px; color:var(--data); border:1px solid var(--rule); border-radius:4px;
+  padding:6px 12px; margin-top:12px; min-height:32px}
+.more:hover{border-color:var(--data)}
+.trace{margin-top:12px; border-top:1px solid var(--rule); padding-top:10px;
+  display:flex; flex-direction:column; gap:6px}
+.trace .step{display:grid; grid-template-columns:34px minmax(0,1fr); gap:8px; font-size:12px}
+.trace .step .n{font-family:var(--mono); color:var(--faint); text-align:right; font-size:10.5px}
+.trace .fn{color:var(--data); font-family:var(--mono)}
+.trace .args,.trace .res{color:var(--dim); font-size:11px; max-height:8em; overflow:auto}
+.trace .err{color:var(--stall)}
+.trace .harness{color:var(--agent); margin-top:3px}
 
-.expand{
-  font-size:12px; color:var(--dim); border:1px solid var(--rule);
-  border-radius:3px; padding:3px 11px 4px; align-self:flex-start;
-}
-.expand:hover{border-color:var(--done); color:var(--done)}
-
-/* --- trace (fetched on demand) ------------------------------------------ */
-.trace{
-  border-top:1px solid var(--rule); padding-top:11px;
-  display:flex; flex-direction:column; gap:8px;
-}
-.notyet{
-  font-size:13px; color:var(--wait); border-left:2px solid var(--wait);
-  padding-left:11px; line-height:1.6;
-}
-.step{display:grid; grid-template-columns:34px minmax(0,1fr); gap:11px; font-size:12.5px}
-.step .n{font-family:var(--mono); color:var(--faint); text-align:right; font-size:11px}
-.step.think .b{color:var(--faint)}
-.step.think .b em{font-style:normal; color:var(--faint); border-bottom:1px dashed}
-.step.call .b{font-family:var(--mono); color:var(--fg)}
-.step.call .b .fn{color:var(--done); font-weight:500}
-.step.call .args{
-  color:var(--faint); font-size:11.5px; margin-top:2px; max-height:6em;
-  overflow:auto;
-}
-.step.result .b{color:var(--dim); font-size:11.5px; max-height:7em; overflow:auto}
-.step.result.err .b{color:var(--stall)}
-.step.mark .b{color:var(--wait)}
-.step.rule .b{color:var(--faint); font-size:11px; letter-spacing:.08em}
-
-/* --- anomalies ---------------------------------------------------------- */
-.anoms{display:flex; flex-direction:column; gap:8px; margin-bottom:18px}
-.anom{
-  font-size:13px; border:1px solid var(--rule); border-left:3px solid var(--wait);
-  border-radius:4px; padding:9px 13px; background:var(--panel);
-}
-.anom.critical{border-left-color:var(--stall)}
-.anom .k{font-family:var(--mono); font-size:10.5px; color:var(--faint);
-  letter-spacing:.07em; display:block}
-
-/* --- event feed --------------------------------------------------------- */
-.feed{display:flex; flex-direction:column-reverse; gap:0}
-.ev{
-  display:grid; grid-template-columns:62px minmax(0,1fr); gap:11px;
-  padding:4px 0; border-bottom:1px solid var(--rule);
-  font-size:12px; line-height:1.5;
-}
-.ev .t{font-family:var(--mono); font-size:11px; color:var(--faint)}
+.feed{display:flex; flex-direction:column-reverse}
+.ev{display:grid; grid-template-columns:58px minmax(0,1fr); gap:10px; padding:4px 0;
+  border-bottom:1px solid var(--rule); font-size:12px; line-height:1.5}
+.ev .t{font-family:var(--mono); font-size:10.5px; color:var(--faint)}
 .ev .m{overflow-wrap:anywhere}
-.ev .rep{font-family:var(--mono); font-size:10.5px; color:var(--faint);
-  margin-left:6px; border:1px solid var(--rule); border-radius:2px; padding:0 4px}
-.ev.hi .m{color:var(--now)}
-.ev.dispatch .m{color:var(--done)}
-.ev.throttle .m{color:var(--wait)}
-.ev.bad .m{color:var(--stall)}
-@media (prefers-reduced-motion:no-preference){
-  .ev.fresh{animation:slide 420ms ease-out}
-}
-@keyframes slide{from{opacity:0; transform:translateY(-4px)} to{opacity:1}}
+.ev .rep{font-family:var(--mono); font-size:10px; color:var(--faint); margin-left:6px;
+  border:1px solid var(--rule); border-radius:2px; padding:0 4px}
+.ev.dispatch .m{color:var(--data)} .ev.throttle .m{color:var(--agent)}
+.ev.bad .m{color:var(--stall)} .ev.read .m{color:var(--dim)}
+@media (prefers-reduced-motion:no-preference){ .ev.fresh{animation:slide 380ms ease-out} }
 
-@media (max-width:980px){
-  .grid{grid-template-columns:1fr}
-  .right{position:static; max-height:none; border-left:none;
+@media (max-width:1060px){
+  .shell{grid-template-columns:1fr}
+  .side{position:static; height:auto; max-height:none; border-left:none;
     border-top:1px solid var(--rule)}
+  .pane{max-height:70vh}
+}
+@media (max-width:640px){
+  .bar{padding:12px 16px 10px} .main{padding:14px 16px 28px}
+  .clock{font-size:19px}
 }
 </style>
 
@@ -215,25 +276,38 @@ h2{
       <div class="detail" id="detail"></div>
     </div>
     <span class="grow"></span>
-    <div style="text-align:right">
+    <div>
       <div class="job" id="job"></div>
-      <div class="clock" id="clock">--:--</div>
+      <div class="clock" id="clock" title="從第一個事件到最後一個事件">--:--</div>
     </div>
   </div>
   <div class="stats" id="stats"></div>
 </header>
 
-<div class="grid">
-  <main class="left">
+<div class="shell">
+  <main class="main">
     <div class="anoms" id="anoms"></div>
-    <h2>資料流</h2>
-    <p class="legend" id="legend"></p>
-    <div class="flow" id="flow"></div>
+    <div class="stagewrap" id="wrap">
+      <div class="stage" id="stage">
+        <svg id="wires" aria-hidden="true"></svg>
+        <svg id="fx" aria-hidden="true"></svg>
+        <div id="nodes"></div>
+      </div>
+    </div>
+    <div class="legend" id="legend"></div>
   </main>
-  <aside class="right">
-    <h2>事件</h2>
+  <aside class="side">
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" id="tab-agent" aria-selected="true"
+        aria-controls="pane-agent">Agent</button>
+      <button class="tab" role="tab" id="tab-events" aria-selected="false"
+        aria-controls="pane-events">事件</button>
+    </div>
+    <div class="pane" id="pane-agent" role="tabpanel" aria-labelledby="tab-agent"></div>
+    <div class="pane" id="pane-events" role="tabpanel" aria-labelledby="tab-events" hidden>
+      <div class="feed" id="feed" aria-live="polite" aria-relevant="additions"></div>
+    </div>
     <div class="link" id="link"><span class="d"></span><span id="linktext">輪詢中</span></div>
-    <div class="feed" id="feed" aria-live="polite" aria-relevant="additions"></div>
   </aside>
 </div>
 
@@ -243,265 +317,584 @@ let DATA = /*__DATA__*/null;
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g,
   (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const n0 = (n) => (n === null || n === undefined) ? "—" : n.toLocaleString("en-US");
-const GLYPH = {blob:"▣", finding:"▪", report:"★", state:"◇", plan:"◆"};
+const n0 = (n) => (n === null || n === undefined) ? "—" : Number(n).toLocaleString("en-US");
+const kTok = (n) => !n ? "" : n >= 1000 ? `~${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k tok` : `~${n} tok`;
+const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /* 「在等什麼」決定整頁的顏色。monitor 唯一要回答的問題就是這個。 */
-const TONE = [
-  [/等待限流|限流/, "wait"], [/等待使用者/, "wait"],
-  [/無進展|卡/, "stall"], [/收尾中|交接重啟/, "wait"],
-  [/已結束/, "done"],
-];
-function toneOf(state) {
-  for (const [re, t] of TONE) if (re.test(state)) return t;
-  return "live";
-}
+const TONE = [[/等待限流|限流/, "agent"], [/等待使用者/, "agent"],
+  [/無進展|卡/, "stall"], [/收尾中|交接重啟/, "agent"], [/已結束/, "done"]];
+const toneOf = (s) => (TONE.find(([re]) => re.test(s)) || [0, "data"])[1];
+
+const STATUS = {running: "執行中", ok: "完成", budget_exceeded: "預算用完",
+  max_turns: "回合用完", tool_failure: "工具失敗", duplicate: "重複派工",
+  state_rejected: "狀態未存", backend_unavailable: "後端不可用"};
+const statusOf = (d) => STATUS[d.status] || d.status;
 
 const clock = (s) => {
   s = Math.max(0, Math.floor(s));
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60;
-  const pad = (v) => String(v).padStart(2, "0");
-  return h ? `${h}:${pad(m)}:${pad(x)}` : `${pad(m)}:${pad(x)}`;
+  const p = (v) => String(v).padStart(2, "0");
+  return h ? `${h}:${p(m)}:${p(x)}` : `${p(m)}:${p(x)}`;
 };
 
-let firstTs = null, lastTs = null, openTrace = null, traceCache = {};
+let firstTs = null, lastTs = null;
+let selected = null, follow = true, tab = "agent";
+let traceOpen = {}, traceCache = {}, taskFull = false;
+let prevEdges = null, prevSteps = {}, prevSeq = null, prevStepSeq = {};
+let GEOM = {pos: new Map(), edges: []};
 
-/* 事件流多久沒動就算「沒有動靜」。一個 job 在兩次派工之間安靜幾十秒是正常的；
-   安靜好幾分鐘不是。這是「在等」跟「死了」之間那條線，也是 monitor 存在的理由。 */
+/* 事件流多久沒動就算「沒有動靜」。兩次派工之間安靜幾十秒是正常的；
+   安靜好幾分鐘不是。那條線就是「在等」跟「死了」的分界。 */
 const STALE_S = 180;
 const lagSeconds = () => lastTs ? (Date.now() - lastTs) / 1000 : 0;
 const isStale = () => !DATA.finished && lagSeconds() > STALE_S;
 
-/* --- render --------------------------------------------------------------- */
-function render() {
-  if (DATA.error) return renderMissing();
-  const stale = isStale();
-  const tone = DATA.finished ? "done" : stale ? "stall" : toneOf(DATA.activity.state);
-  document.documentElement.style.setProperty("--now", `var(--${tone})`);
-  $("bar").className = "bar" + (tone === "live" && !DATA.finished ? " live" : "");
-  $("state").textContent = DATA.finished
-    ? "已結束" + (DATA.finish_reason ? ` · ${DATA.finish_reason}` : "")
-    : stale ? "事件流沒有動靜"
-    : DATA.activity.state;
-  $("detail").textContent = DATA.finished ? (DATA.activity.detail || "")
-    : stale
-      ? `最後一個事件在 ${clock(lagSeconds())} 前。`
-        + `事件流說它當時在「${DATA.activity.state}」，但之後什麼都沒再寫下來。`
-      : (DATA.activity.detail || "");
-  $("job").textContent = DATA.job_id;
-
-  $("stats").innerHTML = [
-    ["派工", `${DATA.dispatches.length}${DATA.running.length
-      ? `（執行中 ${DATA.running.length}）` : ""}`],
-    /* 後端不回報成本時，$0.0000 是一個看起來像量測值的非量測值 ——
-       跟 context 峰值的 0 是同一個問題。 */
-    ["成本", (!DATA.usd && DATA.dispatches.some((d) => !d.running))
-      ? "後端未回報" : "$" + (DATA.usd || 0).toFixed(4)],
-    ["context 峰值", DATA.context_peak ? n0(DATA.context_peak) : "尚未回報"],
-    ...(DATA.throttle_seconds ? [["限流等待", clock(DATA.throttle_seconds)]] : []),
-    ...(DATA.report ? [["報告", "已產出"]] : []),
-  ].map(([k, v]) => `<div class="stat"><span class="k">${esc(k)}</span>
-     <span class="v">${esc(v)}</span></div>`).join("");
-
-  $("anoms").innerHTML = DATA.anomalies.map((a) => `
-    <div class="anom ${esc(a.severity)}"><span class="k">${esc(a.kind)}</span>
-      ${esc(a.detail)}</div>`).join("");
-
-  renderFlow();
-  renderFeed();
-}
-
-function nodeOf(id) {
+/* --- model: nodes, edges, and flow depth ---------------------------------- */
+const isTrace = (id) => id.includes("/blob/traces/");
+function nodeInfo(id) {
   return DATA.nodes.find((n) => n.id === id)
-    || {id, kind: "finding", label: id, bytes: null, est_tokens: null};
+    || {id, kind: "finding", label: id.split("/").pop(), est_tokens: null};
 }
+const lastStep = (d) => d.steps.length ? d.steps[d.steps.length - 1] : null;
+const lastTurn = (d) => [...d.steps].reverse().find((s) => s.phase === "turn") || null;
+const lastPct = (d) => { const s = lastStep(d); return s && s.pct != null ? s.pct : null; };
 
-function chip(id, cls) {
-  const n = nodeOf(id);
-  return `<span class="chip ${cls}" title="${esc(id)}">${
-    GLYPH[n.kind] || "·"} ${esc(n.label || id)}</span>`;
-}
-
-/* job 不存在時，以前 render() 讀 DATA.activity 直接炸掉，整頁空白 ——
-   正好是最需要說明的那一刻什麼都沒說。 */
-function renderMissing() {
-  document.documentElement.style.setProperty("--now", "var(--wait)");
-  $("bar").className = "bar";
-  $("state").textContent = "找不到這個 job";
-  $("detail").textContent = DATA.why;
-  $("job").textContent = DATA.job_id || "";
-  $("stats").innerHTML = "";
-  $("anoms").innerHTML = "";
-  const known = DATA.known || [];
-  $("flow").innerHTML = `<div class="card empty">
-    <p class="nothing">查找位置 <span class="mono">${esc(DATA.root || "")}</span></p>
-    <p class="nothing">${known.length
-      ? "那裡現有的 job：" + known.map((k) => `<span class="chip">${esc(k)}</span>`).join(" ")
-      : "那裡一個 job 都沒有。"}</p></div>`;
-  $("feed").innerHTML = '<p class="nothing feedempty">還沒有事件 —— 因為還找不到這個 job 的事件流。</p>';
-}
-
-function renderFlow() {
-  const produced = new Set(DATA.dispatches.flatMap((d) => d.produced));
-  const origins = DATA.nodes.filter(
-    (n) => n.kind === "blob" && !produced.has(n.id) && !n.id.includes("/traces/"));
-
-  const cards = [];
-  if (origins.length) cards.push(`<div class="card origin">
-    <div class="head"><span class="mk">▣</span><span class="lane">進來的資料</span></div>
-    <div class="io"><span class="k">　</span>${
-      origins.map((n) => chip(n.id, "")).join("")}</div></div>`);
-
+function buildModel() {
+  const producer = new Map();
+  for (const d of DATA.dispatches) for (const a of d.produced) producer.set(a, d.id);
+  const nodes = new Map(), edges = [];
+  const addArt = (a) => {
+    if (isTrace(a) || nodes.has("a:" + a)) return;
+    nodes.set("a:" + a, {key: "a:" + a, type: "data", id: a, info: nodeInfo(a),
+      producer: producer.get(a) || null, report: a === DATA.report, rereads: false});
+  };
+  for (const n of DATA.nodes)
+    if (n.kind === "blob" && !producer.has(n.id) && !isTrace(n.id)) addArt(n.id);
   for (const d of DATA.dispatches) {
+    nodes.set("d:" + d.id, {key: "d:" + d.id, type: "agent", d});
     const opened = new Set(d.opened);
-    const mk = d.running ? "▸" : d.ok ? "✓" : "✗";
-    const known = DATA.read_edges_available;
-    const reads = d.granted.length
-      ? d.granted.map((a) => chip(a, !known ? "" : opened.has(a) ? "open" : "shut")).join("")
-      : `<span class="nothing">${esc(d.nothing_granted_why)}</span>`;
-    /* 6. 「沒有產出」有好幾種原因，而它們對讀者的意思不一樣。 */
-    const writes = d.produced.length
-      ? d.produced.map((a) => chip(a, "out")).join("")
-      : `<span class="nothing">${esc(d.nothing_written_why)}</span>`;
-    cards.push(`<div class="card${d.running ? " running" : ""}" data-d="${esc(d.id)}">
-      <div class="head">
-        <span class="mk">${mk}</span>
-        <span class="did">${esc(d.id)}</span>
-        <span class="lane">${esc(d.lane)}</span>
-        ${d.running
-          ? `<span class="elapsed" data-since="${esc(d.started || "")}">—</span>`
-          : `<span class="pill">${esc(d.status)}</span>`}
-        ${!d.running && d.turns ? `<span class="pill">${d.turns} turns</span>` : ""}
-        ${!d.running && d.tokens_in
-          ? `<span class="pill">${n0(d.tokens_in)} in</span>` : ""}
-      </div>
-      <div class="task">${esc(d.task || "")}</div>
-      <div class="io"><span class="k">讀了</span>${reads}</div>
-      <div class="io"><span class="k">寫出</span>${writes}</div>
-      <button class="expand" data-t="${esc(d.id)}">${
-        openTrace === d.id ? "收合這段做了什麼" : "看這段做了什麼"}</button>
-      ${openTrace === d.id ? renderTrace(traceCache[d.id]) : ""}
-    </div>`);
+    for (const a of new Set([...d.granted, ...d.opened])) {
+      if (isTrace(a)) continue;
+      /* 自己寫出又讀回去的東西，畫成一條往回的邊只會讓圖打結 ——
+         在那份產出上標一個「讀回」，事實一樣在，圖不亂。 */
+      if (producer.get(a) === d.id) { addArt(a); nodes.get("a:" + a).rereads = true; continue; }
+      addArt(a);
+      const kind = !DATA.read_edges_available ? "grant" : opened.has(a) ? "read" : "unopened";
+      edges.push({from: "a:" + a, to: "d:" + d.id, kind, hot: d.running && kind !== "unopened"});
+    }
+    for (const a of d.produced) {
+      if (isTrace(a)) continue;
+      addArt(a);
+      edges.push({from: "d:" + d.id, to: "a:" + a, kind: "write", hot: false});
+    }
+  }
+  if (DATA.report) addArt(DATA.report);
+
+  /* lanes/<lane>/derived/ 底下的表是 agent 自己查出來、存起來再讀的中間結果。
+     畫在「資料」列會讓它看起來像進來的原始資料 —— 它不是。事件流沒有記錄
+     它是哪一次派工寫的，所以這條邊是依路徑推定的，畫成虛線、圖例照說。 */
+  for (const n of nodes.values()) {
+    const m = n.type === "data" && !n.producer && /\/blob\/lanes\/([^/]+)\/derived\//.exec(n.id);
+    if (!m) continue;
+    const mine = DATA.dispatches.filter((d) => d.lane === m[1]);
+    const owner = mine.find((d) => d.opened.includes(n.id)) || mine[0];
+    if (!owner) continue;
+    n.producer = owner.id; n.derived = true;
+    for (let i = edges.length - 1; i >= 0; i--)
+      if (edges[i].from === n.key && edges[i].to === "d:" + owner.id) { edges.splice(i, 1); n.rereads = true; }
+    edges.push({from: "d:" + owner.id, to: n.key, kind: "derived", hot: false});
   }
 
-  if (DATA.flow_empty_why) cards.push(`<div class="card empty">
-    <p class="why">${esc(DATA.flow_empty_why)}</p></div>`);
-  if (DATA.dispatches.length && !origins.length) cards.unshift(`<div class="card empty">
-    <p class="nothing">沒有看到原始資料進入：事件流裡沒有 ingress，派工也沒有被授權任何原始資料。</p></div>`);
+  /* 列＝流向的深度。資料在 0；agent 在它讀的東西的最深處 +1；
+     產出在寫它的 agent +1。 */
+  const rank = new Map(), inputs = new Map();
+  for (const e of edges) if (e.to.startsWith("d:"))
+    (inputs.get(e.to) || inputs.set(e.to, []).get(e.to)).push(e.from);
+  const visiting = new Set();
+  const rankOf = (key) => {
+    if (rank.has(key)) return rank.get(key);
+    if (visiting.has(key)) return 0;
+    visiting.add(key);
+    const n = nodes.get(key);
+    let r = 0;
+    if (n.type === "agent") r = Math.max(0, ...(inputs.get(key) || []).map(rankOf)) + 1;
+    else if (n.producer) r = rankOf("d:" + n.producer) + 1;
+    visiting.delete(key);
+    rank.set(key, r);
+    return r;
+  };
+  for (const k of nodes.keys()) rankOf(k);
+  return {nodes, edges, rank};
+}
 
-  if (DATA.report) cards.push(`<div class="card final">
-    <div class="head"><span class="mk">★</span><span class="lane">報告</span></div>
-    <div class="io"><span class="k">　</span>${chip(DATA.report, "out")}</div></div>`);
+/* --- layout ---------------------------------------------------------------- */
+/* 由上往下：一列是一層流向深度。平行的 lane 很少超過四條，流向卻會一直變深 ——
+   所以深度走可以捲動的方向，寬度只取決於同時有幾條 lane。 */
+const W = {data: 196, agent: 256}, H = {data: 38, agent: 140};
+const GAP_X = 20, GAP_Y = 54, PAD = 24, GUTTER = 78;
 
-  $("legend").innerHTML = !DATA.dispatches.length ? ""
-    : DATA.read_edges_available
-      ? '<span class="chip open">實線</span> 打開過　<span class="chip shut">虛線</span> 有權限但沒打開'
-      : "這份事件流沒有讀取紀錄，所以只看得到每段<b>被允許</b>讀什麼，看不到它實際有沒有打開。";
-  $("flow").innerHTML = cards.join('<div class="wire"></div>');
+function layout(m) {
+  const rows = [];
+  for (const [k, r] of m.rank) (rows[r] || (rows[r] = [])).push(k);
+  const order = new Map(), pos = new Map(), preds = new Map();
+  for (const e of m.edges) (preds.get(e.to) || preds.set(e.to, []).get(e.to)).push(e.from);
+  const dIndex = (k) => DATA.dispatches.findIndex((d) => "d:" + d.id === k);
+  const firstUse = (k) => {
+    const i = DATA.dispatches.findIndex((d) => d.granted.includes(k.slice(2)) || d.opened.includes(k.slice(2)));
+    return i < 0 ? 1e3 : i;
+  };
+  for (let r = 0; r < rows.length; r++) {
+    const row = rows[r] || (rows[r] = []);
+    const bary = (k) => {
+      const ps = (preds.get(k) || []).filter((p) => order.has(p));
+      return ps.length ? ps.reduce((s, p) => s + order.get(p), 0) / ps.length
+        : r === 0 ? firstUse(k) : dIndex(k);
+    };
+    row.sort((a, b) => bary(a) - bary(b) || dIndex(a) - dIndex(b));
+    row.forEach((k, i) => order.set(k, i + 0.001 * i));
+  }
+  const rowW = rows.map((row) => row.reduce((s, k) => s + W[m.nodes.get(k).type] + GAP_X, -GAP_X));
+  const rowH = rows.map((row) => Math.max(H.data, ...row.map((k) => H[m.nodes.get(k).type])));
+  const wide = Math.max(W.agent * 2 + GAP_X, ...rowW);
+  let y = PAD;
+  const heads = [];
+  rows.forEach((row, r) => {
+    const agents = row.some((k) => m.nodes.get(k).type === "agent");
+    heads.push({y: y + rowH[r] / 2, label: r === 0 ? "資料" : agents ? "Agent" : "產出"});
+    let x = GUTTER + (wide - rowW[r]) / 2;
+    for (const k of row) {
+      const t = m.nodes.get(k).type;
+      pos.set(k, {x, y: y + (rowH[r] - H[t]) / 2, w: W[t], h: H[t], row: r});
+      x += W[t] + GAP_X;
+    }
+    y += rowH[r] + GAP_Y;
+  });
+  /* 每一列最右邊在哪裡 —— 跨過好幾列的邊要從旁邊繞，不能穿過中間那列的卡片。 */
+  const right = rows.map((row) => Math.max(0, ...row.map((k) => pos.get(k).x + pos.get(k).w)));
+  return {pos, heads, right, width: GUTTER + wide + PAD * 2 + 40, height: y - GAP_Y + PAD};
+}
+
+const pathOf = (a, b) => {
+  const x1 = a.x + a.w / 2, y1 = a.y + a.h, x2 = b.x + b.w / 2, y2 = b.y;
+  if (b.row - a.row > 1 && GEOM.right) {
+    const xr = Math.max(...GEOM.right.slice(a.row + 1, b.row)) + 22;
+    const k = GAP_Y / 2;
+    return `M${x1},${y1} C${x1},${y1 + k} ${xr},${y1 + k * 0.4} ${xr},${y1 + k}`
+      + ` L${xr},${y2 - k} C${xr},${y2 - k * 0.4} ${x2},${y2 - k} ${x2},${y2}`;
+  }
+  const c = Math.max(24, (y2 - y1) / 2);
+  return `M${x1},${y1} C${x1},${y1 + c} ${x2},${y2 - c} ${x2},${y2}`;
+};
+
+/* --- render ---------------------------------------------------------------- */
+function render() {
+  if (DATA.error) return renderMissing();
+  renderBar();
+  const seqChanged = DATA.seq !== prevSeq;
+  if (seqChanged || !GEOM.pos.size) renderGraph();
+  renderSide();
+  renderFeed();
+  prevSeq = DATA.seq;
   tick();
 }
 
-function renderTrace(t) {
-  if (!t) return '<div class="trace"><span class="nothing">讀取中…</span></div>';
-  if (t.state !== "ready")
-    return `<div class="trace"><p class="notyet">${esc(t.why
-      || "伺服器沒有給出逐輪紀錄，也沒有說明原因。")}</p></div>`;
-
-  const steps = t.steps.map((s, i) => {
-    if (s.kind === "think")
-      return `<div class="step think"><span class="n">${s.turn}</span>
-        <span class="b">思考 <em>${s.empty_reasoning
-          ? "後端回傳空的推理區塊" : `內容未留存（${n0(s.chars)} 字元）`}</em></span></div>`;
-    if (s.kind === "call")
-      return `<div class="step call"><span class="n">${s.turn}</span><span class="b">
-        <span class="fn">${esc(s.name.replace(/^mcp__[^_]+__/, ""))}</span>
-        <div class="args"><pre>${esc(JSON.stringify(s.args, null, 1))}</pre></div>
-        </span></div>`;
-    if (s.kind === "result")
-      return `<div class="step result${s.error ? " err" : ""}${
-          s.budget_pct ? " mark" : ""}"><span class="n">${
-          s.budget_pct !== null && s.budget_pct !== undefined ? s.budget_pct + "%" : "←"}</span>
-        <span class="b"><pre>${esc(s.body.slice(0, 700))}</pre>${
-          s.harness ? `<div style="color:var(--wait);margin-top:4px">${esc(s.harness)}</div>` : ""}
-        </span></div>`;
-    if (s.kind === "attempt")
-      return `<div class="step rule"><span class="n"></span>
-        <span class="b">第 ${s.n} 次嘗試</span></div>`;
-    if (s.kind === "end")
-      return `<div class="step rule"><span class="n"></span>
-        <span class="b">結束 · ${esc(s.subtype)} · ${s.turns} turns</span></div>`;
-    if (s.kind === "text")
-      return `<div class="step"><span class="n">${s.turn}</span>
-        <span class="b">${esc(s.body || s.detail || "")}</span></div>`;
-    return "";
-  }).join("");
-  return `<div class="trace">${steps}</div>`;
+function renderBar() {
+  const stale = isStale();
+  const tone = DATA.finished ? "done" : stale ? "stall" : toneOf(DATA.activity.state);
+  document.documentElement.style.setProperty("--now", `var(--${tone})`);
+  $("bar").className = "bar" + (!DATA.finished && !stale ? " live" : "");
+  $("state").textContent = DATA.finished
+    ? "已結束" + (DATA.finish_reason ? ` · ${DATA.finish_reason}` : "")
+    : stale ? "事件流沒有動靜" : DATA.activity.state;
+  $("detail").textContent = DATA.finished
+    ? (DATA.activity.detail && DATA.activity.detail !== DATA.finish_reason ? DATA.activity.detail : "")
+    : stale ? `最後一個事件在 ${clock(lagSeconds())} 前。事件流說它當時在「${
+        DATA.activity.state}」，但之後什麼都沒再寫下來。`
+    : (DATA.activity.detail || "");
+  $("job").textContent = DATA.job_id;
+  const ran = DATA.dispatches.some((d) => !d.running);
+  $("stats").innerHTML = [
+    ["派工", `${DATA.dispatches.length}${DATA.running.length ? `（執行中 ${DATA.running.length}）` : ""}`],
+    /* 後端不回報成本時，$0.0000 是一個看起來像量測值的非量測值。 */
+    ["成本", !ran ? "派工結束時回報" : !DATA.usd ? "後端未回報" : "$" + DATA.usd.toFixed(4)],
+    ["context 峰值", DATA.context_peak ? n0(DATA.context_peak) : "尚未回報"],
+    ...(DATA.throttle_seconds ? [["限流等待", clock(DATA.throttle_seconds)]] : []),
+    ["報告", DATA.report ? "已產出" : DATA.finished ? "沒有產出" : "還沒有"],
+  ].map(([k, v]) => `<div class="stat"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join("");
+  $("anoms").innerHTML = DATA.anomalies.map((a) =>
+    `<div class="anom ${esc(a.severity)}"><span class="k">${esc(a.kind)}</span>${esc(a.detail)}</div>`).join("");
 }
 
+function renderGraph() {
+  const m = buildModel();
+  const empty = !DATA.dispatches.length;
+  if (empty) {
+    GEOM = {pos: new Map(), edges: []};
+    fit();
+    $("stage").style.width = "100%"; $("stage").style.height = "320px";
+    $("wires").innerHTML = "";
+    $("nodes").innerHTML = `<div class="empty"><div class="why"><p>${
+      esc(DATA.flow_empty_why || "還沒有任何派工。")}</p>${
+      m.nodes.size ? `<p class="sub">已經進來的資料：${[...m.nodes.values()].map((n) =>
+        `<span class="chip">${esc(n.info.label)}</span>`).join("")}</p>` : ""}</div></div>`;
+    renderLegend();
+    return;
+  }
+  const g = layout(m);
+  GEOM = {pos: g.pos, edges: m.edges, right: g.right};
+  const stage = $("stage");
+  stage.style.width = g.width + "px"; stage.style.height = g.height + "px";
+  GEOM.width = g.width;
+  fit();
+  for (const id of ["wires", "fx"]) {
+    $(id).setAttribute("width", g.width); $(id).setAttribute("height", g.height);
+    $(id).setAttribute("viewBox", `0 0 ${g.width} ${g.height}`);
+  }
+
+  $("wires").innerHTML = m.edges.map((e) => {
+    const a = g.pos.get(e.from), b = g.pos.get(e.to);
+    return a && b ? `<path class="edge ${e.kind}${e.hot ? " hot" : ""}" d="${pathOf(a, b)}"/>` : "";
+  }).join("");
+
+  const heads = g.heads.map((h) => `<div class="colhead" style="top:${h.y - 8}px">${esc(h.label)}</div>`);
+  const cards = [...m.nodes.values()].map((n) => {
+    const p = g.pos.get(n.key);
+    const style = `left:${p.x}px;top:${p.y}px;width:${p.w}px;height:${p.h}px`;
+    return n.type === "agent" ? agentNode(n.d, style) : dataNode(n, style);
+  });
+  $("nodes").innerHTML = heads.join("") + cards.join("");
+
+  /* 新出現的讀取與產出，沿著邊流過一次 —— 讓「剛剛發生了什麼」看得見，
+     而不是只在下一次掃視時多出一條線。第一次畫圖不放：那不是「剛剛」。 */
+  const keys = new Set(m.edges.map((e) => `${e.from}>${e.to}>${e.kind}`));
+  if (prevEdges && !reduced)
+    for (const e of m.edges) if (!prevEdges.has(`${e.from}>${e.to}>${e.kind}`)) spark(e);
+  prevEdges = keys;
+
+  for (const d of DATA.dispatches) {
+    const n = d.step_count, before = prevSteps[d.id];
+    if (before !== undefined && n > before && !reduced) {
+      const el = document.querySelector(`.node.agent[data-d="${CSS.escape(d.id)}"]`);
+      if (el) { el.classList.remove("blip"); void el.offsetWidth; el.classList.add("blip"); }
+    }
+    prevSteps[d.id] = n;
+  }
+  renderLegend();
+}
+
+/* 第一眼要看得到整條流：比容器寬就縮，但不縮到字讀不了 —— 再寬就捲動。 */
+function fit() {
+  if (!GEOM.width) { $("stage").style.zoom = 1; return; }
+  const room = $("wrap").clientWidth - 2;
+  $("stage").style.zoom = Math.min(1, Math.max(0.75, room / GEOM.width));
+}
+addEventListener("resize", fit);
+
+function spark(e) {
+  const a = GEOM.pos.get(e.from), b = GEOM.pos.get(e.to);
+  if (!a || !b) return;
+  const color = e.kind === "write" ? "var(--out)" : "var(--data)";
+  const NS = "http://www.w3.org/2000/svg";
+  const c = document.createElementNS(NS, "circle");
+  c.setAttribute("r", "4.5"); c.setAttribute("class", "spark");
+  c.setAttribute("style", `fill:${color};color:${color}`);
+  const mo = document.createElementNS(NS, "animateMotion");
+  mo.setAttribute("dur", "1.1s"); mo.setAttribute("fill", "freeze");
+  mo.setAttribute("path", pathOf(a, b));
+  mo.setAttribute("keySplines", "0.3 0 0.2 1"); mo.setAttribute("calcMode", "spline");
+  mo.setAttribute("keyTimes", "0;1"); mo.setAttribute("keyPoints", "0;1");
+  c.appendChild(mo);
+  $("fx").appendChild(c);
+  mo.beginElement?.();
+  setTimeout(() => c.remove(), 1300);
+}
+
+function dataNode(n, style) {
+  const cls = n.report ? " report" : n.producer ? " made" : "";
+  const glyph = n.report ? "★" : n.derived ? "▤" : n.producer ? "▪" : "▣";
+  const meta = n.rereads ? "讀回 ↺" : kTok(n.info.est_tokens);
+  const title = `${n.id}${n.derived ? `\n${n.producer} 查詢後自己存下的中間表（依路徑判斷）`
+    : n.producer ? `\n由 ${n.producer} 寫出` : "\n進來的資料"}${
+    n.rereads ? "\n寫出它的 agent 之後又讀了它" : ""}`;
+  return `<div class="node data${cls}" style="${style}" title="${esc(title)}">
+    <span class="g" aria-hidden="true">${glyph}</span>
+    <span class="lbl">${esc(n.info.label || n.id)}</span>
+    ${meta ? `<span class="meta">${esc(meta)}</span>` : ""}</div>`;
+}
+
+function agentNode(d, style) {
+  const state = d.running ? "running" : d.ok ? "ok" : "bad";
+  const mk = d.running ? "▸" : d.ok ? "✓" : "✗";
+  const t = lastTurn(d), s = lastStep(d), pct = lastPct(d);
+  let now;
+  const lastCall = [...d.steps].reverse().find((x) => x.phase === "turn" && x.calls.length);
+  if (d.running && s) {
+    const phase = s.phase === "results" ? "結果已回，等模型下一步"
+      : s.calls.length ? "工具執行中" : "模型回應中";
+    const c = lastCall ? lastCall.calls[lastCall.calls.length - 1] : null;
+    now = `<div class="now">${c ? `<b>${esc(c.tool)}</b> ${esc(c.arg)}` : "還沒呼叫任何工具"}</div>
+      <div class="now" style="font-family:var(--sans)">${phase}</div>`;
+  } else if (d.running) {
+    now = `<div class="now why">${esc(d.steps_why)}</div>`;
+  } else {
+    now = `<div class="now">${d.produced.length
+      ? `寫出 ${d.produced.length} 份` : esc(d.nothing_written_why)}</div>`;
+  }
+  const turn = t ? t.turn : d.turns;
+  const meter = pct == null ? `<div class="meter"><span>${
+      d.running ? "預算：還沒有步驟紀錄" : `${n0(d.tokens_in)} in · ${n0(d.tokens_out)} out`}</span></div>`
+    : `<div class="meter${pct >= .9 ? " hot" : pct >= .7 ? " warn" : ""}">
+        <span>預算</span><span class="track"><span class="fill" style="width:${Math.min(100, pct * 100)}%"></span></span>
+        <span>${Math.round(pct * 100)}%</span></div>`;
+  return `<button class="node agent ${state}${selected === d.id ? " sel" : ""}" style="${style}"
+      data-d="${esc(d.id)}" aria-pressed="${selected === d.id}"
+      aria-label="${esc(`${d.lane} ${d.id}，${statusOf(d)}`)}">
+    <div class="a1"><span class="mk" aria-hidden="true">${mk}</span>
+      <span class="lane lbl">${esc(d.lane)}</span>
+      <span class="when"${d.running ? ` data-since="${esc(d.started || "")}"` : ""}>${
+        d.running ? "—" : esc(statusOf(d))}</span></div>
+    <div class="a2"><span>${esc(d.id)}</span>${turn ? `<span>第 ${turn} 輪</span>` : ""}${
+      d.step_count ? `<span>${d.step_count} 步</span>` : ""}</div>
+    ${now}
+    ${meter}
+  </button>`;
+}
+
+function renderLegend() {
+  const line = (cls, extra = "") => `<svg width="30" height="8"><path class="edge ${cls}" d="M1,4 L29,4" ${extra}/></svg>`;
+  const items = [];
+  if (DATA.read_edges_available) {
+    items.push(`<span class="it">${line("read")}讀取過</span>`);
+    items.push(`<span class="it">${line("unopened")}被允許但沒打開</span>`);
+  } else if (DATA.dispatches.length) {
+    items.push(`<span class="it">${line("grant")}被允許讀</span>`);
+  }
+  items.push(`<span class="it">${line("write")}寫出</span>`);
+  if (GEOM.edges.some((e) => e.kind === "derived"))
+    items.push(`<span class="it">${line("derived")}agent 自己存的中間表（依路徑推定，事件流沒記錄寫入）</span>`);
+  items.push(`<span class="it">${line("read hot")}流動＝讀它的 agent 還在跑</span>`);
+  items.push(`<span class="it"><span class="mono" style="color:var(--agent)">▸</span>執行中</span>`);
+  items.push(`<span class="it"><span class="mono" style="color:var(--out)">✓</span>完成</span>`);
+  items.push(`<span class="it"><span class="mono" style="color:var(--stall)">✗</span>沒做完</span>`);
+  if (!DATA.read_edges_available && DATA.dispatches.length)
+    items.push(`<span class="note">這份事件流沒有讀取紀錄，所以只看得到每個 agent <b>被允許</b>讀什麼，看不到它實際打開了哪些。</span>`);
+  if (!DATA.steps_recorded && DATA.dispatches.length)
+    items.push(`<span class="note">這份事件流沒有步驟紀錄（lane.step），所以 agent 節點上沒有「它這一刻在做什麼」—— 不是它們閒著，是沒被記下來。</span>`);
+  $("legend").innerHTML = items.join("");
+}
+
+/* --- side panel ------------------------------------------------------------ */
+function pickFollowed() {
+  if (!follow) return;
+  const running = DATA.dispatches.filter((d) => d.running);
+  const pool = running.length ? running : DATA.dispatches;
+  const pick = pool.reduce((a, d) => (!a || (d.started || "") > (a.started || "")) ? d : a, null);
+  selected = pick ? pick.id : null;
+}
+
+function renderSide() {
+  pickFollowed();
+  document.querySelectorAll(".node.agent").forEach((el) => {
+    const on = el.dataset.d === selected;
+    el.classList.toggle("sel", on); el.setAttribute("aria-pressed", on);
+  });
+  const pane = $("pane-agent");
+  const d = DATA.dispatches.find((x) => x.id === selected);
+  if (!d) {
+    pane.innerHTML = `<p class="say">${DATA.dispatches.length
+      ? "點圖上的一個 agent，看它讀了什麼、每一步做了什麼。"
+      : esc(DATA.flow_empty_why || "還沒有任何 agent。")}</p>`;
+    return;
+  }
+  const atBottom = pane.scrollHeight - pane.scrollTop - pane.clientHeight < 40;
+  const state = d.running ? "running" : d.ok ? "ok" : "bad";
+  const pct = lastPct(d);
+  const label = (a) => esc(nodeInfo(a).label || a);
+  const opened = new Set(d.opened);
+  const reads = d.granted.length ? d.granted.map((a) => `<span class="chip" title="${esc(a)}">${label(a)}${
+      DATA.read_edges_available ? (opened.has(a) ? " · 讀過" : " · 沒打開") : ""}</span>`).join("")
+    : esc(d.nothing_granted_why);
+  const writes = d.produced.length
+    ? d.produced.map((a) => `<span class="chip" title="${esc(a)}">${label(a)}</span>`).join("")
+    : esc(d.nothing_written_why);
+
+  pane.innerHTML = `
+    ${!follow ? `<button class="follow" id="follow">跟隨最新的 agent</button>` : ""}
+    <div class="who">
+      <div class="t1"><span class="lane">${esc(d.lane)}</span><span class="id">${esc(d.id)}</span>
+        <span class="pill ${state}">${esc(statusOf(d))}</span></div>
+      <div class="task${taskFull ? " full" : ""}" id="task" title="點一下展開或收合任務全文">${esc(d.task || "")}</div>
+    </div>
+    <div class="kv">
+      <div><span class="k">經過</span><span class="v"${d.running ? ` data-since="${esc(d.started || "")}"` : ""}>${
+        d.running ? "—" : (d.started && d.ended ? clock((Date.parse(d.ended) - Date.parse(d.started)) / 1000) : "—")}</span></div>
+      <div><span class="k">輪次</span><span class="v">${(lastTurn(d) || {}).turn || d.turns || "—"}</span></div>
+      <div><span class="k">預算</span><span class="v">${pct == null ? "—" : Math.round(pct * 100) + "%"}</span></div>
+      <div><span class="k">輸入 token</span><span class="v">${d.running ? "結束時回報" : n0(d.tokens_in)}</span></div>
+      <div><span class="k">輸出 token</span><span class="v">${d.running ? "結束時回報" : n0(d.tokens_out)}</span></div>
+      <div><span class="k">成本</span><span class="v">${d.running ? "結束時回報" : d.usd ? "$" + d.usd.toFixed(4) : "未回報"}</span></div>
+    </div>
+    <div class="io"><span class="k">讀</span>${reads}</div>
+    <div class="io"><span class="k">寫出</span>${writes}</div>
+    <h2>步驟${d.step_count > d.steps.length ? `（最近 ${d.steps.length} / ${d.step_count}）` : ""}</h2>
+    ${d.steps.length ? `<div class="steps">${stepRows(d)}</div>`
+      : `<p class="say warn" style="margin-top:8px">${esc(d.steps_why)}</p>`}
+    ${!d.running && d.has_trace ? `<button class="more" data-trace="${esc(d.id)}">${
+      traceOpen[d.id] ? "收合完整逐輪紀錄" : "打開完整逐輪紀錄（含參數與結果摘錄）"}</button>` : ""}
+    ${!d.running && !d.has_trace ? `<p class="say" style="margin-top:12px">這次派工沒有留下逐輪紀錄。</p>` : ""}
+    ${d.running ? `<p class="say" style="margin-top:12px">完整逐輪紀錄在派工結束時才寫下 —— 現在不是還沒載入，是還不存在。上面的步驟是執行期間即時記下的。</p>` : ""}
+    ${traceOpen[d.id] ? renderTrace(traceCache[d.id]) : ""}`;
+  if (atBottom && d.running) pane.scrollTop = pane.scrollHeight;
+  tick();
+}
+
+function stepRows(d) {
+  const seen = prevStepSeq[d.id] || 0;
+  let attempt = null, pending = null;
+  const rows = [];
+  const flush = () => {
+    if (!pending) return;
+    const b = pending, bits = [];
+    /* 思考的內容本來就不留存；後端送來空的推理區塊時，連字數都是 0 ——
+       那是後端的事實，不是 agent 沒在想。 */
+    if (b.think) bits.push(b.tc ? `思考 ${n0(b.tc)} 字元（內容不留存）` : `思考 ${b.think} 段（後端回傳空的推理內容）`);
+    if (b.text) bits.push(`文字 ${n0(b.text)} 字元`);
+    if (!bits.length) bits.push(b.known ? "空的回應"
+      : "沒有文字、沒有工具呼叫 —— 多半是空的推理區塊，但這份事件流沒有記錄段數，無法確定");
+    rows.push(`<div class="st think${b.fresh}"><span class="n">${b.from === b.to ? b.from : `${b.from}–${b.to}`}</span><span class="b">${bits.join(" · ")}</span><span class="p">${b.p}</span></div>`);
+    pending = null;
+  };
+  for (const s of d.steps) {
+    const fresh = seen && s.seq > seen ? " fresh" : "";
+    if (s.attempt !== attempt) {
+      flush();
+      if (attempt !== null || s.attempt > 1)
+        rows.push(`<div class="st rule"><span class="n"></span><span class="b">第 ${s.attempt} 次嘗試</span><span class="p"></span></div>`);
+      attempt = s.attempt;
+    }
+    const p = s.pct == null ? "" : Math.round(s.pct * 100) + "%";
+    if (s.phase === "turn" && !s.calls.length) {
+      /* SDK 把一次回應拆成好幾則訊息（思考、文字、工具呼叫各一則），所以沒有工具
+         呼叫的那幾則收成一行 —— 否則一次請求會被讀成三個「什麼都沒做」的回合。 */
+      const thinkN = s.thinking_blocks ?? (s.thinking_chars ? 1 : 0);
+      if (pending) { pending.think += thinkN; pending.tc += s.thinking_chars || 0; pending.text += s.text_chars || 0; pending.p = p; pending.to = s.turn; }
+      else pending = {from: s.turn, to: s.turn, think: thinkN, tc: s.thinking_chars || 0,
+        text: s.text_chars || 0, p, fresh, known: s.thinking_blocks != null};
+      continue;
+    }
+    flush();
+    if (s.phase === "turn") {
+      for (const c of s.calls)
+        rows.push(`<div class="st call${fresh}"><span class="n">${s.turn}</span><span class="b"><span class="fn">${esc(c.tool)}</span> ${esc(c.arg)}</span><span class="p">${p}</span></div>`);
+    } else {
+      for (const r of s.results)
+        rows.push(`<div class="st res${r.error ? " err" : ""}${fresh}"><span class="n">←</span><span class="b">${
+          r.error ? "錯誤 · " : ""}${n0(r.chars)} 字元回到 agent</span><span class="p">${p}</span></div>`);
+    }
+  }
+  flush();
+  prevStepSeq[d.id] = d.steps.length ? d.steps[d.steps.length - 1].seq : 0;
+  return rows.join("");
+}
+
+function renderTrace(t) {
+  if (!t) return '<div class="trace"><p class="say">讀取中…</p></div>';
+  if (t.state !== "ready")
+    return `<div class="trace"><p class="say warn">${esc(t.why || "伺服器沒有給出逐輪紀錄，也沒有說明原因。")}</p></div>`;
+  return `<div class="trace">${t.steps.map((s) => {
+    if (s.kind === "think")
+      return `<div class="step"><span class="n">${s.turn}</span><span class="say">思考 · ${
+        s.empty_reasoning ? "後端回傳空的推理區塊" : `內容未留存（${n0(s.chars)} 字元）`}</span></div>`;
+    if (s.kind === "call")
+      return `<div class="step"><span class="n">${s.turn}</span><div><span class="fn">${
+        esc(s.name.replace(/^mcp__[^_]+__/, ""))}</span><div class="args"><pre>${
+        esc(JSON.stringify(s.args, null, 1))}</pre></div></div></div>`;
+    if (s.kind === "result")
+      return `<div class="step"><span class="n">${s.budget_pct != null ? s.budget_pct + "%" : "←"}</span><div class="res${
+        s.error ? " err" : ""}"><pre>${esc(s.body.slice(0, 700))}</pre>${
+        s.harness ? `<div class="harness">${esc(s.harness)}</div>` : ""}</div></div>`;
+    if (s.kind === "attempt")
+      return `<div class="step"><span class="n"></span><span class="say">第 ${s.n} 次嘗試</span></div>`;
+    if (s.kind === "end")
+      return `<div class="step"><span class="n"></span><span class="say">結束 · ${esc(s.subtype)} · ${s.turns} 輪</span></div>`;
+    if (s.kind === "text")
+      return `<div class="step"><span class="n">${s.turn}</span><span>${esc(s.body || s.detail || "")}</span></div>`;
+    return "";
+  }).join("")}</div>`;
+}
+
+/* --- event feed ------------------------------------------------------------ */
 function shortIds(line) {
-  /* 事件流裡的 artifact id 是全長的。在一條要被掃過去的訊息裡，
-     golden24/note/lanes/critic1/findings/critique 佔掉整行而只有最後一段有訊息量。 */
-  return line.replace(/\S*\/(?:lanes\/)?([^/\s]+)\/(?:findings\/)?([^/\s]+)/g,
-                      (m, a, b) => `${a}:${b}`);
+  /* 全長的 artifact id 佔掉整行，而只有最後一段有訊息量。 */
+  return line.replace(/\S*\/(?:lanes\/)?([^/\s]+)\/(?:findings\/)?([^/\s]+)/g, (m, a, b) => `${a}:${b}`);
 }
 
 function renderFeed() {
   const seen = new Set([...$("feed").children].map((e) => e.dataset.seq));
-  /* 連續同樣的事件收成一行加次數 —— 十一次「窺看同一份 finding」是一件事，
-     不是十一件。 */
   const rows = [];
   for (const e of DATA.events) {
-    const line = shortIds(e.line);
-    const last = rows[rows.length - 1];
+    const line = shortIds(e.line), last = rows[rows.length - 1];
     if (last && last.line === line && last.t === e.t) { last.n += 1; last.seq = e.seq; }
     else rows.push({...e, line, n: 1});
   }
+  $("tab-events").textContent = `事件（${DATA.events.length}）`;
   if (!rows.length) {
-    $("feed").innerHTML = '<p class="nothing feedempty">事件流還是空的：job 還沒寫下任何事件。</p>';
+    $("feed").innerHTML = '<p class="say">事件流還是空的：job 還沒寫下任何事件。</p>';
     return;
   }
   $("feed").innerHTML = rows.map((e) => {
-    const cls = e.t.startsWith("dispatch") ? "dispatch"
-      : e.t.startsWith("throttle") ? "throttle"
-      : (e.t === "no_progress" || e.t === "limit.reached") ? "bad" : "";
+    const cls = e.t.startsWith("dispatch") ? "dispatch" : e.t.startsWith("throttle") ? "throttle"
+      : (e.t === "no_progress" || e.t === "limit.reached") ? "bad" : e.t === "artifact.read" ? "read" : "";
     const fresh = seen.size && !seen.has(String(e.seq)) ? " fresh" : "";
-    return `<div class="ev ${cls}${fresh}" data-seq="${e.seq}">
-      <span class="t">${esc(e.ts.slice(11, 19))}</span>
-      <span class="m">${esc(e.line)}${
-        e.n > 1 ? `<span class="rep">×${e.n}</span>` : ""}</span></div>`;
+    return `<div class="ev ${cls}${fresh}" data-seq="${e.seq}"><span class="t">${esc(e.ts.slice(11, 19))}</span>
+      <span class="m">${esc(e.line)}${e.n > 1 ? `<span class="rep">×${e.n}</span>` : ""}</span></div>`;
   }).join("");
 }
 
-/* --- ticking clocks ------------------------------------------------------- */
+/* job 不存在時，整頁要說它在哪裡找、那裡有什麼 —— 而且繼續等它出現。 */
+function renderMissing() {
+  document.documentElement.style.setProperty("--now", "var(--agent)");
+  $("bar").className = "bar";
+  $("state").textContent = "找不到這個 job";
+  $("detail").textContent = DATA.why;
+  $("job").textContent = DATA.job_id || "";
+  $("stats").innerHTML = ""; $("anoms").innerHTML = ""; $("legend").innerHTML = "";
+  $("wires").innerHTML = "";
+  $("stage").style.width = "100%"; $("stage").style.height = "320px";
+  const known = DATA.known || [];
+  $("nodes").innerHTML = `<div class="empty"><div class="why">
+    <p class="sub">查找位置 <span class="mono">${esc(DATA.root || "")}</span></p>
+    <p class="sub">${known.length ? "那裡現有的 job：" + known.map((k) => `<span class="chip">${esc(k)}</span>`).join("")
+      : "那裡一個 job 都沒有。"}</p></div></div>`;
+  $("pane-agent").innerHTML = '<p class="say">還沒有 agent —— 因為還找不到這個 job 的事件流。</p>';
+  $("feed").innerHTML = '<p class="say">還沒有事件 —— 因為還找不到這個 job 的事件流。</p>';
+}
+
+/* --- clocks ----------------------------------------------------------------- */
 function tick() {
   const now = Date.now();
-  if (firstTs) $("clock").textContent = clock(((lastTs || now) - firstTs) / 1000);
+  if (firstTs) $("clock").textContent = clock(((DATA.finished || isStale() ? lastTs : now) - firstTs) / 1000);
   const stale = isStale();
-  document.querySelectorAll(".elapsed[data-since]").forEach((el) => {
+  document.querySelectorAll("[data-since]").forEach((el) => {
     const t = Date.parse(el.dataset.since);
     if (isNaN(t)) return;
-    /* 事件流停了之後，牆上的時鐘就不是這個 job 的時鐘了。停在最後一個事件，
-       加一個 + 表示「至少這麼久」—— 讓計數器繼續跑是在報告一件沒發生的事。 */
-    el.textContent = stale ? clock((lastTs - t) / 1000) + "+"
-                           : clock((now - t) / 1000);
+    /* 事件流停了之後，牆上的時鐘就不是這個 job 的時鐘了：停在最後一個事件，
+       加一個 + 表示「至少這麼久」。 */
+    el.textContent = stale ? clock((lastTs - t) / 1000) + "+" : clock((now - t) / 1000);
     el.classList.toggle("stalled", stale);
   });
 }
 setInterval(tick, 1000);
 
-/* --- polling -------------------------------------------------------------- */
-/* 輪詢而不是 SSE：事件流是幾 KB 的 append-only JSONL，重讀的成本人感覺不到。
-   這跟終端機那份即時模式的判斷一模一樣。 */
+/* --- polling ----------------------------------------------------------------- */
 async function poll() {
   try {
     const r = await fetch("state", {cache: "no-store"});
     if (!r.ok) throw new Error(r.status);
-    /* job 不存在是伺服器的答案，不是連線斷了 —— 以前這裡把它當成「連不上 monitor」，
-       而那是相反的診斷。 */
+    /* job 不存在是伺服器的答案，不是連線斷了。 */
     DATA = await r.json();
-    stamps();
-    render();
-    link(true);
+    stamps(); render(); link(true);
   } catch (err) {
     /* 畫面不動有兩種原因，而它們是相反的診斷。說出是哪一種。 */
     link(false, String(err.message || err));
@@ -512,32 +905,43 @@ async function poll() {
 
 function link(ok, note) {
   $("link").className = "link" + (ok ? "" : " bad");
-  $("linktext").textContent = ok
-    ? (note || `輪詢中 · 最後更新 ${new Date().toTimeString().slice(0, 8)}`)
+  $("linktext").textContent = ok ? (note || `輪詢中 · 最後更新 ${new Date().toTimeString().slice(0, 8)}`)
     : `連不上 monitor（${note}）—— 畫面停住是這個原因，不是 job 停住`;
 }
 
 function stamps() {
-  const ts = (DATA.events || []).map((e) => Date.parse(e.ts)).filter((t) => !isNaN(t));
+  const ts = [...(DATA.events || []).map((e) => e.ts),
+    ...(DATA.dispatches || []).flatMap((d) => d.steps.map((s) => s.ts))]
+    .map((t) => Date.parse(t)).filter((t) => !isNaN(t));
   if (ts.length) { firstTs = firstTs || Math.min(...ts); lastTs = Math.max(...ts); }
 }
 
-/* --- open one dispatch's turns ------------------------------------------- */
-document.addEventListener("click", async (e) => {
-  const b = e.target.closest(".expand");
-  if (!b) return;
-  const id = b.dataset.t;
-  if (openTrace === id) { openTrace = null; renderFlow(); return; }
-  openTrace = id;
-  renderFlow();
-  if (!traceCache[id] || traceCache[id].state === "running") {
-    try {
-      traceCache[id] = await (await fetch("trace/" + encodeURIComponent(id))).json();
-    } catch (err) {
-      traceCache[id] = {state: "absent", why: "讀不到逐輪紀錄：" + err};
-    }
+/* --- interaction ------------------------------------------------------------ */
+function showTab(name) {
+  tab = name;
+  for (const t of ["agent", "events"]) {
+    $("tab-" + t).setAttribute("aria-selected", String(t === name));
+    $("pane-" + t).hidden = t !== name;
   }
-  renderFlow();
+}
+$("tab-agent").onclick = () => showTab("agent");
+$("tab-events").onclick = () => showTab("events");
+
+document.addEventListener("click", async (e) => {
+  const node = e.target.closest(".node.agent");
+  if (node) { selected = node.dataset.d; follow = false; showTab("agent"); renderSide(); return; }
+  if (e.target.closest("#task")) { taskFull = !taskFull; $("task").classList.toggle("full", taskFull); return; }
+  if (e.target.closest("#follow")) { follow = true; renderSide(); return; }
+  const more = e.target.closest(".more[data-trace]");
+  if (!more) return;
+  const id = more.dataset.trace;
+  traceOpen[id] = !traceOpen[id];
+  renderSide();
+  if (traceOpen[id] && !traceCache[id]) {
+    try { traceCache[id] = await (await fetch("trace/" + encodeURIComponent(id))).json(); }
+    catch (err) { traceCache[id] = {state: "absent", why: "讀不到逐輪紀錄：" + err}; }
+    renderSide();
+  }
 });
 
 stamps();

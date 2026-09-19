@@ -198,6 +198,9 @@ class WorkerToolbox:
     #: should not grow one; the worker injects this so a read can become an
     #: event without the storage tools learning what an event is.
     on_read: Callable[[str], Awaitable[None]] | None = None
+    #: Called once per streamed turn and per batch of tool results, with a
+    #: ``lane.step`` payload. Injected for the same reason as ``on_read``.
+    on_step: Callable[[dict[str, Any]], Awaitable[None]] | None = None
     #: How many calls the budget gate refused. Recorded on the dispatch event so
     #: a run says whether the gate fired rather than leaving it to be inferred.
     gated: int = 0

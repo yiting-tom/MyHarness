@@ -23,7 +23,7 @@ from myharness.artifacts.types import GrantSet
 from myharness.backends.profile import registry as backends
 from myharness.events.log import EventLog, LocalEventLog
 from myharness.events.query import summarize
-from myharness.events.types import INGRESS, PROXY_ROUTE
+from myharness.events.types import INGRESS, LANE_STEP, PROXY_ROUTE
 from myharness.jobs.channel import QueueChannel
 from myharness.jobs.runner import JobRunner
 from myharness.jobs.spec import JobSpec
@@ -148,7 +148,9 @@ class AnalysisService:
             state=str(handle.state),
             revision=handle.revision,
             status=handle.runner.status(),
-            recent_events=events[-_RECENT_WINDOW:],
+            # Steps are for the monitor. Eight of them would fill the caller's
+            # "recent" -- paid for in its context -- with one lane's queries.
+            recent_events=[e for e in events if e.t != LANE_STEP][-_RECENT_WINDOW:],
             note=handle.error,
         )
         return {"ok": True, **progress.to_dict()}

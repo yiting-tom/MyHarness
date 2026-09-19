@@ -35,6 +35,7 @@ from urllib.parse import urlparse
 
 from myharness.dataflow import EdgeKind, build_dataflow, detect
 from myharness.events.query import summarize
+from myharness.events.types import LANE_STEP
 from myharness.local_layout import find_jobs
 from myharness.loopback import require_loopback
 from myharness.monitor.html import SLOT, script_literal, template
@@ -73,6 +74,8 @@ def build_state(root: Path, job_id: str) -> dict[str, Any]:
     flow = build_dataflow(events, job_id=job_id)
     summary = summarize(events)
     activity = current_activity(events, flow)
+    steps = _steps_by_dispatch(events)
+    recorded = bool(steps)
 
     return {
         "job_id": job_id,
@@ -89,6 +92,9 @@ def build_state(root: Path, job_id: str) -> dict[str, Any]:
         # grant as "not opened" would be an unrecorded fact impersonating a
         # recorded one.
         "read_edges_available": flow.read_edges_available,
+        # The same rule for steps: a stream written before lane.step existed has
+        # none, and an agent drawn without steps must not read as an idle one.
+        "steps_recorded": recorded,
         "flow_empty_why": explain_empty_flow(events, flow),
         "usd": summary.total_usd,
         "context_peak": summary.context_peak,
@@ -107,6 +113,9 @@ def build_state(root: Path, job_id: str) -> dict[str, Any]:
                 "nothing_granted_why": ("" if d.granted else
                                         "沒有被授權任何輸入 —— 它讀不到 job 裡的任何資料"),
                 "nothing_written_why": "" if d.produced else explain_no_output(d.status),
+                "steps": steps.get(d.id, [])[-_STEPS_SHOWN:],
+                "step_count": len(steps.get(d.id, [])),
+                "steps_why": explain_no_steps(d, recorded, bool(steps.get(d.id))),
                 "started": _stamp(events, "dispatch.start", d.id),
                 "ended": _stamp(events, "dispatch.end", d.id),
             }
@@ -119,7 +128,9 @@ def build_state(root: Path, job_id: str) -> dict[str, Any]:
         "events": [
             {"seq": e.seq, "t": e.t, "ts": e.ts.isoformat(),
              "line": _one_line(e)}
-            for e in events[-120:]
+            # Steps are drawn on the agents they belong to; in this column they
+            # would be forty lines of one lane's queries burying everything else.
+            for e in [e for e in events if e.t != LANE_STEP][-120:]
         ],
     }
 
@@ -222,6 +233,28 @@ def explain_empty_flow(events: Sequence[Any], flow: Any) -> str:
             + "第一個派工出現時會長在這裡。")
 
 
+def explain_no_steps(dispatch: Any, recorded: bool, has_steps: bool) -> str:
+    """Why an agent shows no steps, or "" when it has some.
+
+    Four causes, and a reader should do different things about each: wait, look
+    at the transcript instead, suspect the stream, or accept that the run never
+    got as far as a first answer.
+    """
+    if has_steps:
+        return ""
+    if not dispatch.running and not dispatch.turns:
+        return "它在收到第一輪回應之前就結束了，所以沒有任何一步可記。"
+    if not recorded:
+        if dispatch.running:
+            return ("還沒有步驟紀錄。可能它還在等第一輪回應；"
+                    "也可能這份事件流是舊版 harness 寫的，那一版不記錄步驟。")
+        return ("這份事件流沒有記錄步驟 —— 它是在 harness 開始寫 lane.step 之前跑的。"
+                "這不代表它閒著：完整逐輪紀錄仍然可以打開。")
+    if dispatch.running:
+        return "剛開始，還在等第一輪回應。"
+    return "這次派工結束了，但事件流裡沒有它的步驟 —— 這一段紀錄不完整。"
+
+
 _NO_OUTPUT: Final[dict[str, str]] = {
     "running": "還在跑，還沒寫出東西",
     "ok": "回報完成，但沒有寫出任何 artifact",
@@ -256,6 +289,27 @@ def _read_events(path: Path) -> list[Any]:
     return out
 
 
+#: Per agent, how many recent steps ride along on every poll. The node shows
+#: the last one; the side panel shows these; the transcript has all of them.
+_STEPS_SHOWN: Final = 60
+
+
+def _steps_by_dispatch(events: Sequence[Any]) -> dict[str, list[dict[str, Any]]]:
+    out: dict[str, list[dict[str, Any]]] = {}
+    for e in events:
+        if e.t != LANE_STEP:
+            continue
+        out.setdefault(str(e.get("dispatch") or ""), []).append({
+            "seq": e.seq, "ts": e.ts.isoformat(), "phase": e.get("phase"),
+            "attempt": e.get("attempt"), "turn": e.get("turn"),
+            "calls": e.get("calls") or [], "results": e.get("results") or [],
+            "thinking_chars": e.get("thinking_chars"), "text_chars": e.get("text_chars"),
+            "thinking_blocks": e.get("thinking_blocks"),
+            "spent": e.get("spent"), "pct": e.get("pct"),
+        })
+    return out
+
+
 def _stamp(events: Sequence[Any], kind: str, dispatch_id: str) -> str | None:
     for event in events:
         if event.t == kind and str(event.get("id") or "") == dispatch_id:
@@ -283,7 +337,7 @@ _EVENT_SAYS: Final[dict[str, str]] = {
     "ask.answer": "回答", "throttle.cooldown": "限流冷卻",
     "throttle.wait": "限流等待", "throttle.gave_up": "限流放棄",
     "limit.reached": "觸及上限", "no_progress": "無進展",
-    "handoff.restart": "交接重啟",
+    "handoff.restart": "交接重啟", "lane.step": "步驟",
 }
 
 
@@ -392,4 +446,5 @@ def serve(root: Path, job_id: str, *, host: str = "127.0.0.1",
 
 
 __all__ = ["build_state", "build_trace", "explain_empty_flow", "explain_no_output",
+           "explain_no_steps",
            "make_server", "missing_job", "safe_id", "serve"]

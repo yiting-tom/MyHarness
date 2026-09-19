@@ -372,3 +372,63 @@ def test_the_page_never_shows_a_blank_where_a_reason_belongs(running_job):
                    "nothing_granted_why", "事件流還是空的", "沒有說明原因",
                    "沒有讀取紀錄"):
         assert reason in body, reason
+
+
+# --- steps: what an agent is doing while it runs --------------------------
+
+
+def _step(stream: Stream, did: str, turn: int, pct: float) -> Stream:
+    return stream._add("lane.step", dispatch=did, lane="a", phase="turn", attempt=1,
+                       turn=turn, spent=int(pct * 1000), pct=pct,
+                       calls=[{"tool": "run_query", "arg": f"sql=SELECT {turn}"}],
+                       thinking_chars=0, text_chars=4)
+
+
+def test_a_running_agent_carries_its_steps(tmp_path: Path):
+    """Scenario: 執行中的 agent 顯示當下的步驟"""
+    write_job(tmp_path, _step(_step(mid_flight(), "d1", 1, 0.1), "d1", 2, 0.2))
+    state = build_state(tmp_path, JOB)
+    (d1,) = state["dispatches"]
+    assert state["steps_recorded"]
+    assert [s["turn"] for s in d1["steps"]] == [1, 2] and d1["step_count"] == 2
+    assert d1["steps"][-1]["calls"][0]["arg"] == "sql=SELECT 2"
+    assert d1["steps_why"] == ""
+
+
+def test_steps_stay_off_the_event_column(tmp_path: Path):
+    stream = mid_flight()
+    for i in range(30):
+        stream = _step(stream, "d1", i + 1, i / 40)
+    write_job(tmp_path, stream)
+    lines = [e["t"] for e in build_state(tmp_path, JOB)["events"]]
+    assert "lane.step" not in lines and "dispatch.start" in lines
+
+
+def test_an_old_stream_is_not_drawn_as_an_idle_agent(tmp_path: Path):
+    """Scenario: 舊的事件流"""
+    write_job(tmp_path, finished())
+    state = build_state(tmp_path, JOB)
+    assert not state["steps_recorded"]
+    why = state["dispatches"][0]["steps_why"]
+    assert "lane.step" in why and "不代表它閒著" in why
+
+
+def test_a_dispatch_that_just_started_is_waiting_for_its_first_answer(tmp_path: Path):
+    """Scenario: 剛開始的派工"""
+    stream = _step(finished(), "d1", 1, 0.1).dispatch("d2", "b", [BLOB])
+    write_job(tmp_path, stream)
+    d2 = next(d for d in build_state(tmp_path, JOB)["dispatches"] if d["id"] == "d2")
+    assert "等第一輪回應" in d2["steps_why"]
+
+
+def test_a_running_dispatch_on_a_stepless_stream_admits_both_causes(tmp_path: Path):
+    write_job(tmp_path, mid_flight())
+    why = build_state(tmp_path, JOB)["dispatches"][0]["steps_why"]
+    assert "第一輪回應" in why and "舊版" in why
+
+
+def test_a_dispatch_that_ended_before_its_first_turn_says_so(tmp_path: Path):
+    stream = (Stream().start().ingress(BLOB).dispatch("d1", "a", [BLOB])
+              .done("d1", "a", None, status="tool_failure", turns=0))
+    write_job(tmp_path, stream)
+    assert "第一輪回應之前" in build_state(tmp_path, JOB)["dispatches"][0]["steps_why"]
