@@ -17,3 +17,4 @@ jobs-scratch/
 .DS_Store
 # draw.io writes .$<name>.bkp autosaves beside the file it is editing.
 .$*.bkp
+.playwright-mcp/

@@ -11,6 +11,8 @@ dependencies = [
     "claude-agent-sdk>=0.2.139",
     "duckdb>=1.5",
     "jsonschema>=4.23",
+    # myharness/mcp/server.py uses the 1.x low-level Server decorators, which 2.x removed.
+    "mcp>=1.23,<2",
 ]
 
 [project.optional-dependencies]
