@@ -24,7 +24,7 @@ from myharness.artifacts.types import ArtifactMeta, GrantSet
 from myharness.dataflow import DataFlow, build_dataflow, detect
 from myharness.events.log import LocalEventLog
 from myharness.events.types import Event
-from myharness.local_layout import find_jobs
+from myharness.local_layout import DEFAULT_ROOT, find_jobs
 from myharness.monitor.inspect import render_inspect
 from myharness.monitor.live import LiveView
 from myharness.monitor.render import colour_enabled, human_duration, pad, style
@@ -34,7 +34,6 @@ from myharness.monitor.trace import Trace, parse_trace
 from myharness.monitor.viewer import render_html
 from myharness.orchestrator.delivery import build_delivery, drill
 
-DEFAULT_ROOT = Path("jobs-scratch")
 POLL_INTERVAL_S = 1.0
 
 

@@ -113,9 +113,9 @@ agent card 在 `/.well-known/agent-card.json`，宣告兩個 skill：
 
 ```bash
 myharness golden --backend openrouter             # 端到端的 golden job
-myharness --root jobs-scratch/golden jobs          # 列出 job
-myharness --root jobs-scratch/golden inspect golden # 資料流與異常
-myharness --root jobs-scratch/golden monitor golden # 即時追蹤
+myharness jobs                                    # 列出 job
+myharness inspect golden                          # 資料流與異常
+myharness monitor golden                          # 即時追蹤
 ```
 
 ## Lane 能做什麼

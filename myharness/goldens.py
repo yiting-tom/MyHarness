@@ -26,6 +26,7 @@ from myharness.events.query import summarize
 from myharness.jobs.runner import JobRunner
 from myharness.jobs.spec import JobSpec
 from myharness.lanes.types import LaneRegistry, LaneType
+from myharness.local_layout import DEFAULT_ROOT
 from myharness.orchestrator.delivery import Delivery, build_delivery
 from myharness.orchestrator.loop import LoopOutcome, OrchestratorLoop
 
@@ -215,7 +216,7 @@ async def run_golden(
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     parser = argparse.ArgumentParser(prog=prog, description=__doc__)
-    parser.add_argument("--root", type=Path, default=Path("jobs-scratch/golden"))
+    parser.add_argument("--root", type=Path, default=DEFAULT_ROOT / "golden")
     parser.add_argument("--backend", default="openrouter")
     parser.add_argument("--job-id", default="golden")
     args = parser.parse_args(argv)

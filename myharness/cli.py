@@ -46,8 +46,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--root", type=Path, default=None,
-        help="job 儲存根目錄，所有子命令共用；不給時各子命令用自己的預設"
-             f"（檢視：{views.DEFAULT_ROOT}；mcp／a2a：myharness-jobs；golden：jobs-scratch/golden）",
+        help=f"job 儲存根目錄，所有子命令共用（預設 {views.DEFAULT_ROOT}；"
+             "golden 預設寫在其下的 golden/，檢視會往下找得到）",
     )
     sub = parser.add_subparsers(dest="command", required=True, metavar="<command>")
     views.add_view_commands(sub)

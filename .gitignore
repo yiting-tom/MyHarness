@@ -18,3 +18,4 @@ jobs-scratch/
 # draw.io writes .$<name>.bkp autosaves beside the file it is editing.
 .$*.bkp
 .playwright-mcp/
+myharness-jobs/

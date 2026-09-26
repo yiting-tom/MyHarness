@@ -14,6 +14,13 @@ from pathlib import Path
 
 _JOBS_DIR = "jobs"
 
+#: The one default store for every command -- serving, the golden run and the
+#: views -- so a job served over MCP shows up in `myharness jobs` with no flags.
+#: Not "jobs": the layout already puts a jobs/ directory under the root, so
+#: that default would produce jobs/jobs/<job_id>. The layout-privacy test
+#: catches the name collision, which is the point of it.
+DEFAULT_ROOT = Path("myharness-jobs")
+
 
 @dataclass(frozen=True, slots=True)
 class JobLayout:

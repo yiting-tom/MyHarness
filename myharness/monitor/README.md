@@ -106,7 +106,7 @@ MCP 的 long-poll 不被它喚醒（`NOT_NEWS`）、progress 的 recent 不收�
 會對每一個 `AnomalyKind`、每一個 caveat kind、每一個 dispatch status 檢查有沒有人話，
 並且掃過整頁確認沒有任何內部代碼漏到使用者面前。新增一種異常而忘了翻譯，測試會紅。
 
-`--root` 預設 `jobs-scratch`，會往下找兩層 —— **猜目錄不該是使用 monitor 的第一道門檻。**
+`--root` 預設 `myharness-jobs`（和 mcp／a2a 同一個），會往下找兩層 —— **猜目錄不該是使用 monitor 的第一道門檻。**
 
 `inspect` 在偵測到 CRITICAL 異常時以 exit code 2 結束，所以 CI 不需要解析輸出就能擋。
 

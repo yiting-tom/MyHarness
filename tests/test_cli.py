@@ -103,3 +103,12 @@ async def test_myharness_mcp_speaks_clean_json_rpc_on_stdout(tmp_path: Path):
             await session.initialize()
             names = {t.name for t in (await session.list_tools()).tools}
     assert "analysis_start" in names
+
+
+def test_every_command_defaults_to_one_store():
+    """A job served over MCP must show up in `myharness jobs` with no flags."""
+    from myharness.local_layout import DEFAULT_ROOT
+    from myharness.mcp import server
+    from myharness.monitor import cli as views
+
+    assert server.DEFAULT_ROOT == views.DEFAULT_ROOT == DEFAULT_ROOT

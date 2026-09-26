@@ -686,13 +686,13 @@ Charter 是 worker 的全部人格。它會被放在 prompt 的穩定前綴，�
 myharness golden --backend openrouter
 
 # 列出所有 job
-myharness --root jobs-scratch/golden jobs
+myharness jobs
 
 # 資料流與異常偵測；有 CRITICAL 時 exit code 2
-myharness --root jobs-scratch/golden inspect golden
+myharness inspect golden
 
 # 即時追蹤一個進行中的 job
-myharness --root jobs-scratch/golden monitor golden
+myharness monitor golden
 ```
 
 ### Monitor 看得到什麼

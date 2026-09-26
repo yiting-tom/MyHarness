@@ -24,16 +24,13 @@ from mcp.server.models import InitializationOptions
 from mcp.server.stdio import stdio_server
 
 from myharness.lanes.types import LaneRegistry, LaneType
+from myharness.local_layout import DEFAULT_ROOT
 from myharness.mcp.service import AnalysisService
 from myharness.mcp.tools import TOOL_DESCRIPTIONS, TOOL_SCHEMAS, build_handlers, call
 
 SERVER_NAME = "myharness"
 SERVER_VERSION = "0.1.0"
 
-#: Not "jobs": the layout already puts a jobs/ directory under the root, so
-#: that default would produce jobs/jobs/<job_id>. The layout-privacy test
-#: catches the name collision, which is the point of it.
-DEFAULT_ROOT = Path("myharness-jobs")
 DEFAULT_CHARTERS = Path("charters")
 
 
