@@ -316,7 +316,7 @@ comply」：**不認得這個約定的客戶端會被告知它不認得**，而�
 
 A2A 這條邊界目前**沒有 `analysis_provide` 的對應**。中途補資料在 A2A 上應該是
 一則新 message 還是 task 的後續輸入，是這個 change 刻意沒有回答的問題
-（見 `openspec/changes/expose-over-a2a/design.md` 的 Open Questions）。
+（見 `openspec/changes/archive/2026-09-12-expose-over-a2a/design.md` 的 Open Questions）。
 
 所以要餵資料給一個經 A2A 啟動的 job，目前得透過同一個 process 裡的
 `AnalysisService`。live 測試就是這麼做的，而它那樣做這件事本身就是這個缺口的

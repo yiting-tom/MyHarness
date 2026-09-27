@@ -331,8 +331,33 @@ CLI 即使在 `setting_sources=[]` 下仍會送出全部內建工具定義（spi
 
 ## 7. 目錄結構
 
+### 程式碼（`myharness/`）
+
+依賴方向由上往下；下層不 import 上層。`monitor/` 與 `dataflow/` 只讀 `events/` 和 `artifacts/`，執行路徑不依賴它們。
+
 ```
-jobs/<job_id>/
+cli.py                 唯一入口：jobs / inspect / report / monitor / mcp / a2a / golden
+mcp/  a2a/             兩個對外邊界，共用 mcp/service.py 的 AnalysisService
+goldens.py             端到端 golden job
+monitor/               只讀檢視（終端機、inspect --html、來源報告、即時網頁）
+orchestrator/          常駐規劃者：loop、plan、routing、固定 6 工具、delivery
+proxy/                 cheap tier 的單次分流建議
+jobs/                  JobSpec、JobRunner（非阻塞 dispatch + await_tasks）、job 狀態
+lanes/                 短命 worker、handle 契約、預算、worker 工具；tabular/ 為 DuckDB
+artifacts/  events/    Artifact Store 與 event log 介面及本地實作
+backends/              後端 profile 與 per-backend 並行閘門
+dataflow/              由事件重建資料流並偵測異常
+local_layout.py        唯一組硬碟路徑的模組；DEFAULT_ROOT 也在這裡
+textwidth.py           CJK 顯示寬度（monitor 與 lanes/tabular 共用）
+```
+
+### 儲存（`<root>/`，預設 `myharness-jobs/`）
+
+所有子命令共用同一個預設 root；檢視命令會往下找兩層，所以 golden 的
+`<root>/golden/` 也找得到。
+
+```
+<root>/jobs/<job_id>/
   blobs/<name>                  原始資料，永不進 context
   notes/                        LLM 產出的文字（id 為 <job>/note/<name>）
     plan.md                     orchestrator 的全局狀態（resume 與可觀測性）

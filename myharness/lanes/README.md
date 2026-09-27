@@ -3,7 +3,18 @@
 一個 lane worker 就是一次任務：全新的 agent context、一份延續的 lane state、
 一個受限的 handle。做完就死。
 
-規格見 `openspec/changes/add-lane-worker/`，實測依據見 `spikes/RESULTS.md`。
+規格見 `openspec/specs/lane-worker/`，實測依據見 `spikes/RESULTS.md`。
+
+| 檔案 | 負責 |
+|---|---|
+| `worker.py` | 一次派工的流程：組 prompt、跑 agent、schema 重問、暫時性錯誤重試與 throttle |
+| `stream.py` | 把串流訊息累積成 `Accumulated`，並以實測係數估算每次請求的 token 成本 |
+| `budget.py` | 預算上限用的 token 估算（刻意和 `artifacts/tokens.py` 的價目表係數分開） |
+| `contract.py`／`handle.py` | handle 的 schema、驗證、截斷、失敗 handle |
+| `tools.py` | worker 碰儲存的唯一途徑：in-process MCP 工具，每次都檢查 grant |
+| `tabular/` | 表格 blob 的 DuckDB 查詢（見該目錄 README） |
+| `transport.py` | 真實 SDK 與測試用 scripted transport |
+| `types.py` | `LaneType`／`LaneInstance`／`LaneRegistry` |
 
 ## 為什麼 handle 一定守得住
 
