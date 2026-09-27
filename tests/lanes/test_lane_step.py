@@ -20,15 +20,9 @@ from claude_agent_sdk import (
 
 from myharness.dataflow import build_dataflow
 from myharness.events.types import LANE_STEP, THROTTLE_WAIT, Event
+from myharness.lanes.stream import STEP_ARG_CHARS, Accumulated, _consume, step_event
 from myharness.lanes.transport import ScriptedTransport
-from myharness.lanes.worker import (
-    STEP_ARG_CHARS,
-    Accumulated,
-    WorkerRequest,
-    _consume,
-    run_lane_worker,
-    step_event,
-)
+from myharness.lanes.worker import WorkerRequest, run_lane_worker
 from myharness.mcp.manager import MEANINGFUL, NOT_NEWS
 from myharness.monitor.live import current_activity
 

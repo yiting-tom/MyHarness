@@ -416,7 +416,7 @@ async def test_token_breakdown_keeps_cache_reads_visible(bench):
 def test_a_tool_result_reaches_the_transcript():
     from claude_agent_sdk import ToolResultBlock, UserMessage
 
-    from myharness.lanes.worker import Accumulated, _consume
+    from myharness.lanes.stream import Accumulated, _consume
 
     acc = Accumulated()
     _consume(
@@ -442,7 +442,7 @@ def test_a_long_tool_result_keeps_its_tail():
     """
     from claude_agent_sdk import ToolResultBlock, UserMessage
 
-    from myharness.lanes.worker import MAX_TOOL_RESULT_CHARS, Accumulated, _consume
+    from myharness.lanes.stream import MAX_TOOL_RESULT_CHARS, Accumulated, _consume
 
     body = "x" * (MAX_TOOL_RESULT_CHARS * 3)
     _consume(
@@ -462,7 +462,7 @@ def test_a_long_tool_result_keeps_its_tail():
 def test_a_string_bodied_user_message_does_not_crash():
     from claude_agent_sdk import UserMessage
 
-    from myharness.lanes.worker import Accumulated, _consume
+    from myharness.lanes.stream import Accumulated, _consume
 
     _consume(UserMessage(content="plain text"), acc := Accumulated())
     assert acc.transcript[0]["content"][0]["text"] == "plain text"
@@ -480,7 +480,7 @@ def _exchange(acc, reply="x" * 4_000, tool_result="r" * 1_000):
     """One round trip: the model answers, tool results come back, a request goes out."""
     from claude_agent_sdk import AssistantMessage, TextBlock, ToolResultBlock, UserMessage
 
-    from myharness.lanes.worker import _consume
+    from myharness.lanes.stream import _consume
 
     _consume(AssistantMessage(content=[TextBlock(text=reply)], model="m"), acc)
     _consume(UserMessage(content=[ToolResultBlock(
@@ -488,7 +488,7 @@ def _exchange(acc, reply="x" * 4_000, tool_result="r" * 1_000):
 
 
 def test_consumption_is_visible_before_the_run_ends():
-    from myharness.lanes.worker import Accumulated
+    from myharness.lanes.stream import Accumulated
 
     acc = Accumulated()
     for _ in range(5):
@@ -501,7 +501,7 @@ def test_consumption_is_visible_before_the_run_ends():
 
 def test_the_estimate_grows_with_every_request():
     """Cumulative input, not conversation size: a request re-sends everything."""
-    from myharness.lanes.worker import Accumulated
+    from myharness.lanes.stream import Accumulated
 
     acc = Accumulated()
     seen = []
@@ -523,7 +523,7 @@ def test_streamed_messages_are_not_requests():
     """
     from claude_agent_sdk import AssistantMessage, TextBlock, ThinkingBlock
 
-    from myharness.lanes.worker import Accumulated, _consume
+    from myharness.lanes.stream import Accumulated, _consume
 
     acc = Accumulated()
     for block in (ThinkingBlock(thinking="…", signature=""),
@@ -538,11 +538,11 @@ def test_streamed_messages_are_not_requests():
 
 def test_the_opening_request_is_not_free():
     """The charter and the task are sent before anything streams back."""
-    from myharness.lanes.worker import FRAMEWORK_TOKENS_PER_REQUEST, Accumulated
+    from myharness.lanes.stream import FRAMEWORK_TOKENS_PER_REQUEST, Accumulated
 
     acc = Accumulated(fixed_tokens_per_request=FRAMEWORK_TOKENS_PER_REQUEST + 300,
                       conversation=count_text("z" * 800))
-    from myharness.lanes.worker import _estimated_request_cost
+    from myharness.lanes.stream import _estimated_request_cost
 
     assert _estimated_request_cost(acc) > FRAMEWORK_TOKENS_PER_REQUEST
 
@@ -577,7 +577,7 @@ async def test_declaring_more_tools_costs_more_per_request(bench):
 
 def test_the_estimate_includes_what_every_request_re_sends():
     """Conversation alone estimated golden #14's d1 at 45k against 62k reported."""
-    from myharness.lanes.worker import Accumulated
+    from myharness.lanes.stream import Accumulated
 
     long_text = count_text("z " * 20_000)
     bare = Accumulated(conversation=long_text)
@@ -593,7 +593,7 @@ def test_the_estimate_includes_what_every_request_re_sends():
 
 def test_a_reported_figure_wins_when_it_arrives():
     """The estimate is a stand-in, never a replacement."""
-    from myharness.lanes.worker import Accumulated
+    from myharness.lanes.stream import Accumulated
 
     acc = Accumulated(estimated_tokens_in=1_000)
     acc.usage = {"input_tokens": 50_000, "output_tokens": 2_000}
@@ -604,7 +604,7 @@ def test_a_tool_result_counts_toward_consumption():
     """Query results are most of what fills a lane's context."""
     from claude_agent_sdk import ToolResultBlock, UserMessage
 
-    from myharness.lanes.worker import Accumulated, _consume
+    from myharness.lanes.stream import Accumulated, _consume
 
     acc = Accumulated()
     _consume(UserMessage(content=[ToolResultBlock(
@@ -621,7 +621,7 @@ def test_a_tool_result_counts_toward_consumption():
 def test_an_interrupted_run_reports_the_estimate_rather_than_zero():
     from claude_agent_sdk import AssistantMessage, TextBlock, ToolResultBlock, UserMessage
 
-    from myharness.lanes.worker import Accumulated, _consume
+    from myharness.lanes.stream import Accumulated, _consume
 
     acc = Accumulated()
     for _ in range(4):
@@ -638,7 +638,7 @@ def test_output_is_estimated_from_what_the_model_wrote():
     """Not from the whole conversation: tool results are input, not output."""
     from claude_agent_sdk import AssistantMessage, TextBlock, ToolResultBlock, UserMessage
 
-    from myharness.lanes.worker import Accumulated, _consume
+    from myharness.lanes.stream import Accumulated, _consume
 
     acc = Accumulated()
     _consume(AssistantMessage(content=[TextBlock(text="a" * 400)], model="m"), acc)
@@ -656,7 +656,7 @@ def test_a_reported_figure_is_never_replaced_by_the_estimate():
     zero, and overwriting that with a guess would be the harness inventing
     usage the backend denied.
     """
-    from myharness.lanes.worker import Accumulated
+    from myharness.lanes.stream import Accumulated
 
     acc = Accumulated(conversation=count_text("z " * 40_000),
                       estimated_tokens_in=20_000)
@@ -727,7 +727,7 @@ def test_each_turn_leaves_behind_something_the_stream_never_shows():
     requests of runs 2 and 3, giving that growth a term of its own took the
     worst per-request error from 6.8% to 0.8%.
     """
-    from myharness.lanes.worker import (
+    from myharness.lanes.stream import (
         TOKENS_PER_TURN_INJECTION,
         Accumulated,
         _estimated_request_cost,
@@ -756,7 +756,7 @@ def test_the_budget_estimator_is_not_the_pricelist_estimator():
 def test_the_split_is_recorded_so_the_rates_stay_derivable():
     """Without it, calibration means replaying transcripts -- and transcripts
     excerpt tool results at 2,000 characters, which is the dominant term."""
-    from myharness.lanes.worker import Accumulated
+    from myharness.lanes.stream import Accumulated
 
     acc = Accumulated(conversation=TextCount(words=800, punct=200, cjk=500))
     breakdown = acc.estimate_breakdown
@@ -774,7 +774,7 @@ def test_the_split_is_recorded_so_the_rates_stay_derivable():
 
 
 def test_the_estimate_counts_output_because_the_reported_figure_does():
-    from myharness.lanes.worker import Accumulated
+    from myharness.lanes.stream import Accumulated
 
     acc = Accumulated()
     for _ in range(3):
@@ -786,7 +786,7 @@ def test_the_estimate_counts_output_because_the_reported_figure_does():
 
 def test_the_two_sides_of_the_ceiling_cover_the_same_ground():
     """Whichever side wins, it answers the same question: what has this cost?"""
-    from myharness.lanes.worker import Accumulated
+    from myharness.lanes.stream import Accumulated
 
     acc = Accumulated(estimated_tokens_in=1_000, output=count_text("z " * 1_090))
     acc.usage = {"input_tokens": 50_000, "output_tokens": 2_000}
@@ -807,7 +807,7 @@ def test_the_reserve_at_ninety_percent_was_smaller_than_one_turn():
     next one. Ten percent of a 60,000 budget is 6,000. It was told to write and
     could not afford to.
     """
-    from myharness.lanes.worker import Accumulated, _turns_affordable
+    from myharness.lanes.stream import Accumulated, _turns_affordable
 
     acc = Accumulated(fixed_tokens_per_request=1_524, requests=15,
                       conversation=count_text("z " * 3_806))
@@ -817,7 +817,7 @@ def test_the_reserve_at_ninety_percent_was_smaller_than_one_turn():
 
 def test_the_same_reserve_is_plenty_earlier_in_the_run():
     """Which is why a percentage cannot express this: the unit changes size."""
-    from myharness.lanes.worker import Accumulated, _turns_affordable
+    from myharness.lanes.stream import Accumulated, _turns_affordable
 
     early = Accumulated(fixed_tokens_per_request=1_524, requests=3,
                         conversation=count_text("z " * 500))
@@ -825,7 +825,7 @@ def test_the_same_reserve_is_plenty_earlier_in_the_run():
 
 
 def test_a_run_that_has_spent_everything_can_afford_nothing():
-    from myharness.lanes.worker import Accumulated, _turns_affordable
+    from myharness.lanes.stream import Accumulated, _turns_affordable
 
     acc = Accumulated(fixed_tokens_per_request=1_524, requests=9)
     assert _turns_affordable(acc, 0) == 0.0
@@ -883,7 +883,7 @@ def test_an_unrecognisable_id_is_not_guessed_at():
 
 def test_a_cached_prefix_is_not_charged_like_new_text():
     """Golden run #1's d1, as the backend reported it."""
-    from myharness.lanes.worker import Accumulated
+    from myharness.lanes.stream import Accumulated
 
     acc = Accumulated()
     acc.usage = {"input_tokens": 4_063, "cache_read_input_tokens": 14_976,
@@ -896,7 +896,7 @@ def test_a_cached_prefix_is_not_charged_like_new_text():
 
 def test_what_the_ceiling_charged_is_recorded_next_to_what_it_counted():
     """A dispatch stopped at 60,000 whose breakdown reads 63,752 explains nothing."""
-    from myharness.lanes.worker import Accumulated
+    from myharness.lanes.stream import Accumulated
 
     acc = Accumulated()
     acc.usage = {"input_tokens": 4_063, "cache_read_input_tokens": 14_976,
@@ -909,7 +909,7 @@ def test_what_the_ceiling_charged_is_recorded_next_to_what_it_counted():
 
 def test_a_backend_that_does_not_cache_gets_no_discount():
     """SELF_HOSTED declares nothing, and an unknown proxy must prove what it does."""
-    from myharness.lanes.worker import Accumulated
+    from myharness.lanes.stream import Accumulated
 
     acc = Accumulated(fixed_tokens_per_request=1_524)
     for _ in range(14):
@@ -921,7 +921,7 @@ def test_a_backend_that_does_not_cache_gets_no_discount():
 
 def test_a_cacheable_prefix_is_charged_once_and_then_at_a_tenth():
     """The 1,524-token block golden #22's d1 was charged fifteen times over."""
-    from myharness.lanes.worker import Accumulated
+    from myharness.lanes.stream import Accumulated
 
     plain = Accumulated(fixed_tokens_per_request=1_524)
     cached = Accumulated(fixed_tokens_per_request=1_524, caches_prompts=True)
@@ -937,7 +937,7 @@ def test_a_cacheable_prefix_is_charged_once_and_then_at_a_tenth():
 
 def test_the_conversation_is_cached_from_the_turn_after_it_was_said():
     """The dominant term: 36,812 of golden #22's d1 was conversation re-sent."""
-    from myharness.lanes.worker import Accumulated
+    from myharness.lanes.stream import Accumulated
 
     cached = Accumulated(caches_prompts=True)
     for _ in range(14):
@@ -978,7 +978,7 @@ async def test_the_ctx_event_can_explain_a_run_the_ceiling_stopped(bench):
 def test_thinking_is_measured_even_though_it_is_not_kept():
     from claude_agent_sdk import AssistantMessage, TextBlock, ThinkingBlock
 
-    from myharness.lanes.worker import Accumulated, _consume
+    from myharness.lanes.stream import Accumulated, _consume
 
     acc = Accumulated()
     _consume(AssistantMessage(model="m", content=[
@@ -1000,7 +1000,7 @@ def test_measuring_thinking_does_not_yet_charge_for_it():
     """
     from claude_agent_sdk import AssistantMessage, ThinkingBlock
 
-    from myharness.lanes.worker import Accumulated, _consume
+    from myharness.lanes.stream import Accumulated, _consume
 
     acc = Accumulated()
     before = acc.conversation_tokens
@@ -1015,7 +1015,7 @@ def test_the_transcript_says_how_much_thinking_it_dropped():
     """Keeping the text would bloat a blob; keeping nothing lost the term."""
     from claude_agent_sdk import AssistantMessage, ThinkingBlock
 
-    from myharness.lanes.worker import Accumulated, _consume
+    from myharness.lanes.stream import Accumulated, _consume
 
     acc = Accumulated()
     _consume(AssistantMessage(model="m", content=[
@@ -1036,11 +1036,7 @@ def test_the_transcript_says_how_much_thinking_it_dropped():
 
 def test_the_estimate_records_the_sum_it_actually_charged():
     from myharness.lanes.budget import TextCount
-    from myharness.lanes.worker import (
-        TOKENS_PER_TURN_INJECTION,
-        Accumulated,
-        _charge_request,
-    )
+    from myharness.lanes.stream import TOKENS_PER_TURN_INJECTION, Accumulated, _charge_request
 
     acc = Accumulated(fixed_tokens_per_request=500)
     _charge_request(acc)  # the opening request, as _run_once does
@@ -1064,7 +1060,7 @@ def test_the_estimate_records_the_sum_it_actually_charged():
 
 def test_the_breakdown_covers_both_halves_of_the_ceiling():
     """The ceiling judges input and output; the record showed only input."""
-    from myharness.lanes.worker import Accumulated
+    from myharness.lanes.stream import Accumulated
 
     acc = Accumulated(output=count_text("z " * 1_090))
     assert acc.estimate_breakdown["tokens_out"] == acc.estimated_tokens_out > 0
@@ -1072,11 +1068,7 @@ def test_the_breakdown_covers_both_halves_of_the_ceiling():
 
 def test_the_opening_request_is_charged_and_recorded_too():
     """A run cut off after two requests was never free -- nor unaccounted for."""
-    from myharness.lanes.worker import (
-        TOKENS_PER_TURN_INJECTION,
-        Accumulated,
-        _charge_request,
-    )
+    from myharness.lanes.stream import TOKENS_PER_TURN_INJECTION, Accumulated, _charge_request
 
     opening = count_text("z " * 1_090)
     acc = Accumulated(fixed_tokens_per_request=600, conversation=opening)
@@ -1157,7 +1149,7 @@ async def test_a_dispatch_that_re_prompts_can_exhaust_its_budget(bench):
 
 async def test_the_ceiling_counts_every_attempt(bench):
     """Three attempts under the budget can put a dispatch far over it."""
-    from myharness.lanes.worker import Accumulated
+    from myharness.lanes.stream import Accumulated
 
     acc = Accumulated(carried_tokens=4_800)
     acc.usage = {"input_tokens": 900, "output_tokens": 100}
