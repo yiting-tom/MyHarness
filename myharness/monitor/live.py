@@ -29,15 +29,8 @@ from myharness.events.types import (
     THROTTLE_WAIT,
     Event,
 )
-from myharness.monitor.render import (
-    bar,
-    human_duration,
-    human_tokens,
-    pad,
-    rule,
-    style,
-    truncate,
-)
+from myharness.monitor.render import bar, human_duration, human_tokens, rule, style
+from myharness.textwidth import pad, truncate
 
 SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 

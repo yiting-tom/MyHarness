@@ -4,17 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from myharness.monitor.render import (
-    bar,
-    colour_enabled,
-    display_width,
-    human_duration,
-    human_tokens,
-    pad,
-    rule,
-    style,
-    truncate,
-)
+from myharness.monitor.render import bar, colour_enabled, human_duration, human_tokens, rule, style
+from myharness.textwidth import display_width, pad, truncate
 
 
 @pytest.mark.parametrize(

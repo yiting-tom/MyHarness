@@ -19,7 +19,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from myharness.monitor.render import display_width, pad, truncate
+from myharness.textwidth import display_width, pad, truncate
 
 #: Enough to see a distribution, not enough to be a data transfer.
 DEFAULT_MAX_ROWS = 50

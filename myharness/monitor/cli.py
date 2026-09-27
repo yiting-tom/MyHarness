@@ -27,12 +27,13 @@ from myharness.events.types import Event
 from myharness.local_layout import DEFAULT_ROOT, find_jobs
 from myharness.monitor.inspect import render_inspect
 from myharness.monitor.live import LiveView
-from myharness.monitor.render import colour_enabled, human_duration, pad, style
+from myharness.monitor.render import colour_enabled, human_duration, style
 from myharness.monitor.report import render_report
 from myharness.monitor.serve import serve
 from myharness.monitor.trace import Trace, parse_trace
 from myharness.monitor.viewer import render_html
 from myharness.orchestrator.delivery import build_delivery, drill
+from myharness.textwidth import pad
 
 POLL_INTERVAL_S = 1.0
 

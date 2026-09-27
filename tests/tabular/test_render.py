@@ -5,7 +5,7 @@ from myharness.lanes.tabular.render import (
     MAX_CELL_CHARS,
     render_rows,
 )
-from myharness.monitor.render import display_width
+from myharness.textwidth import display_width
 
 
 def test_columns_and_rows_appear():

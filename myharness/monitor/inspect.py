@@ -20,15 +20,8 @@ from myharness.dataflow import (
 )
 from myharness.events.query import JobSummary, summarize
 from myharness.events.types import Event
-from myharness.monitor.render import (
-    bar,
-    human_duration,
-    human_tokens,
-    pad,
-    rule,
-    style,
-    truncate,
-)
+from myharness.monitor.render import bar, human_duration, human_tokens, rule, style
+from myharness.textwidth import pad, truncate
 
 STATUS_STYLE = {
     "ok": ("green",), "running": ("cyan",), "duplicate": ("dim",),
