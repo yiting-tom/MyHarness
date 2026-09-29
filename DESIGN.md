@@ -333,7 +333,7 @@ CLI 即使在 `setting_sources=[]` 下仍會送出全部內建工具定義（spi
 
 ### 程式碼（`myharness/`）
 
-依賴方向由上往下；下層不 import 上層。`monitor/` 與 `dataflow/` 只讀 `events/` 和 `artifacts/`，執行路徑不依賴它們。
+依賴方向由上往下；下層不 import 上層（`tests/unit/test_layers.py` 強制；新增頂層模組要先在那裡給它一層）。`monitor/` 與 `dataflow/` 只讀 `events/` 和 `artifacts/`，執行路徑不依賴它們。
 
 ```
 cli.py                 唯一入口：jobs / inspect / report / monitor / mcp / a2a / golden
