@@ -15,7 +15,7 @@ def test_every_command_is_listed(capsys):
     with pytest.raises(SystemExit):
         cli.main(["--help"])
     out = capsys.readouterr().out
-    for name in ("jobs", "inspect", "report", "monitor", "mcp", "a2a", "golden"):
+    for name in ("jobs", "inspect", "report", "monitor", "mcp", "a2a", "run", "golden"):
         assert name in out
 
 

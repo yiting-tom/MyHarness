@@ -107,11 +107,16 @@ agent card 在 `/.well-known/agent-card.json`，宣告兩個 skill：
 | `myharness a2a` | 以 A2A（只綁 loopback）提供分析服務，需要 `[a2a]` extra |
 | `myharness golden` | 跑端到端的 golden job（會花錢） |
 
-`--root` 放在子命令前面，所有子命令共用；不給時各自用原本的預設。`mcp`／`a2a`／`golden` 的其他選項看 `myharness <command> --help`。
+`--root` 放在子命令前面，所有子命令共用，預設 `myharness-jobs`。`mcp`／`a2a`／`run`／`golden` 的其他選項看 `myharness <command> --help`。
 
 ## 不用 MCP 直接跑
 
+`run` 走的是和 MCP 同一個 service：開 job、提供檔案、等進度、問你問題、印摘要。
+job 跑在這個行程裡，Ctrl-C 就停；事件留在磁碟上，事後照樣能 `inspect`。
+stdin 不是終端機（或加 `--no-input`）時，orchestrator 的提問會自動回答。
+
 ```bash
+myharness run "找出 2024 年交易的異常樣態" goldens/txn-2024.csv -o report.md
 myharness golden --backend openrouter             # 端到端的 golden job
 myharness jobs                                    # 列出 job
 myharness inspect golden                          # 資料流與異常

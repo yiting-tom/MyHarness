@@ -3,6 +3,7 @@
     myharness jobs | inspect | report | monitor   read-only views of a job
     myharness mcp                                  serve over MCP (stdio)
     myharness a2a                                  serve over A2A (loopback HTTP)
+    myharness run                                  one analysis from a terminal
     myharness golden                               run the end-to-end golden job
 
 The serving and running commands own their options: ``myharness mcp --help``
@@ -34,6 +35,7 @@ FORWARDED: Final[dict[str, tuple[str, str]]] = {
     "mcp": ("myharness.mcp.server", "以 MCP（stdio）提供分析服務"),
     "a2a": ("myharness.a2a.server",
             "以 A2A（只綁 loopback 的 HTTP）提供分析服務；需要 [a2a] extra"),
+    "run": ("myharness.run", "從終端機跑一次分析：myharness run \"<任務>\" <資料檔>..."),
     "golden": ("myharness.goldens", "跑端到端的 golden job"),
 }
 
@@ -42,7 +44,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="myharness",
         description="MyHarness：多 agent 資料分析 harness。",
-        epilog="mcp／a2a／golden 的選項看 `myharness <command> --help`。",
+        epilog="mcp／a2a／run／golden 的選項看 `myharness <command> --help`。",
     )
     parser.add_argument(
         "--root", type=Path, default=None,
