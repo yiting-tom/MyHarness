@@ -117,7 +117,10 @@ async def drive(
     elif sections:
         print(f"\n報告共 {len(sections)} 節；加 -o report.md 取得全文，"
               f"或 myharness report {job} -o report.html")
-    return 0 if result.get("report_artifact") else 1
+    # A salvaged report is written by code, not by an analysis. Exiting 0 on it
+    # told scripts a job had succeeded when nothing was analysed.
+    salvaged = any(c.get("kind") == "salvaged" for c in result.get("caveats") or ())
+    return 0 if result.get("report_artifact") and not salvaged else 1
 
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:

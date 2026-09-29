@@ -134,7 +134,7 @@ def test_every_caveat_kind_the_framework_emits_has_a_sentence():
     """`derive_caveats` 會發出的每一種，都要有人話。"""
     from myharness.events.types import DEGRADED_STATUSES
     emitted = {*DEGRADED_STATUSES, "no_cost_ceiling", "limit_reached",
-               "rate_limited", "unanswered_question", "unprocessed_payload"}
+               "rate_limited", "unanswered_question", "unprocessed_payload", "salvaged"}
     assert emitted <= set(_CAVEAT_SAYS), emitted - set(_CAVEAT_SAYS)
 
 

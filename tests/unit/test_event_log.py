@@ -231,6 +231,16 @@ def test_unrouted_payload_becomes_a_caveat():
     assert caveat.context["payload"] == "j7/blob/raw/orphan"
 
 
+def test_a_salvaged_finish_says_so_and_why():
+    """A harness-written report must not read like a finished analysis."""
+    assert "salvaged" not in {c.kind for c in derive_caveats(_stream())}
+    salvaged = [*_stream()[:-1],
+                ev(11, JOB_FINISH, report="j7/note/report", salvaged=True,
+                   reason="backend_unavailable")]
+    caveat = next(c for c in derive_caveats(salvaged) if c.kind == "salvaged")
+    assert "後端持續無法使用" in caveat.detail
+
+
 def test_duplicate_dispatch_is_not_a_caveat():
     """A blocked duplicate cost nothing and lost nothing -- it is not a shortfall."""
     assert STATUS_DUPLICATE not in {c.kind for c in derive_caveats(_stream())}

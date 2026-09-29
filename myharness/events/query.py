@@ -159,6 +159,17 @@ class Caveat:
     context: dict[str, Any]
 
 
+#: Why the orchestrator stopped, as orchestrator/loop.py names it.
+_STOP_SAYS: dict[str, str] = {
+    "backend_unavailable": "後端持續無法使用",
+    "session_error": "對話出錯，例如金鑰無效或模型拒絕請求",
+    "idle": "連續多輪沒有任何動作",
+    "refused": "它的呼叫一再被拒絕",
+    "max_turns": "用完了來回次數",
+    "handoff_limit": "用完了交接次數",
+}
+
+
 def derive_caveats(events: Sequence[Event]) -> Sequence[Caveat]:
     """What the job failed to do, computed rather than self-reported.
 
@@ -223,6 +234,20 @@ def derive_caveats(events: Sequence[Event]) -> Sequence[Caveat]:
                 ),
                 context={"backend": e.get("backend"), "lane": e.get("lane"),
                          "waited_s": e.get("waited_s")},
+            )
+        )
+
+    # The report exists either way, so without this a job that never ran reads
+    # like one that finished: run-live-1 delivered "complete" on a revoked key.
+    for e in of_type(events, JOB_FINISH):
+        if not e.get("salvaged"):
+            continue
+        why = _STOP_SAYS.get(str(e.get("reason")), "對話提前結束")
+        caveats.append(
+            Caveat(
+                kind="salvaged",
+                detail=f"orchestrator 沒有自己收工（{why}），報告是 harness 代寫的",
+                context={"reason": e.get("reason")},
             )
         )
 

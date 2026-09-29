@@ -94,6 +94,11 @@ _CAVEAT_SAYS: Final[dict[str, tuple[str, str]]] = {
         "有一份進來的資料沒有被送進任何分析",
         "報告裡的結論不是根據它寫的。",
     ),
+    "salvaged": (
+        "這份報告不是分析做完後寫的",
+        "負責規劃的模型中途停了，報告是系統依已完成的部分代寫的。"
+        "沒列出來的，就是沒有做。",
+    ),
 }
 
 #: What each dispatch outcome means. The status code is never the only thing
