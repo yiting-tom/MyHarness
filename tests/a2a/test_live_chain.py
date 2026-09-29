@@ -54,9 +54,10 @@ async def test_a_remote_agent_can_run_and_read_an_analysis(tmp_path: Path):
         lanes=default_lanes(Path("charters"), backend=profile.name),
         backend=profile.name,
     )
-    csv = next(Path("jobs-scratch").rglob("blobs/raw/txn-2024"), None)
-    if csv is None:
-        pytest.skip("no txn-2024 fixture in jobs-scratch; run a golden job first")
+    from myharness.goldens import GOLDEN_CSV
+
+    # The golden job's own input, committed -- not a copy left behind by a run.
+    csv = GOLDEN_CSV
 
     async def seed(job_id: str) -> None:
         provided = await service.provide(
