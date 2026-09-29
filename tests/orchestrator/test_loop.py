@@ -236,13 +236,16 @@ def tool_turn(name: str = "plan_update"):
     ]
 
 
-def error_turn(*, transient: bool = False):
+def error_turn(*, transient: bool = False, retried_status: int | None = None):
     from claude_agent_sdk import ResultMessage, SystemMessage
 
     messages = []
     if transient:
         messages.append(SystemMessage(subtype="api_retry",
                                       data={"error_status": 429, "error": "rate_limit"}))
+    if retried_status is not None:
+        messages.append(SystemMessage(subtype="api_retry",
+                                      data={"error_status": retried_status}))
     messages.append(ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1,
                                   is_error=True, num_turns=1, session_id="s"))
     return messages
@@ -276,6 +279,19 @@ async def test_acting_resets_the_idle_counter(bench):
 async def test_an_errored_turn_stops_rather_than_looping(bench):
     """A failed turn produced nothing to react to; retrying blindly repeats it."""
     session = ScriptedSession(turns=[error_turn()] * 4, usage_series=[1_000])
+    outcome = await make_loop(bench, ScriptedSessionFactory([session])).run()
+    assert outcome.reason == "session_error"
+    assert len(session.sent) == 1
+
+
+async def test_a_retried_auth_failure_stops_at_once(bench):
+    """A 401 the CLI retries is not a rate limit; waiting out the gate won't fix a key.
+
+    Live run-live-1 spent 300s in throttle.wait on a revoked OpenRouter key and
+    then reported backend_unavailable.
+    """
+    session = ScriptedSession(turns=[error_turn(retried_status=401)] * 4,
+                              usage_series=[1_000])
     outcome = await make_loop(bench, ScriptedSessionFactory([session])).run()
     assert outcome.reason == "session_error"
     assert len(session.sent) == 1

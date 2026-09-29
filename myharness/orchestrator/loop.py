@@ -388,7 +388,13 @@ class OrchestratorLoop:
                         refusals.append(reason)
             elif isinstance(message, SystemMessage):
                 if message.subtype == "api_retry":
-                    transient = True
+                    # The CLI retries some errors no wait will fix: an invalid
+                    # key (401) sat out the whole 300s gate budget as if it were
+                    # a rate limit. Same rule as the lane worker; a retry that
+                    # names no status (a dropped connection) still counts.
+                    status = (message.data or {}).get("error_status")
+                    if not isinstance(status, int) or status in TRANSIENT_STATUSES:
+                        transient = True
             elif isinstance(message, ResultMessage):
                 errored = bool(message.is_error)
                 status = getattr(message, "api_error_status", None)
