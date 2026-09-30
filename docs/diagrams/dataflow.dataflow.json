@@ -1,0 +1,363 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "MyHarness 一次分析的資料流",
+    "output": ".archify/dataflow-myharness-job-20261001-075107/myharness-dataflow.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "git@github.com:yiting-tom/MyHarness.git",
+      "provider": "github",
+      "link_mode": "local-only",
+      "revision": "783031e5cbfbfddcdcdcc3dde229a3be1d1eea4f"
+    },
+    "viewBox": [
+      1072,
+      560
+    ],
+    "legend": {
+      "entries": {
+        "emphasis": {
+          "label": "主要資料路徑"
+        },
+        "security": {
+          "label": "授權（dispatch inputs）"
+        },
+        "dashed": {
+          "label": "有預算的窺看"
+        },
+        "database": {
+          "label": "artifact store"
+        },
+        "default": {
+          "label": "其他資料移動"
+        }
+      }
+    }
+  },
+  "stages": [
+    {
+      "label": "進入"
+    },
+    {
+      "label": "落地與分流"
+    },
+    {
+      "label": "調度與分析"
+    },
+    {
+      "label": "產出"
+    },
+    {
+      "label": "交付"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "client",
+      "type": "external",
+      "label": "Client",
+      "sublabel": "MCP / A2A / run",
+      "stage": 0,
+      "row": 1,
+      "tag": "原始資料"
+    },
+    {
+      "id": "proxy",
+      "type": "backend",
+      "label": "proxy",
+      "sublabel": "cheap tier · 單次",
+      "stage": 1,
+      "row": 0,
+      "tag": "只給建議",
+      "sources": [
+        {
+          "path": "myharness/proxy/classify.py",
+          "line": 130,
+          "label": "classify"
+        },
+        {
+          "path": "myharness/mcp/service.py",
+          "line": 248,
+          "end_line": 249
+        }
+      ]
+    },
+    {
+      "id": "blob",
+      "type": "database",
+      "label": "raw blob",
+      "sublabel": "blobs/raw/",
+      "stage": 1,
+      "row": 1,
+      "tag": "永不進 context",
+      "sources": [
+        {
+          "path": "myharness/mcp/service.py",
+          "line": 198,
+          "label": "put_blob"
+        },
+        {
+          "path": "myharness/artifacts/local.py",
+          "line": 306,
+          "label": "BlobNotReadable"
+        }
+      ]
+    },
+    {
+      "id": "orch",
+      "type": "backend",
+      "label": "orchestrator",
+      "sublabel": "不讀原始資料",
+      "stage": 2,
+      "row": 0,
+      "tag": "strong",
+      "sources": [
+        {
+          "path": "myharness/orchestrator/tools.py",
+          "line": 191,
+          "label": "dispatch"
+        },
+        {
+          "path": "myharness/mcp/service.py",
+          "line": 218,
+          "label": "ingress notice"
+        }
+      ]
+    },
+    {
+      "id": "lane",
+      "type": "backend",
+      "label": "lane worker",
+      "sublabel": "短命 · DuckDB",
+      "stage": 2,
+      "row": 1,
+      "tag": "grant 限定",
+      "sources": [
+        {
+          "path": "myharness/lanes/worker.py",
+          "line": 225,
+          "label": "GrantSet.for_lane"
+        },
+        {
+          "path": "myharness/lanes/tools.py",
+          "line": 490,
+          "label": "duckdb_query"
+        }
+      ]
+    },
+    {
+      "id": "findings",
+      "type": "database",
+      "label": "findings",
+      "sublabel": "lane 的 note",
+      "stage": 3,
+      "row": 1,
+      "tag": "note",
+      "sources": [
+        {
+          "path": "myharness/lanes/tools.py",
+          "line": 371,
+          "label": "write_finding"
+        }
+      ]
+    },
+    {
+      "id": "report",
+      "type": "database",
+      "label": "report",
+      "sublabel": "synthesizer 寫",
+      "stage": 3,
+      "row": 2,
+      "tag": "note",
+      "sources": [
+        {
+          "path": "myharness/orchestrator/tools.py",
+          "line": 318,
+          "label": "finish"
+        }
+      ]
+    },
+    {
+      "id": "delivery",
+      "type": "backend",
+      "label": "delivery",
+      "sublabel": "摘要 + 章節價目表",
+      "stage": 4,
+      "row": 2,
+      "tag": "有界",
+      "sources": [
+        {
+          "path": "myharness/orchestrator/delivery.py",
+          "line": 113,
+          "label": "build_delivery"
+        },
+        {
+          "path": "myharness/mcp/payload.py",
+          "line": 202,
+          "label": "build_result"
+        }
+      ]
+    },
+    {
+      "id": "reader",
+      "type": "external",
+      "label": "Client 讀取",
+      "sublabel": "result · drill",
+      "stage": 4,
+      "row": 1,
+      "tag": "按節付費",
+      "sources": [
+        {
+          "path": "myharness/mcp/service.py",
+          "line": 307,
+          "end_line": 324
+        }
+      ]
+    }
+  ],
+  "flows": [
+    {
+      "id": "provide",
+      "from": "client",
+      "to": "blob",
+      "label": "analysis_provide",
+      "classification": "0 token",
+      "variant": "emphasis"
+    },
+    {
+      "id": "sample",
+      "from": "blob",
+      "to": "proxy",
+      "label": "樣本",
+      "classification": "≤1,200 字元",
+      "labelAt": [
+        315,
+        214
+      ]
+    },
+    {
+      "id": "route",
+      "from": "proxy",
+      "to": "orch",
+      "label": "建議 + id",
+      "classification": "不授權"
+    },
+    {
+      "id": "dispatch",
+      "from": "orch",
+      "to": "lane",
+      "label": "inputs",
+      "classification": "授權",
+      "variant": "security",
+      "labelAt": [
+        488,
+        214
+      ]
+    },
+    {
+      "id": "query",
+      "from": "blob",
+      "to": "lane",
+      "label": "duckdb_query",
+      "classification": "結果有界",
+      "variant": "emphasis"
+    },
+    {
+      "id": "write",
+      "from": "lane",
+      "to": "findings",
+      "label": "write_finding",
+      "variant": "emphasis",
+      "route": "straight"
+    },
+    {
+      "id": "handle",
+      "from": "lane",
+      "to": "orch",
+      "label": "handle",
+      "classification": "≤2,000 字",
+      "labelAt": [
+        574,
+        214
+      ]
+    },
+    {
+      "id": "peek",
+      "from": "findings",
+      "to": "orch",
+      "label": "peek",
+      "classification": "≤30k token",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "right",
+      "via": [
+        [
+          745,
+          157
+        ]
+      ],
+      "labelAt": [
+        640,
+        146
+      ]
+    },
+    {
+      "id": "synthesize",
+      "from": "findings",
+      "to": "report",
+      "label": "彙整",
+      "labelAt": [
+        745,
+        328
+      ]
+    },
+    {
+      "id": "deliver",
+      "from": "report",
+      "to": "delivery",
+      "label": "build_delivery",
+      "variant": "emphasis"
+    },
+    {
+      "id": "drill",
+      "from": "delivery",
+      "to": "reader",
+      "label": "drill",
+      "classification": "每節 ≤20k",
+      "labelAt": [
+        960,
+        328
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "原始資料的去向",
+      "items": [
+        "進來就落成 blob，read_note 對 blob 一律拒絕",
+        "只有 lane 能透過 grant 查詢，查詢結果有上限",
+        "proxy 只看有界樣本，給的是建議，不派工也不授權"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "每一層回給上一層的量",
+      "items": [
+        "lane → orchestrator：handle ≤2,000 字元",
+        "orchestrator 窺看 finding：整個 job ≤30k token",
+        "client：摘要 + 章節價目表，再按節 drill"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "沿途留下的紀錄",
+      "items": [
+        "每一步寫進 events.jsonl",
+        "每次派工的完整 transcript 存成 blob",
+        "monitor 與 dataflow/ 由這些紀錄重建這張圖的實際版本"
+      ]
+    }
+  ]
+}

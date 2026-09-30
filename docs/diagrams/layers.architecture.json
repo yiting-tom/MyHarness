@@ -1,0 +1,600 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "MyHarness 分層架構",
+    "output": ".archify/architecture-myharness-layers-20261001-074410/myharness-layers.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "git@github.com:yiting-tom/MyHarness.git",
+      "provider": "github",
+      "link_mode": "local-only",
+      "revision": "783031e5cbfbfddcdcdcc3dde229a3be1d1eea4f"
+    }
+  },
+  "components": [
+    {
+      "id": "client",
+      "type": "external",
+      "label": "MCP / A2A client",
+      "sublabel": "Claude Code、遠端 agent",
+      "pos": [
+        140,
+        40
+      ],
+      "size": [
+        190,
+        64
+      ]
+    },
+    {
+      "id": "operator",
+      "type": "external",
+      "label": "終端機使用者",
+      "sublabel": "myharness <command>",
+      "pos": [
+        700,
+        40
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "myharness/cli.py",
+          "line": 34,
+          "end_line": 40,
+          "label": "subcommands"
+        }
+      ]
+    },
+    {
+      "id": "mcp",
+      "type": "frontend",
+      "label": "mcp/",
+      "sublabel": "stdio JSON-RPC · 6 tools",
+      "tag": "layer 1",
+      "pos": [
+        40,
+        170
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "myharness/mcp/server.py",
+          "line": 111,
+          "label": "stdio_server"
+        }
+      ]
+    },
+    {
+      "id": "a2a",
+      "type": "frontend",
+      "label": "a2a/",
+      "sublabel": "HTTP · 只綁 loopback",
+      "tag": "layer 1",
+      "pos": [
+        260,
+        170
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "myharness/a2a/server.py",
+          "line": 40,
+          "label": "DEFAULT_HOST"
+        },
+        {
+          "path": "myharness/a2a/executor.py",
+          "line": 36
+        }
+      ]
+    },
+    {
+      "id": "run",
+      "type": "frontend",
+      "label": "run.py",
+      "sublabel": "myharness run（layer 0）",
+      "tag": "layer 0",
+      "pos": [
+        480,
+        170
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "myharness/run.py",
+          "line": 25,
+          "label": "uses AnalysisService"
+        }
+      ]
+    },
+    {
+      "id": "monitor",
+      "type": "frontend",
+      "label": "monitor/",
+      "sublabel": "4 個只讀檢視命令",
+      "tag": "layer 1",
+      "pos": [
+        920,
+        170
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "myharness/monitor/cli.py",
+          "line": 21,
+          "end_line": 25
+        },
+        {
+          "path": "myharness/cli.py",
+          "line": 31
+        }
+      ]
+    },
+    {
+      "id": "service",
+      "type": "backend",
+      "label": "AnalysisService",
+      "sublabel": "mcp/service.py · start / provide / poll / answer / result / drill",
+      "tag": "兩條邊界共用",
+      "pos": [
+        165,
+        300
+      ],
+      "size": [
+        360,
+        64
+      ],
+      "sources": [
+        {
+          "path": "myharness/mcp/service.py",
+          "line": 63,
+          "label": "class AnalysisService"
+        }
+      ]
+    },
+    {
+      "id": "dataflow",
+      "type": "backend",
+      "label": "dataflow/",
+      "sublabel": "由事件重建資料流 · 異常偵測",
+      "tag": "layer 5",
+      "pos": [
+        920,
+        300
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "myharness/dataflow/build.py",
+          "line": 61,
+          "label": "build_dataflow"
+        }
+      ]
+    },
+    {
+      "id": "orch",
+      "type": "backend",
+      "label": "orchestrator/",
+      "sublabel": "常駐規劃 · 固定 6 工具",
+      "tag": "layer 2",
+      "pos": [
+        260,
+        430
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "myharness/orchestrator/loop.py",
+          "line": 179,
+          "label": "OrchestratorLoop"
+        },
+        {
+          "path": "myharness/orchestrator/loop.py",
+          "line": 263,
+          "label": "hard deadline"
+        }
+      ]
+    },
+    {
+      "id": "proxy",
+      "type": "backend",
+      "label": "proxy/",
+      "sublabel": "cheap tier 單次分流建議",
+      "tag": "layer 2",
+      "pos": [
+        700,
+        430
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "myharness/proxy/classify.py",
+          "line": 130,
+          "label": "classify"
+        }
+      ]
+    },
+    {
+      "id": "jobs",
+      "type": "backend",
+      "label": "jobs/",
+      "sublabel": "JobRunner · 上限與收工",
+      "tag": "layer 3",
+      "pos": [
+        260,
+        560
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "myharness/jobs/runner.py",
+          "line": 99,
+          "label": "class JobRunner"
+        },
+        {
+          "path": "myharness/jobs/runner.py",
+          "line": 241,
+          "label": "background task"
+        }
+      ]
+    },
+    {
+      "id": "llm",
+      "type": "external",
+      "label": "LLM backend",
+      "sublabel": "OpenRouter · self-hosted · Anthropic",
+      "pos": [
+        700,
+        560
+      ],
+      "size": [
+        170,
+        194
+      ],
+      "sources": [
+        {
+          "path": "myharness/backends/profile.py",
+          "line": 283,
+          "label": "registry"
+        }
+      ]
+    },
+    {
+      "id": "lanes",
+      "type": "backend",
+      "label": "lanes/",
+      "sublabel": "短命 worker · handle 契約 · DuckDB",
+      "tag": "layer 4",
+      "pos": [
+        250,
+        690
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "sources": [
+        {
+          "path": "myharness/lanes/worker.py",
+          "line": 24,
+          "end_line": 30
+        },
+        {
+          "path": "myharness/lanes/transport.py",
+          "line": 26,
+          "label": "SdkTransport"
+        }
+      ]
+    },
+    {
+      "id": "artifacts",
+      "type": "database",
+      "label": "artifacts/",
+      "sublabel": "blob / note · grant 檢查",
+      "tag": "layer 5",
+      "pos": [
+        40,
+        850
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "myharness/artifacts/local.py",
+          "line": 65,
+          "label": "LocalArtifactStore"
+        }
+      ]
+    },
+    {
+      "id": "events",
+      "type": "database",
+      "label": "events/",
+      "sublabel": "append-only 事件紀錄",
+      "tag": "layer 5",
+      "pos": [
+        260,
+        850
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "myharness/events/log.py",
+          "line": 33,
+          "label": "LocalEventLog"
+        }
+      ]
+    },
+    {
+      "id": "backends",
+      "type": "cloud",
+      "label": "backends/",
+      "sublabel": "後端 profile · 並行閘門",
+      "tag": "layer 5",
+      "pos": [
+        480,
+        850
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "myharness/backends/profile.py",
+          "line": 169,
+          "end_line": 196
+        },
+        {
+          "path": "myharness/lanes/worker.py",
+          "line": 27
+        }
+      ]
+    },
+    {
+      "id": "disk",
+      "type": "database",
+      "label": "myharness-jobs/",
+      "sublabel": "blobs · notes · traces · events.jsonl · index.sqlite",
+      "tag": "local_layout.py 獨佔路徑",
+      "pos": [
+        40,
+        1000
+      ],
+      "size": [
+        390,
+        64
+      ],
+      "sources": [
+        {
+          "path": "myharness/local_layout.py",
+          "line": 22,
+          "label": "DEFAULT_ROOT"
+        },
+        {
+          "path": "myharness/events/log.py",
+          "line": 57,
+          "label": "append"
+        },
+        {
+          "path": "myharness/artifacts/local.py",
+          "line": 87,
+          "end_line": 89
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "基礎層（layer 5）",
+      "wraps": [
+        "artifacts",
+        "events",
+        "backends"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "只讀檢視，不在執行路徑上",
+      "wraps": [
+        "monitor",
+        "dataflow"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "client-mcp",
+      "from": "client",
+      "to": "mcp",
+      "label": "stdio",
+      "variant": "emphasis"
+    },
+    {
+      "id": "client-a2a",
+      "from": "client",
+      "to": "a2a",
+      "label": "HTTP"
+    },
+    {
+      "id": "operator-run",
+      "from": "operator",
+      "to": "run",
+      "label": "run"
+    },
+    {
+      "id": "operator-monitor",
+      "from": "operator",
+      "to": "monitor",
+      "label": "檢視"
+    },
+    {
+      "id": "mcp-service",
+      "from": "mcp",
+      "to": "service",
+      "variant": "emphasis"
+    },
+    {
+      "id": "a2a-service",
+      "from": "a2a",
+      "to": "service"
+    },
+    {
+      "id": "run-service",
+      "from": "run",
+      "to": "service"
+    },
+    {
+      "id": "service-orch",
+      "from": "service",
+      "to": "orch",
+      "label": "start",
+      "variant": "emphasis"
+    },
+    {
+      "id": "service-proxy",
+      "from": "service",
+      "to": "proxy",
+      "label": "provide → 分流"
+    },
+    {
+      "id": "orch-jobs",
+      "from": "orch",
+      "to": "jobs",
+      "label": "dispatch / await",
+      "variant": "emphasis"
+    },
+    {
+      "id": "jobs-lanes",
+      "from": "jobs",
+      "to": "lanes",
+      "label": "run_lane_worker",
+      "variant": "emphasis"
+    },
+    {
+      "id": "proxy-llm",
+      "from": "proxy",
+      "to": "llm",
+      "label": "httpx",
+      "variant": "dashed"
+    },
+    {
+      "id": "orch-llm",
+      "from": "orch",
+      "to": "llm",
+      "label": "Agent SDK session",
+      "variant": "dashed"
+    },
+    {
+      "id": "lanes-llm",
+      "from": "lanes",
+      "to": "llm",
+      "label": "Agent SDK query()",
+      "variant": "dashed"
+    },
+    {
+      "id": "lanes-artifacts",
+      "from": "lanes",
+      "to": "artifacts",
+      "label": "讀寫"
+    },
+    {
+      "id": "lanes-events",
+      "from": "lanes",
+      "to": "events",
+      "label": "記事件"
+    },
+    {
+      "id": "lanes-backends",
+      "from": "lanes",
+      "to": "backends",
+      "label": "profile / gate"
+    },
+    {
+      "id": "artifacts-disk",
+      "from": "artifacts",
+      "to": "disk"
+    },
+    {
+      "id": "events-disk",
+      "from": "events",
+      "to": "disk",
+      "label": "JSONL"
+    },
+    {
+      "id": "monitor-dataflow",
+      "from": "monitor",
+      "to": "dataflow",
+      "label": "重建"
+    },
+    {
+      "id": "monitor-disk",
+      "from": "monitor",
+      "to": "disk",
+      "label": "唯讀",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "分層規則",
+      "items": [
+        "依賴方向由上往下，下層不 import 上層",
+        "tests/unit/test_layers.py 強制；新頂層模組要先給它一層",
+        "layer 6：local_layout.py（唯一組路徑）、textwidth.py（CJK 寬度）"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "入口",
+      "items": [
+        "cli.py 是唯一入口；mcp／a2a／run／golden 轉交給各模組自己的 parser",
+        "run 與 MCP、A2A 走同一個 AnalysisService",
+        "goldens.py 自行組 JobRunner，用來釘住上限"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Context 保護",
+      "items": [
+        "原始資料以 blob 存放，永不進 context",
+        "lane 只回 ~120 token 的 handle",
+        "時間上限＋寬限到期即中止卡住的請求"
+      ]
+    }
+  ]
+}

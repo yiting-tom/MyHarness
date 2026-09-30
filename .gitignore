@@ -19,3 +19,4 @@ jobs-scratch/
 .$*.bkp
 .playwright-mcp/
 myharness-jobs/
+.archify/

@@ -20,6 +20,8 @@
 
 完整設計見 [`DESIGN.md`](DESIGN.md)，實測結果見 [`spikes/RESULTS.md`](spikes/RESULTS.md)。
 
+圖：[分層架構](docs/diagrams/layers.html)、[一次分析的資料流](docs/diagrams/dataflow.html)（用瀏覽器開，可點節點看對應原始碼；`*.json` 是產生它們的 archify 原稿）。
+
 ## 安裝
 
 ```bash
