@@ -284,6 +284,38 @@ async def test_an_errored_turn_stops_rather_than_looping(bench):
     assert len(session.sent) == 1
 
 
+@pytest.mark.parametrize("bench", [{"max_wall_clock_s": 0.2, "wrap_up_grace_s": 0.3}],
+                         indirect=True)
+async def test_a_hung_request_cannot_outlive_the_deadline(bench):
+    """The wall-clock ceiling is checked between dispatches; a stalled backend never
+    reaches one. run-live-3 hit 1800s and ran to 6600s on hung self-hosted requests.
+    """
+    import asyncio
+    import time
+
+    session = ScriptedSession(turns=[tool_turn()], usage_series=[1_000])
+    original_send = session.send
+
+    def send(text: str):
+        if session.sent:  # the second turn is the one that never comes back
+            session.sent.append(text)
+
+            async def hang():
+                await asyncio.Event().wait()
+                yield  # pragma: no cover
+
+            return hang()
+        return original_send(text)
+
+    session.send = send  # type: ignore[method-assign]
+    started = time.monotonic()
+    outcome = await make_loop(bench, ScriptedSessionFactory([session])).run()
+
+    assert time.monotonic() - started < 5.0, "cut off at the deadline, not left hanging"
+    assert outcome.reason == "deadline"
+    assert outcome.salvaged and outcome.report_artifact, "the harness still delivers"
+
+
 async def test_a_retried_auth_failure_stops_at_once(bench):
     """A 401 the CLI retries is not a rate limit; waiting out the gate won't fix a key.
 

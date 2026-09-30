@@ -13,6 +13,11 @@ DEFAULT_MAX_WALL_CLOCK_S: Final = 1800.0
 DEFAULT_PEEK_BUDGET_TOKENS: Final = 30_000
 DEFAULT_QUESTION_QUOTA: Final = 5
 DEFAULT_WRAP_UP_GRACE: Final = 3
+#: How long past max_wall_clock_s wrap-up may take before the job is cut off.
+#: The dispatch grace bounds how many more jobs wrap-up may start; this bounds
+#: how long they may hang. run-live-3 reached its 1800s ceiling and ran to
+#: 6600s, most of it on requests to a self-hosted backend that had stalled.
+DEFAULT_WRAP_UP_GRACE_S: Final = 600.0
 DEFAULT_NO_PROGRESS_LIMIT: Final = 3
 DEFAULT_HANDOFF_RATIO: Final = 0.6
 DEFAULT_CONTEXT_WINDOW: Final = 196_000
@@ -57,6 +62,7 @@ class JobSpec:
     peek_budget_tokens: int = DEFAULT_PEEK_BUDGET_TOKENS
     question_quota: int = DEFAULT_QUESTION_QUOTA
     wrap_up_grace: int = DEFAULT_WRAP_UP_GRACE
+    wrap_up_grace_s: float = DEFAULT_WRAP_UP_GRACE_S
     no_progress_limit: int = DEFAULT_NO_PROGRESS_LIMIT
     handoff_ratio: float = DEFAULT_HANDOFF_RATIO
     context_window: int = DEFAULT_CONTEXT_WINDOW

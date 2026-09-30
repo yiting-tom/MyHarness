@@ -167,6 +167,7 @@ _STOP_SAYS: dict[str, str] = {
     "refused": "它的呼叫一再被拒絕",
     "max_turns": "用完了來回次數",
     "handoff_limit": "用完了交接次數",
+    "deadline": "超過時間上限加寬限仍未收工，進行中的工作被中止",
 }
 
 

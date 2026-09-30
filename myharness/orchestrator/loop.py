@@ -15,6 +15,7 @@ one dies without it -- so it has to be exercised, not merely documented.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
@@ -252,19 +253,29 @@ class OrchestratorLoop:
             lane_types=self.lanes.describe_types(),
         )
         reason = "finished"
+        # The wall-clock ceiling is soft: it asks for wrap-up at the next
+        # await_tasks. A request that never returns never reaches one, so the
+        # hard stop is here, around everything the orchestrator waits on.
+        deadline = spec.max_wall_clock_s + spec.wrap_up_grace_s - self.runner.elapsed_s()
+        timed_out = False
 
-        while True:
-            handed_off = await self._one_session(prompt)
-            if not handed_off:
-                break
-            if self.runner.state.handoffs >= 3:
-                reason = "handoff_limit"
-                break
-            plan, _ = await read_plan(self.runner.store, spec.job_id)
-            prompt = RESUME_NOTICE.format(
-                plan=plan or initial_plan(spec.goal),
-                status=self.runner.status(),
-            )
+        try:
+            async with asyncio.timeout(max(0.0, deadline)):
+                while True:
+                    handed_off = await self._one_session(prompt)
+                    if not handed_off:
+                        break
+                    if self.runner.state.handoffs >= 3:
+                        reason = "handoff_limit"
+                        break
+                    plan, _ = await read_plan(self.runner.store, spec.job_id)
+                    prompt = RESUME_NOTICE.format(
+                        plan=plan or initial_plan(spec.goal),
+                        status=self.runner.status(),
+                    )
+        except TimeoutError:
+            timed_out = True
+            self._stop_reason = "deadline"
 
         reason = self._stop_reason or reason
         if self._throttle.waits:
@@ -273,7 +284,9 @@ class OrchestratorLoop:
                 lane="orchestrator", seconds=round(self._throttle.waited_s, 3),
                 waits=self._throttle.waits,
             )
-        await self.runner.settle()
+        # Past the deadline nothing more is waited for: whatever is still in
+        # flight is what was hanging.
+        await self.runner.settle(timeout=0.0 if timed_out else 300.0)
         assert self.tools is not None
         salvaged = not self.tools.finished
         if salvaged:

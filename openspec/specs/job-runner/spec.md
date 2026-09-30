@@ -64,6 +64,11 @@
 - **WHEN** orchestrator 在被要求收工後仍繼續派工
 - **THEN** 系統 SHALL 在寬限額度用盡後中止該 job 並自行產出降級交付
 
+#### Scenario: 卡住的請求不能拖過時間上限
+- **WHEN** 時間上限已過，且再過 `wrap_up_grace_s` 仍未收工（例如後端請求一直沒有回應）
+- **THEN** 系統 SHALL 中止 orchestrator 與仍在執行的 lane，不再等待
+- **AND** SHALL 自行產出降級交付，其已知限制 SHALL 說明是因超時而中止
+
 #### Scenario: 沒有金額上限時仍然有界
 - **WHEN** 一個 job 在沒有金額上限的情況下執行
 - **THEN** 派工次數與時間上限 SHALL 仍然生效
