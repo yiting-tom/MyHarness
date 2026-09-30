@@ -46,8 +46,8 @@ async def test_a_run_provides_answers_and_writes_the_report(tmp_path: Path, caps
     printed = capsys.readouterr().out
     assert "已提供" in printed and "txn.csv" in printed
     assert "765" in out.read_text(encoding="utf-8"), "-o holds the drilled sections"
-    assert list((tmp_path / "root").rglob("blobs/raw/txn")), \
-        "the file went in as a blob named after it"
+    assert list((tmp_path / "root").rglob("blobs/raw/txn.csv")), \
+        "the file went in under its full name -- the lanes pick a reader by suffix"
 
 
 async def test_an_empty_task_is_refused_before_anything_runs(tmp_path: Path, capsys):

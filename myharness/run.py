@@ -68,7 +68,9 @@ async def drive(
             print(f"{path} 不是 UTF-8 文字檔；目前只收文字（例如 CSV、JSON）",
                   file=sys.stderr)
             return 1
-        provided = await service.provide(job, text, name=path.stem)
+        # The whole name, suffix included: the lanes' DuckDB picks its reader
+        # by suffix, and run-live-2 lost every query to a blob named txn-2024.
+        provided = await service.provide(job, text, name=path.name)
         if not provided.get("ok"):
             print(f"{path} 上傳失敗：{provided.get('message')}", file=sys.stderr)
             return 1
