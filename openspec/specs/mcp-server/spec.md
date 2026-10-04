@@ -108,6 +108,11 @@ SHALL NOT 進入 orchestrator 或客戶端的 context。系統 SHALL 通知該�
 - **THEN** 系統 SHALL 將其存成 blob artifact
 - **AND** 回應 SHALL 含該 artifact 的識別碼，SHALL NOT 含資料內容
 
+#### Scenario: 以路徑補充的資料由系統讀取
+- **WHEN** 客戶端以檔案路徑補充資料
+- **THEN** 系統 SHALL 自行讀取該檔，資料內容 SHALL NOT 經過客戶端
+- **AND** 該路徑解析（含 symlink）後不在允許讀取的目錄內時，系統 SHALL 拒絕且 SHALL NOT 讀取
+
 #### Scenario: 未經路由要明說
 - **WHEN** 系統未判定該資料應交給哪一條 lane
 - **THEN** 回應 SHALL 明示該資料未經路由

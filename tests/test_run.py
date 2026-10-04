@@ -21,6 +21,7 @@ def service_at(tmp_path: Path) -> AnalysisService:
         tmp_path / "root",
         lanes=LaneRegistry(LaneType(name="analyst", charter_path=charter, state_max_tokens=100)),
         loop_factory=ScriptedLoop,
+        readable=[tmp_path],
     )
 
 

@@ -12,7 +12,7 @@ explanation it can act on beats a stack trace that costs it a turn.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -74,8 +74,13 @@ class AnalysisService:
         event_log: EventLog | None = None,
         loop_factory: Callable[..., Any] | None = None,
         proxy_transport: Any = None,
+        readable: Sequence[Path | str] = (),
     ) -> None:
         self._root = Path(root)
+        # Where provide(path=...) may read. Empty means nowhere: the server
+        # reads files on a client's say-so, and a client can be talked into
+        # asking for ~/.ssh as easily as for a CSV.
+        self._readable = [Path(p).resolve() for p in readable]
         self._lanes = lanes
         self._backend = backend
         self._manager = manager or JobManager()
@@ -183,20 +188,32 @@ class AnalysisService:
     # ---- provide ---------------------------------------------------------
 
     async def provide(
-        self, job_id: str, payload: str, *, name: str = "",
+        self, job_id: str, payload: str = "", *, name: str = "",
+        path: str | Path | None = None,
         schema: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if job_id not in self._known_job_ids() and self._manager.get(job_id) is None:
             return _err("no_such_job", f"no analysis with id {job_id}")
-        if not payload:
+        if path is not None and payload:
+            return _err("payload_and_path", "give payload or path, not both")
+        if path is not None:
+            # Read here, not by the client: a payload the client sends has
+            # already been through the client's own context.
+            data = self._read_provided(Path(path))
+            if isinstance(data, dict):
+                return data
+            name = name or Path(path).name
+        elif not payload:
             return _err("empty_payload", "payload must not be empty")
+        else:
+            data = payload.encode("utf-8")
         leaf = (name or f"provided-{uuid.uuid4().hex[:8]}").strip()
         try:
             ArtifactId(job_id=job_id, kind="blob", name=f"raw/{leaf}")
         except ValueError as exc:
             return _err("bad_name", str(exc))
         meta = await self._store.put_blob(
-            job_id, f"raw/{leaf}", data=payload.encode("utf-8"),
+            job_id, f"raw/{leaf}", data=data,
             produced_by="client", schema=schema,
         )
         handle = self._manager.get(job_id)
@@ -232,6 +249,19 @@ class AnalysisService:
             "announced": announced,
             "note": _provide_note(routing, announced=announced),
         }
+
+    def _read_provided(self, path: Path) -> bytes | dict[str, Any]:
+        resolved = path.expanduser().resolve()  # a symlink out of a root is out
+        if not any(resolved.is_relative_to(root) for root in self._readable):
+            allowed = ", ".join(map(str, self._readable)) or "none"
+            return _err("path_not_allowed",
+                        f"{path} is outside the readable directories ({allowed})")
+        if not resolved.is_file():
+            return _err("no_such_file", f"{path} is not a file")
+        data = resolved.read_bytes()
+        if not data:
+            return _err("empty_payload", f"{path} is empty")
+        return data
 
     async def _route(self, job_id: str, meta: Any) -> Routing:
         """Classify one payload. Never raises -- the blob is already stored."""

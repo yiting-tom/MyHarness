@@ -133,6 +133,9 @@ def main(argv: list[str] | None = None, *, prog: str = "myharness-mcp") -> int:
     parser.add_argument("--charters", type=Path, default=DEFAULT_CHARTERS)
     parser.add_argument("--backend", default="openrouter")
     parser.add_argument("--max-concurrent-jobs", type=int, default=None)
+    parser.add_argument("--allow-read", type=Path, action="append",
+                        help="a directory analysis_provide may read files from; "
+                             "repeatable (default: the working directory)")
     args = parser.parse_args(argv)
 
     from myharness.mcp.manager import JobManager
@@ -147,6 +150,7 @@ def main(argv: list[str] | None = None, *, prog: str = "myharness-mcp") -> int:
         lanes=default_lanes(args.charters, args.backend),
         backend=args.backend,
         manager=manager,
+        readable=args.allow_read or [Path.cwd()],
     )
 
     async def run() -> None:

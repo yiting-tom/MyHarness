@@ -142,8 +142,8 @@ claude mcp add myharness -- \
 analysis_start(task="分析這份交易資料，找出異常樣態，並給出不重複帳戶的總數")
 → { job_id: "job7ab30092db", state: "running", revision: 0 }
 
-// 2. 把資料交進去。內容不會進任何人的 context
-analysis_provide(job_id="job7ab30092db", payload=<CSV>, name="txn.csv")
+// 2. 把資料交進去。給路徑，server 自己讀，內容不會進任何人的 context
+analysis_provide(job_id="job7ab30092db", path="data/txn.csv")
 → { artifact: "job7ab30092db/blob/raw/txn.csv", bytes: 1472,
     routed: true, routed_to: "txn", announced: true }
 

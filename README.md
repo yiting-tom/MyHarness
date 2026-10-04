@@ -50,11 +50,13 @@ claude mcp add myharness -- myharness mcp --root ./myharness-jobs --backend open
 
 （舊的 `myharness-mcp` 仍然可用，是同一個東西 —— 已經設定好的 MCP client 不必改。）
 
+資料用 `path` 交進去：server 自己讀檔，資料不經過 client 的 context。可讀的目錄預設是 server 的工作目錄，用 `--allow-read DIR`（可重複）指定別處；範圍外的路徑、包括指出去的 symlink，一律拒絕。用 path 時 CSV 以外的格式（JSON、Parquet）也行。`payload` 仍然收，但那份資料在送出前已經進過 client 的 context 一次。
+
 然後在對話裡：
 
 ```
 analysis_start(task="分析這份交易資料，找出異常樣態")
-analysis_provide(job_id=..., payload=<CSV>, name="txn.csv")
+analysis_provide(job_id=..., path="data/txn.csv")  # server 自己讀檔
 analysis_poll(job_id=..., wait=30)          # 等到真的有進展才回
 analysis_result(job_id=...)                 # 摘要 + 章節價目表
 analysis_drill(job_id=..., section_id="方法") # 需要哪節才讀哪節

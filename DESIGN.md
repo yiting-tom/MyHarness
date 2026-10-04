@@ -28,7 +28,7 @@
    ┌──────────────────────────────────────┴───────────────────────────────┐
    │                        MyHarness MCP Server                          │
    │                                                                      │
-   │   analysis_provide(payload)                                          │
+   │   analysis_provide(path)                                             │
    │        │ 落 blob（0 token）                                          │
    │        ▼                                                             │
    │   ┌─────────┐  routing_table + metadata + 有界樣本                    │
@@ -173,7 +173,7 @@ turn 2: await_tasks([a,b,c], mode="all")         → 三份 handle 一起回來
 ```
 analysis_start(task)                 → {job_id, status}
 analysis_poll(job_id, wait=30)       → {status, progress, questions[]}   long-poll
-analysis_provide(job_id, payload)    → {blob_id, routed_to}
+analysis_provide(job_id, path|payload) → {blob_id, routed_to}
 analysis_answer(job_id, qid, text)   → {ok}
 analysis_result(job_id)              → summary + key_findings + caveats + sections[est_tokens] + cost
 analysis_drill(job_id, section_id)   → 章節全文

@@ -51,6 +51,16 @@ def _reset():
     FakeLoop.instances.clear()
 
 
+def _readable_service(tmp_path: Path, *readable: Path) -> AnalysisService:
+    charter = tmp_path / "c.md"
+    charter.write_text("charter", encoding="utf-8")
+    lanes = LaneRegistry(
+        LaneType(name="analyst", charter_path=charter, state_max_tokens=100)
+    )
+    return AnalysisService(tmp_path / "root", lanes=lanes, loop_factory=FakeLoop,
+                           readable=readable)
+
+
 @pytest.fixture
 async def service(tmp_path: Path):
     charter = tmp_path / "c.md"
@@ -206,6 +216,38 @@ class TestProvide:
         out = await service.provide(job_id, "a,b\n1,2\n", name="extra.csv")
         assert out["ok"] and out["artifact"].endswith("raw/extra.csv")
         assert "1,2" not in str(out)
+
+    async def test_a_path_is_read_by_the_server_not_the_client(self, tmp_path):
+        """The client sends a name, not the data: nothing passes through its
+        context. Bytes, so a Parquet file goes in as it is."""
+        inbox = tmp_path / "in"
+        inbox.mkdir()
+        (inbox / "t.parquet").write_bytes(b"PAR1\xff\x00")
+        svc = _readable_service(tmp_path, inbox)
+        job_id = (await svc.start("t"))["job_id"]
+        out = await svc.provide(job_id, path=inbox / "t.parquet")
+        assert out["ok"] and out["artifact"].endswith("raw/t.parquet")
+        assert out["bytes"] == 6
+
+    async def test_a_path_outside_the_readable_directories_is_refused(self, tmp_path):
+        inbox = tmp_path / "in"
+        inbox.mkdir()
+        secret = tmp_path / "secret.txt"
+        secret.write_text("key", encoding="utf-8")
+        (inbox / "link.txt").symlink_to(secret)
+        svc = _readable_service(tmp_path, inbox)
+        job_id = (await svc.start("t"))["job_id"]
+        for path in (secret, inbox / "../secret.txt", inbox / "link.txt"):
+            out = await svc.provide(job_id, path=path)
+            assert out["error"] == "path_not_allowed", path
+
+    async def test_a_service_with_no_readable_directories_reads_nothing(
+        self, service, tmp_path
+    ):
+        (tmp_path / "a.csv").write_text("a\n1\n", encoding="utf-8")
+        job_id = (await service.start("t"))["job_id"]
+        out = await service.provide(job_id, path=tmp_path / "a.csv")
+        assert out["error"] == "path_not_allowed"
 
     async def test_the_absence_of_routing_is_stated(self, service):
         """Silence would let a client assume the data reached a lane."""

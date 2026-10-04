@@ -59,17 +59,24 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     "analysis_provide": _obj(
         {
             "job_id": {"type": "string"},
+            "path": {
+                "type": "string",
+                "description": "Preferred. A file the server reads itself, so the "
+                               "data never passes through your context. Must be "
+                               "under a directory the server was allowed to read.",
+            },
             "payload": {
                 "type": "string",
-                "description": "The data itself. It is stored as a blob and never "
-                               "enters anyone's context.",
+                "description": "The data itself, if you have no file. It has "
+                               "passed through your context by the time you send "
+                               "it; from here on it is a blob nobody else reads.",
             },
             "name": {
                 "type": "string",
                 "description": "Optional. A short file-like name, e.g. 'kyc.csv'.",
             },
         },
-        ["job_id", "payload"],
+        ["job_id"],
     ),
     "analysis_answer": _obj(
         {
@@ -106,9 +113,9 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         "or the wait elapses; an empty return means 'still working'."
     ),
     "analysis_provide": (
-        "Hand the analysis more data mid-run. Stored as a blob, so the content "
-        "never enters your context or the orchestrator's. Nothing routes it to a "
-        "particular lane yet -- the orchestrator decides."
+        "Hand the analysis more data mid-run: a file path (preferred) or the "
+        "data itself. Stored as a blob the orchestrator never reads. By path, "
+        "any file DuckDB reads works (CSV, JSON, Parquet)."
     ),
     "analysis_answer": (
         "Answer a question the analysis is waiting on. Unanswered questions "
@@ -144,8 +151,9 @@ def build_handlers(service: AnalysisService) -> dict[str, Handler]:
     async def provide(args: dict[str, Any]) -> dict[str, Any]:
         return await service.provide(
             str(args.get("job_id", "")),
-            str(args.get("payload", "")),
+            str(args.get("payload") or ""),
             name=str(args.get("name") or ""),
+            path=args.get("path") or None,
         )
 
     async def answer(args: dict[str, Any]) -> dict[str, Any]:

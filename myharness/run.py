@@ -61,16 +61,10 @@ async def drive(
     print(f"job {job}（另開終端機：myharness monitor {job}）")
 
     for path in files:
-        try:
-            text = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            # provide() carries text, as analysis_provide does over MCP.
-            print(f"{path} 不是 UTF-8 文字檔；目前只收文字（例如 CSV、JSON）",
-                  file=sys.stderr)
-            return 1
-        # The whole name, suffix included: the lanes' DuckDB picks its reader
-        # by suffix, and run-live-2 lost every query to a blob named txn-2024.
-        provided = await service.provide(job, text, name=path.name)
+        # By path, as an MCP client should. The blob keeps the file's whole
+        # name: the lanes' DuckDB picks its reader by suffix, and run-live-2
+        # lost every query to a blob named txn-2024.
+        provided = await service.provide(job, path=path)
         if not provided.get("ok"):
             print(f"{path} 上傳失敗：{provided.get('message')}", file=sys.stderr)
             return 1
@@ -130,7 +124,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
 
     parser = argparse.ArgumentParser(prog=prog, description="從終端機跑一次分析。")
     parser.add_argument("task", help="要分析什麼，用一句話說")
-    parser.add_argument("files", nargs="*", type=Path, help="要提供的資料檔（文字，例如 CSV）")
+    parser.add_argument("files", nargs="*", type=Path, help="要提供的資料檔（CSV、JSON、Parquet…）")
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT)
     parser.add_argument("--charters", type=Path, default=DEFAULT_CHARTERS)
     parser.add_argument("--backend", default="openrouter")
@@ -147,7 +141,8 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
 
     ask = ask_nobody if args.no_input or not sys.stdin.isatty() else ask_terminal
     service = AnalysisService(
-        args.root, lanes=default_lanes(args.charters, args.backend), backend=args.backend
+        args.root, lanes=default_lanes(args.charters, args.backend), backend=args.backend,
+        readable=args.files,  # exactly the files named, nothing beside them
     )
 
     async def run() -> int:
