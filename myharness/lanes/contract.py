@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Final
@@ -175,14 +175,20 @@ def reprompt_text(problems: tuple[str, ...]) -> str:
     )
 
 
-def handle_only_text(findings: Sequence[str]) -> str:
-    """Said before reprompt_text when the work itself is already on file."""
-    listed = "\n".join(f"- {f}" for f in findings)
+def handle_only_text(findings: Mapping[str, str | None]) -> str:
+    """Said before reprompt_text when the work itself is already on file.
+
+    Carries each finding's text: a re-prompt is a fresh run that remembers
+    nothing, and without the text in hand it goes back for it.
+    """
+    parts = [
+        f"--- {fid} ---\n{text}" if text else f"--- {fid} ---（讀不到全文，未附上）"
+        for fid, text in findings.items()
+    ]
     return (
-        "這項任務你已經做完，結論寫在這些 finding 裡：\n"
-        f"{listed}\n\n"
-        "不要重做分析，查資料的工具這一輪不會受理。"
-        "需要的話用 read_note 讀回你的 finding，然後只回傳 handle。"
+        "這項任務你已經做完，結論寫在下面這些 finding 裡。"
+        "不要重做分析，讀寫資料的工具這一輪都不會受理。"
+        "依這些內容只回傳 handle，artifact 用下面的 id。\n\n" + "\n\n".join(parts)
     )
 
 

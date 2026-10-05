@@ -131,9 +131,13 @@ GATED_ABOVE_BUDGET: frozenset[str] = frozenset({
     "read_note", "inspect_blob", "duckdb_query",
 })
 
-#: What a handle-only re-prompt shuts. read_note stays open: re-reading its own
-#: finding is how a fresh run learns what it is writing the handle for.
-HANDLE_ONLY_SHUT: frozenset[str] = frozenset({"inspect_blob", "duckdb_query"})
+#: What a handle-only re-prompt shuts: everything but update_state, which a
+#: lane still owes. The finding comes in the prompt instead -- with read_note
+#: open, compare-live-3's critic re-read all three inputs and rewrote its
+#: critique four times, and it had no query tools to shut.
+HANDLE_ONLY_SHUT: frozenset[str] = frozenset({
+    "inspect_blob", "duckdb_query", "read_note", "write_finding",
+})
 
 #: Longest a finding's name may be. Names appear in artifact ids, grant lists
 #: and the flow graph; a sentence there is unreadable everywhere at once.
@@ -288,9 +292,9 @@ class WorkerToolbox:
             self.gated += 1
             return _err({
                 "code": "handle_only",
-                "message": "分析已經做完並寫成 finding，這一輪不再查資料。"
-                           "需要的話用 read_note 讀你的 finding，然後只回傳 handle。",
-                "still_available": ["read_note", "write_finding", "update_state"],
+                "message": "分析已經做完並寫成 finding，內容就在任務說明裡。"
+                           "這一輪不再讀寫資料，只回傳 handle。",
+                "still_available": ["update_state"],
             })
         if tool_name not in GATED_ABOVE_BUDGET or self.turns_affordable >= GATE_TURNS_LEFT:
             return None
@@ -301,7 +305,8 @@ class WorkerToolbox:
             message = (
                 f"{left}（token 預算已用 {pct}%）。剩下的餘裕只夠落檔，"
                 "不夠再取用內容，所以取用類工具停止受理。"
-                "用 write_finding 把新結論補進去，然後回傳 handle 結束。"
+                "你的 finding 已經存檔：真有新結論才用 write_finding 補，"
+                "否則直接回傳 handle 結束，不必重寫。"
             )
         else:
             message = (
@@ -330,8 +335,10 @@ class WorkerToolbox:
         left = self._turns_phrase()
         if self.findings:
             warning = (
-                f"\n\n[harness] {left}（token 預算已用 {pct}%）。你已經寫過 finding —— "
-                "把新結論補進去，然後回傳 handle 結束。不要再開新的查詢。"
+                # "Add your new conclusions" read as "write it again": compare-
+                # live-3's critic re-sent the same 3k-token finding four times.
+                f"\n\n[harness] {left}（token 預算已用 {pct}%）。你的 finding 已經存檔 —— "
+                "沒有新結論就直接回傳 handle 結束，不必重寫，也不要再開新的查詢。"
             )
         else:
             warning = (
@@ -384,6 +391,8 @@ class WorkerToolbox:
             annotations=mutating,
         )
         async def write_finding(args: dict[str, Any]) -> dict[str, Any]:
+            if refusal := self._gate("write_finding"):  # only ever handle_only
+                return refusal
             name = str(args.get("name", "")).strip() or str(len(self.findings) + 1)
             text = str(args.get("text", ""))
             if not text.strip():

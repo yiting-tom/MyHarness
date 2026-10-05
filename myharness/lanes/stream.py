@@ -130,6 +130,8 @@ class Accumulated:
     #: and the ceiling, which is the only thing standing between a lane and an
     #: unbounded bill, never saw the first two.
     carried_tokens: int = 0
+    #: Earlier attempts' input and output, as token_breakdown reported them.
+    carried_io: tuple[int, int] = (0, 0)
     #: Which attempt this is, counted from one. Recorded so a dispatch says it
     #: was re-prompted instead of leaving it to be inferred.
     attempt: int = 1
@@ -253,8 +255,8 @@ class Accumulated:
             "chargeable": self.chargeable_tokens_in,
         }
         if any(reported.values()):
-            return reported
-        return {
+            return self._with_carried(reported)
+        return self._with_carried({
             **reported,
             "in": self.estimated_tokens_in,
             "out": self.estimated_tokens_out,
@@ -263,7 +265,15 @@ class Accumulated:
             # not know about the key still reads a plausible total, and one
             # that does can decline to treat it as measurement.
             "estimated": True,
-        }
+        })
+
+    def _with_carried(self, breakdown: dict[str, Any]) -> dict[str, Any]:
+        """Totals for the dispatch, not the attempt. ``usage`` is the last
+        attempt's alone, so a re-prompted dispatch reported only its re-prompt:
+        compare-live-4's d1 ran 14 turns and 1 more, and recorded 3,727."""
+        carried_in, carried_out = self.carried_io
+        return {**breakdown, "in": breakdown["in"] + carried_in,
+                "out": breakdown["out"] + carried_out}
 
     @property
     def estimate_breakdown(self) -> dict[str, int]:

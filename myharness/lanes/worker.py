@@ -21,6 +21,7 @@ from claude_agent_sdk import (
     ClaudeAgentOptions,
 )
 
+from myharness.artifacts.errors import ArtifactError
 from myharness.artifacts.ids import ArtifactId
 from myharness.artifacts.store import ArtifactStore
 from myharness.artifacts.types import GrantSet
@@ -142,6 +143,7 @@ async def _run_once(
     charter: str,
     enforce_schema: bool,
     carried: int = 0,
+    carried_io: tuple[int, int] = (0, 0),
     carried_transcript: list[dict[str, Any]] | None = None,
     attempt: int = 1,
     budget: int | None = None,
@@ -157,6 +159,7 @@ async def _run_once(
         ),
         conversation=count_text(prompt),
         carried_tokens=carried,
+        carried_io=carried_io,
         carried_transcript=list(carried_transcript or ()),
         attempt=attempt,
         caches_prompts=profile.supports(BackendCapability.PROMPT_CACHING),
@@ -436,6 +439,7 @@ async def _attempt_all(
     # so the ceiling sees the dispatch rather than the attempt, the other so a
     # reader does.
     carried = 0
+    carried_io = (0, 0)
     carried_rows: list[dict[str, Any]] = []
     attempt = 0
     budget = request.lane.type.token_budget
@@ -446,12 +450,14 @@ async def _attempt_all(
             acc, exc = await _run_once(
                 request, profile, toolbox, transport,
                 prompt=current_prompt, charter=charter, enforce_schema=enforce,
-                carried=carried, carried_transcript=carried_rows,
+                carried=carried, carried_io=carried_io, carried_transcript=carried_rows,
                 attempt=attempt, budget=budget,
             )
             # Whatever happens next -- a return, a re-prompt, a back-off -- this
             # attempt has been paid for, and what it said is on the record.
             carried = acc.budget_tokens
+            spent_io = acc.token_breakdown
+            carried_io = (spent_io["in"], spent_io["out"])
             carried_rows = acc.full_transcript
 
             if exc is not None:
@@ -495,7 +501,8 @@ async def _attempt_all(
                 # compare-live-2's d3 wrote its finding, answered in prose,
                 # and spent another 48k tokens querying everything again.
                 toolbox.handle_only = True
-                current_prompt = f"{prompt}\n\n{handle_only_text(toolbox.findings)}" \
+                written = {fid: await _finding_text(toolbox, fid) for fid in toolbox.findings}
+                current_prompt = f"{prompt}\n\n{handle_only_text(written)}" \
                                  f"\n\n{reprompt_text(schema_problems)}"
             # Raised, not reset. The re-prompt redoes the task, so it needs room
             # of its own -- but `carried` keeps running, so the ceiling and the
@@ -536,6 +543,21 @@ async def _attempt_all(
         partial=toolbox.last_finding,
         suggest="檢查 charter 是否清楚說明 handle 格式",
     )
+
+
+#: Most a handle-only re-prompt carries of one finding. Above it the id alone
+#: goes in: a handle needs the conclusion, not the whole write-up.
+HANDLE_ONLY_FINDING_TOKENS = 6_000
+
+
+async def _finding_text(toolbox: WorkerToolbox, finding: str) -> str | None:
+    try:
+        return await toolbox.store.read_note(
+            ArtifactId.parse(finding), grants=toolbox.grants,
+            max_tokens=HANDLE_ONLY_FINDING_TOKENS,
+        )
+    except (ArtifactError, ValueError):
+        return None
 
 
 def _classify(acc: Accumulated, exc: BaseException, profile: BackendProfile) -> HandleStatus:

@@ -1347,3 +1347,20 @@ async def test_a_reprompt_with_the_finding_written_asks_only_for_the_handle(
     second = transport.calls[1][0]
     assert written in second and "不要重做分析" in second
     assert seen[0].handle_only
+
+
+async def test_a_reprompted_dispatch_reports_every_attempts_tokens(bench):
+    """compare-live-4's d1 ran 14 turns, was re-prompted for one more, and
+    recorded only the re-prompt's 3,727 -- every job total was short."""
+    lane = with_backend(bench.lane, "test-degraded")
+    transport = ScriptedTransport(
+        [assistant("散文"), result(usage={"input_tokens": 3_000, "output_tokens": 90})],
+        [assistant(handle_text()), result(usage={"input_tokens": 400, "output_tokens": 10})],
+    )
+    await run_lane_worker(
+        WorkerRequest(job_id=JOB, lane=lane, task="t", dispatch_id="d1"),
+        store=bench.store, event_log=bench.events, transport=transport,
+    )
+    (end,) = await bench.events_for(DISPATCH_END)
+    assert (end.get("tokens")["in"], end.get("tokens")["out"]) == (3_400, 100)
+    assert transport.call_count == 2

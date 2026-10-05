@@ -389,10 +389,11 @@ async def test_the_gate_is_counted_so_a_run_shows_it_fired(bench):
     assert toolbox.gated == 3
 
 
-async def test_a_handle_only_run_cannot_query_but_can_reread(bench):
-    toolbox, ids = bench
+async def test_a_handle_only_run_can_neither_read_nor_rewrite(bench):
+    """compare-live-3's critic, given read_note, re-read every input and
+    rewrote its critique four times. The finding is in the prompt instead."""
+    toolbox, _ = bench
     toolbox.handle_only = True
-    body = error_of(toolbox._gate("duckdb_query"))
-    assert body["code"] == "handle_only"
-    result = await toolbox.handlers["read_note"]({"artifact": str(ids["granted"].id)})
-    assert "已授權的內容" in _text(result)
+    for tool in ("duckdb_query", "read_note", "write_finding"):
+        assert error_of(toolbox._gate(tool))["code"] == "handle_only", tool
+    assert toolbox._gate("update_state") is None
