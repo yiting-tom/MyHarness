@@ -44,6 +44,7 @@ from myharness.events.types import (
 )
 from myharness.jobs.runner import JobRunner
 from myharness.jobs.spec import JobPhase
+from myharness.lanes.stream import RequestMeter
 from myharness.lanes.types import LaneRegistry
 from myharness.lanes.worker import TRANSIENT_STATUSES
 from myharness.orchestrator.plan import initial_plan, read_plan, write_plan
@@ -138,6 +139,10 @@ class TurnResult:
     #: those as values, not errors, so nothing else in the stream shows them.
     refused: int = 0
     refusals: tuple[str, ...] = ()
+    #: What this turn's requests carried, as the backend reported them. The
+    #: orchestrator's spend was in no event at all: every total a job reported
+    #: was its lanes' and proxy's alone.
+    meter: RequestMeter = field(default_factory=RequestMeter)
 
     @property
     def acted(self) -> bool:
@@ -322,6 +327,7 @@ class OrchestratorLoop:
                 await self.runner.events.append(
                     spec.job_id, CTX, who="orchestrator", used=usage.used,
                     pct=round(usage.ratio, 3), turn=self.turns,
+                    requests=turn.meter.to_event(),
                 )
 
                 if self.tools.finished:
@@ -381,9 +387,11 @@ class OrchestratorLoop:
         errored = False
         transient = False
         texts: list[str] = []
+        meter = RequestMeter()
 
         async for message in session.send(prompt):
             if isinstance(message, AssistantMessage):
+                meter.add(message)
                 for block in message.content:
                     if isinstance(block, ToolUseBlock):
                         tool_calls += 1
@@ -416,7 +424,8 @@ class OrchestratorLoop:
 
         return TurnResult(tool_calls=tool_calls, errored=errored,
                           transient=transient, text="\n".join(texts)[:500],
-                          refused=refused, refusals=tuple(refusals[:3]))
+                          refused=refused, refusals=tuple(refusals[:3]),
+                          meter=meter)
 
     def _next_prompt(
         self, *, idle: bool = False, turn: TurnResult | None = None

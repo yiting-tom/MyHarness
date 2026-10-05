@@ -36,6 +36,7 @@ FORWARDED: Final[dict[str, tuple[str, str]]] = {
     "a2a": ("myharness.a2a.server",
             "以 A2A（只綁 loopback 的 HTTP）提供分析服務；需要 [a2a] extra"),
     "run": ("myharness.run", "從終端機跑一次分析：myharness run \"<任務>\" <資料檔>..."),
+    "compare": ("myharness.compare", "同一個 golden 問題：單一 agent 對 MyHarness"),
     "golden": ("myharness.goldens", "跑端到端的 golden job"),
 }
 

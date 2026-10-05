@@ -18,6 +18,7 @@ from myharness.events.query import (
     derive_caveats,
     duplicate_dispatches,
     failures,
+    footprint,
     tokens_by_lane,
 )
 from myharness.events.types import (
@@ -161,6 +162,20 @@ async def test_context_peak_is_the_maximum(log: LocalEventLog):
     await log.append(JOB, CTX, who="lane:txn", used=180_000)
     assert context_peak(await log.read(JOB)) == 74_210
     assert context_peak(await log.read(JOB), who="lane:txn") == 180_000
+
+
+
+async def test_the_footprint_counts_the_orchestrator(log: LocalEventLog):
+    """tokens_by_lane never saw the orchestrator; a total without it flatters
+    exactly the component that holds a context for the whole job."""
+    await log.append(JOB, CTX, who="orchestrator", used=9_000,
+                     requests={"in": 20_000, "out": 500, "peak": 9_500})
+    await log.append(JOB, DISPATCH_END, id="d1", lane="txn",
+                     tokens={"in": 30_000, "out": 900},
+                     requests={"in": 30_000, "out": 900, "peak": 12_000})
+    await log.append(JOB, PROXY_ROUTE, tokens={"in": 800, "out": 40})
+    assert footprint(await log.read(JOB)) == {
+        "in": 50_800, "out": 1_440, "peak": 12_000, "peak_estimated": False}
 
 
 # --- Requirement: 聚合查詢介面 --------------------------------------------

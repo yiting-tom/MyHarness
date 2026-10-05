@@ -110,6 +110,7 @@ agent card 在 `/.well-known/agent-card.json`，宣告兩個 skill：
 | `myharness mcp` | 以 MCP（stdio）提供分析服務 |
 | `myharness a2a` | 以 A2A（只綁 loopback）提供分析服務，需要 `[a2a]` extra |
 | `myharness golden` | 跑端到端的 golden job（會花錢） |
+| `myharness compare` | 同一個 golden 問題，單一 agent 對 MyHarness（會花錢） |
 
 `--root` 放在子命令前面，所有子命令共用，預設 `myharness-jobs`。`mcp`／`a2a`／`run`／`golden` 的其他選項看 `myharness <command> --help`。
 
@@ -142,6 +143,19 @@ duckdb_query   對被授權的 blob 下 SQL，大結果用 into 寫回成新 blo
 
 SQL 裡不能有檔案路徑 —— 指名 artifact 是唯一的取用方式。
 沙箱如何守住這件事，見 [`myharness/lanes/tabular/README.md`](myharness/lanes/tabular/README.md)。
+
+## 量測：單一 agent 對 MyHarness
+
+`myharness compare --backend self-hosted`，2026-10-05，模型 `aird-35b`（context window 65,536）。問題是 golden 那題：138 KB 的交易 CSV，報告要給出不重複帳戶數（765）和平均金額最低的 channel（app）。
+
+| | 答對 | 單一 context 峰值 | 總輸入 token | 總輸出 token | 秒 |
+|---|---|---:|---:|---:|---:|
+| 單一 agent（CSV 全文進 prompt） | 否：放不進 context window，prompt 至少 57,345 token | — | — | — | 2 |
+| MyHarness | 是 | ≈13,902 | 154,093 | 22,682 | 458 |
+
+- 峰值是 orchestrator（Claude Code 自己算的 context 用量）；各 lane 單次請求的峰值在 3,835–6,950 之間。
+- `≈`：LiteLLM 串流時每則訊息的 usage 都是 0，只有整次的總數，所以 lane 的單次請求大小用 worker 自己的估算。總輸入／輸出是 backend 回報的實數，包含 orchestrator。
+- 沒比的：給單一 agent 一個 SQL 工具。那樣它也不必讀全文，總 token 很可能比 MyHarness 少；MyHarness 要贏的是單一 context 撐不住的題目，這題還不夠大，證明不了這點。
 
 ## 這個 harness 保證什麼
 

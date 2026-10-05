@@ -46,6 +46,34 @@ def context_peak(events: Iterable[Event], who: str = "orchestrator") -> int:
     return max(used, default=0)
 
 
+def footprint(events: Sequence[Event]) -> dict[str, int | bool]:
+    """A whole job's tokens, and the largest any single request carried.
+
+    The two numbers a low-context design answers for: what it spent in all,
+    and whether any one context ever had to hold much. Counts the orchestrator,
+    which ``tokens_by_lane`` does not. The peak is per request, as backends
+    report it; the orchestrator's ``used`` is its session's estimate and the
+    larger of the two stands.
+    """
+    by_lane = tokens_by_lane(events)
+    tokens_in = sum(t["in"] for t in by_lane.values())
+    tokens_out = sum(t["out"] for t in by_lane.values())
+    peaks = [context_peak(events)]
+    estimated = False
+    for e in events:
+        req = e.get("requests") if e.t in (CTX, DISPATCH_END) else None
+        if isinstance(req, dict):
+            peaks.append(int(req.get("peak", 0)))
+            estimated |= bool(req.get("estimated"))
+            if e.t == CTX:
+                tokens_in += int(req.get("in", 0))
+                tokens_out += int(req.get("out", 0))
+        elif e.t == PROXY_ROUTE:
+            peaks.append(int((e.get("tokens") or {}).get("in", 0)))
+    return {"in": tokens_in, "out": tokens_out, "peak": max(peaks),
+            "peak_estimated": estimated}
+
+
 PROXY_BUCKET = "(proxy)"
 
 

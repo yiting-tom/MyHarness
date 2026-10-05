@@ -40,6 +40,48 @@ def _as_int(value: Any) -> int:
 
 
 @dataclass
+class RequestMeter:
+    """Tokens as the backend reported them, one request at a time.
+
+    ``usage`` on the final message is a run's total, which says what it cost
+    and nothing about how big any one context got -- the number a low-context
+    design is judged by. Every AssistantMessage carries its own request's
+    usage; the SDK splits one response into a message per block, all with the
+    same id and usage, so each id is counted once.
+    """
+
+    tokens_in: int = 0
+    tokens_out: int = 0
+    #: The largest single request's input: the most any one context held.
+    peak: int = 0
+    _seen: set[str] = field(default_factory=set)
+
+    def add(self, message: AssistantMessage) -> None:
+        usage = getattr(message, "usage", None) or {}
+        key = getattr(message, "message_id", None)
+        if not usage or (key is not None and key in self._seen):
+            return
+        if key is not None:
+            self._seen.add(key)
+        context = sum(_as_int(usage.get(k)) for k in (
+            "input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"))
+        self.tokens_in += context
+        self.tokens_out += _as_int(usage.get("output_tokens"))
+        self.peak = max(self.peak, context)
+
+    def to_event(self) -> dict[str, int]:
+        return {"in": self.tokens_in, "out": self.tokens_out, "peak": self.peak}
+
+
+def request_footprint(acc: Accumulated) -> dict[str, Any]:
+    """``meter`` as an event field, the estimate standing in for a silent backend."""
+    reported = acc.meter.to_event()
+    if reported["peak"]:
+        return {**reported, "estimated": False}
+    return {**reported, "peak": acc.peak_estimate, "estimated": True}
+
+
+@dataclass
 class Accumulated:
     """What we know so far, usable even if the run dies mid-stream."""
 
@@ -49,6 +91,11 @@ class Accumulated:
     result: ResultMessage | None = None
     turns: int = 0
     usage: dict[str, int] = field(default_factory=dict)
+    meter: RequestMeter = field(default_factory=RequestMeter)
+    #: The largest request as the estimate prices it. LiteLLM streams every
+    #: message with zeroed usage and only the run's total arrives, so on the
+    #: self-hosted backend this is the only per-request size there is.
+    peak_estimate: int = 0
     #: Conversation so far, counted in the three quantities the rates are
     #: priced against rather than in characters. Kept as counts so the rates can
     #: be re-derived from a recorded run instead of being inferred from a
@@ -419,6 +466,7 @@ def _charge_request(acc: Accumulated) -> None:
     """
     acc.charged += acc.conversation
     acc.estimated_tokens_in += _estimated_request_cost(acc)
+    acc.peak_estimate = max(acc.peak_estimate, _estimated_request_cost(acc))
 
 
 def _message_count(message: Any) -> TextCount:
@@ -465,6 +513,7 @@ def _consume(message: Any, acc: Accumulated) -> None:
         usage = getattr(message, "usage", None)
         if usage:
             acc.usage = dict(usage)
+        acc.meter.add(message)
     elif isinstance(message, UserMessage):
         # Tool results arriving means another request is about to go out
         # carrying everything so far, which is the moment the estimate grows.

@@ -16,7 +16,7 @@ PACKAGE_ROOT = Path(myharness.__file__).parent
 
 #: Lower number = higher layer. Same number = siblings, free to import each other.
 LAYERS = {
-    "cli": 0, "goldens": 0, "run": 0,
+    "cli": 0, "goldens": 0, "run": 0, "compare": 0,
     "mcp": 1, "a2a": 1, "monitor": 1,
     "orchestrator": 2, "proxy": 2,
     "jobs": 3,

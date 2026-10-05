@@ -55,6 +55,7 @@ from myharness.lanes.stream import (
     _charge_request,
     _consume,
     _turns_affordable,
+    request_footprint,
     step_event,
 )
 from myharness.lanes.tools import WorkerToolbox
@@ -319,6 +320,7 @@ async def _run_with_toolbox(
         request.job_id, DISPATCH_END, id=request.dispatch_id, lane=lane.id,
         status=str(handle.status), artifact=handle.artifact or None,
         tokens=acc.token_breakdown, turns=acc.turns,
+        requests=request_footprint(acc),
         # The estimate's own inputs, so its error against the reported figure
         # is readable from the event stream. Three golden runs were diagnosed
         # by replaying transcripts, and transcripts excerpt tool results --
