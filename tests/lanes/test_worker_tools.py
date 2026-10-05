@@ -387,3 +387,12 @@ async def test_the_gate_is_counted_so_a_run_shows_it_fired(bench):
     for _ in range(3):
         await toolbox.handlers["read_note"]({"artifact": str(ids["granted"].id)})
     assert toolbox.gated == 3
+
+
+async def test_a_handle_only_run_cannot_query_but_can_reread(bench):
+    toolbox, ids = bench
+    toolbox.handle_only = True
+    body = error_of(toolbox._gate("duckdb_query"))
+    assert body["code"] == "handle_only"
+    result = await toolbox.handlers["read_note"]({"artifact": str(ids["granted"].id)})
+    assert "已授權的內容" in _text(result)

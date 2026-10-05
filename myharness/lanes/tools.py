@@ -131,6 +131,10 @@ GATED_ABOVE_BUDGET: frozenset[str] = frozenset({
     "read_note", "inspect_blob", "duckdb_query",
 })
 
+#: What a handle-only re-prompt shuts. read_note stays open: re-reading its own
+#: finding is how a fresh run learns what it is writing the handle for.
+HANDLE_ONLY_SHUT: frozenset[str] = frozenset({"inspect_blob", "duckdb_query"})
+
 #: Longest a finding's name may be. Names appear in artifact ids, grant lists
 #: and the flow graph; a sentence there is unreadable everywhere at once.
 MAX_FINDING_NAME_CHARS = 60
@@ -214,6 +218,9 @@ class WorkerToolbox:
     #: and the gate act on: a lane needs a number of turns to land its work,
     #: and a share of the budget does not say how many it has left.
     turns_affordable: float = math.inf
+    #: Set when a run is re-prompted only for its handle: the finding is
+    #: written, so the content tools stay shut and nothing gets redone.
+    handle_only: bool = False
 
     #: Holds every localisation open for as long as the worker runs. A blob
     #: materialised by an object-store backend is deleted when its context
@@ -277,6 +284,14 @@ class WorkerToolbox:
         finish. What is left open is exactly what it needs to land the work it
         already has.
         """
+        if self.handle_only and tool_name in HANDLE_ONLY_SHUT:
+            self.gated += 1
+            return _err({
+                "code": "handle_only",
+                "message": "分析已經做完並寫成 finding，這一輪不再查資料。"
+                           "需要的話用 read_note 讀你的 finding，然後只回傳 handle。",
+                "still_available": ["read_note", "write_finding", "update_state"],
+            })
         if tool_name not in GATED_ABOVE_BUDGET or self.turns_affordable >= GATE_TURNS_LEFT:
             return None
         self.gated += 1
@@ -284,13 +299,13 @@ class WorkerToolbox:
         left = self._turns_phrase()
         if self.findings:
             message = (
-                f"token 預算已用 {pct}%，{left}。剩下的餘裕只夠落檔，"
+                f"{left}（token 預算已用 {pct}%）。剩下的餘裕只夠落檔，"
                 "不夠再取用內容，所以取用類工具停止受理。"
                 "用 write_finding 把新結論補進去，然後回傳 handle 結束。"
             )
         else:
             message = (
-                f"token 預算已用 {pct}%，{left}。剩下的餘裕只夠落檔，"
+                f"{left}（token 預算已用 {pct}%）。剩下的餘裕只夠落檔，"
                 "不夠再取用內容，所以取用類工具停止受理。"
                 "現在就用 write_finding 寫下目前為止的結論 —— "
                 "預算用盡時未落檔的分析會全部消失。"
@@ -315,12 +330,12 @@ class WorkerToolbox:
         left = self._turns_phrase()
         if self.findings:
             warning = (
-                f"\n\n[harness] token 預算已用 {pct}%，{left}。你已經寫過 finding —— "
+                f"\n\n[harness] {left}（token 預算已用 {pct}%）。你已經寫過 finding —— "
                 "把新結論補進去，然後回傳 handle 結束。不要再開新的查詢。"
             )
         else:
             warning = (
-                f"\n\n[harness] token 預算已用 {pct}%，{left}，"
+                f"\n\n[harness] {left}（token 預算已用 {pct}%），"
                 "而你還沒有寫任何 finding。"
                 "現在就用 write_finding 寫下目前為止的結論 —— "
                 "預算用盡時未落檔的分析會全部消失。"

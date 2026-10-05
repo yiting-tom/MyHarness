@@ -153,6 +153,7 @@ SQL 裡不能有檔案路徑 —— 指名 artifact 是唯一的取用方式。
 | 單一 agent（CSV 全文進 prompt） | 否：放不進 context window，prompt 至少 57,345 token | — | — | — | 2 |
 | MyHarness | 是 | ≈13,902 | 154,093 | 22,682 | 458 |
 
+- 之後修了兩個浪費（lane 的閘門只看 token 不看 max_turns；handle 格式錯時 re-prompt 會整個重做分析），同一題重跑：答對，峰值 ≈13,386，總輸入 102,063（−34%），總輸出 15,606。各只跑一次，run 之間的變異不小，當作方向而不是精確的差距。
 - 峰值是 orchestrator（Claude Code 自己算的 context 用量）；各 lane 單次請求的峰值在 3,835–6,950 之間。
 - `≈`：LiteLLM 串流時每則訊息的 usage 都是 0，只有整次的總數，所以 lane 的單次請求大小用 worker 自己的估算。總輸入／輸出是 backend 回報的實數，包含 orchestrator。
 - 沒比的：給單一 agent 一個 SQL 工具。那樣它也不必讀全文，總 token 很可能比 MyHarness 少；MyHarness 要贏的是單一 context 撐不住的題目，這題還不夠大，證明不了這點。

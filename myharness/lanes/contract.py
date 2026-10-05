@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Final
@@ -171,6 +172,17 @@ def reprompt_text(problems: tuple[str, ...]) -> str:
         f"{allowed}. artifact is the id write_finding handed back, copied "
         "exactly -- not a path you compose yourself. Every value in metrics "
         "must be a number. Leave metrics and followups out if you have none."
+    )
+
+
+def handle_only_text(findings: Sequence[str]) -> str:
+    """Said before reprompt_text when the work itself is already on file."""
+    listed = "\n".join(f"- {f}" for f in findings)
+    return (
+        "這項任務你已經做完，結論寫在這些 finding 裡：\n"
+        f"{listed}\n\n"
+        "不要重做分析，查資料的工具這一輪不會受理。"
+        "需要的話用 read_note 讀回你的 finding，然後只回傳 handle。"
     )
 
 

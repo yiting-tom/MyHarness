@@ -43,6 +43,7 @@ from myharness.lanes.contract import (
     ContractPath,
     extract_json_object,
     failure_handle,
+    handle_only_text,
     reprompt_text,
     validate_payload,
 )
@@ -191,6 +192,12 @@ async def _run_once(
             if budget:
                 toolbox.budget_used = spent / budget
                 toolbox.turns_affordable = _turns_affordable(acc, budget - spent)
+            # max_turns ends a run as surely as the budget does. compare-live-2's
+            # d2 had budget to spare, so the gate never closed, and it spent
+            # all 32 turns querying with nothing written.
+            toolbox.turns_affordable = min(
+                toolbox.turns_affordable, request.lane.type.max_turns - acc.requests
+            )
             # Local ceiling for backends that cannot enforce one server-side.
             # Reading acc.tokens_in here meant the ceiling only ever tripped on
             # the final message -- it relabelled a finished run rather than
@@ -482,6 +489,14 @@ async def _attempt_all(
             # Semantic failures are never auto-retried; a malformed handle is a
             # formatting failure, which a re-prompt legitimately fixes.
             current_prompt = f"{prompt}\n\n{reprompt_text(schema_problems)}"
+            if toolbox.findings:
+                # The work is on file; only its handle was malformed. Without
+                # this the re-prompt is a fresh run that redoes the analysis:
+                # compare-live-2's d3 wrote its finding, answered in prose,
+                # and spent another 48k tokens querying everything again.
+                toolbox.handle_only = True
+                current_prompt = f"{prompt}\n\n{handle_only_text(toolbox.findings)}" \
+                                 f"\n\n{reprompt_text(schema_problems)}"
             # Raised, not reset. The re-prompt redoes the task, so it needs room
             # of its own -- but `carried` keeps running, so the ceiling and the
             # dispatch event still say what the whole dispatch spent.

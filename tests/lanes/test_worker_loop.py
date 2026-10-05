@@ -1288,3 +1288,62 @@ async def test_a_dispatch_gets_one_reprompt_and_no_more(bench):
 
     assert handle.status is HandleStatus.SCHEMA_VIOLATION
     assert transport.call_count == 2, "asked once, re-asked once, then it is a failure"
+
+
+# --- compare-live-2: turns ran out with budget to spare, and a re-prompt -----
+# redid a finished analysis.
+
+
+def _capture_toolbox(monkeypatch, *, finding: str | None = None) -> list:
+    from myharness.lanes import worker as W
+
+    seen: list = []
+    original = W.WorkerToolbox.build_server
+
+    def build(self):
+        seen.append(self)
+        if finding:
+            self.findings.append(finding)
+        return original(self)
+
+    monkeypatch.setattr(W.WorkerToolbox, "build_server", build)
+    return seen
+
+
+async def test_the_gate_counts_turns_not_only_tokens(bench, monkeypatch):
+    """d2 had budget left, so the gate never closed, and it spent all 32
+    turns querying with nothing written."""
+    from dataclasses import replace
+
+    from claude_agent_sdk import ToolResultBlock, UserMessage
+
+    seen = _capture_toolbox(monkeypatch)
+    lane = replace(bench.lane, type=replace(bench.lane.type, max_turns=4))
+    tool_result = UserMessage(content=[ToolResultBlock(tool_use_id="t", content="r")])
+    transport = ScriptedTransport([assistant("q"), tool_result] * 3 + [result()])
+    await run_lane_worker(
+        WorkerRequest(job_id=JOB, lane=lane, task="t", dispatch_id="d1"),
+        store=bench.store, event_log=bench.events, transport=transport,
+    )
+    assert seen[0].turns_affordable <= 0
+
+
+async def test_a_reprompt_with_the_finding_written_asks_only_for_the_handle(
+    bench, monkeypatch
+):
+    """d3 wrote its finding, answered in prose, and redid the analysis."""
+    written = f"{JOB}/note/lanes/txn-2024/findings/done"
+    seen = _capture_toolbox(monkeypatch, finding=written)
+    lane = with_backend(bench.lane, "test-degraded")
+    transport = ScriptedTransport(
+        [assistant("分析完成，結論如上"), result()],
+        [assistant(handle_text()), result()],
+    )
+    handle = await run_lane_worker(
+        WorkerRequest(job_id=JOB, lane=lane, task="t", dispatch_id="d1"),
+        store=bench.store, event_log=bench.events, transport=transport,
+    )
+    assert handle.ok
+    second = transport.calls[1][0]
+    assert written in second and "不要重做分析" in second
+    assert seen[0].handle_only
