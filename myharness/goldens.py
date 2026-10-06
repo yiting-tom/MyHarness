@@ -13,7 +13,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import re
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -80,6 +82,118 @@ def ground_truth(csv_path: Path = GOLDEN_CSV) -> GroundTruth:
         return GroundTruth(rows, accounts, channel)
     finally:
         conn.close()
+
+
+@dataclass(frozen=True, slots=True)
+class Blob:
+    name: str
+    path: Path
+    columns: tuple[str, ...]
+
+    @property
+    def schema(self) -> dict[str, Any]:
+        return {"columns": list(self.columns), "format": "csv"}
+
+
+@dataclass(frozen=True, slots=True)
+class GoldenTask:
+    """A question, its data, and what a report must contain to have answered it."""
+
+    name: str
+    goal: str
+    blobs: tuple[Blob, ...]
+    #: What the report is missing; empty means answered.
+    check: Callable[[str], list[str]]
+
+
+TXN_BLOB = Blob("raw/txn-2024", GOLDEN_CSV, ("txn_id", "ts", "account", "amount", "channel"))
+
+
+def txn_task(csv_path: Path = GOLDEN_CSV) -> GoldenTask:
+    return GoldenTask("txn", GOAL, (Blob(TXN_BLOB.name, csv_path, TXN_BLOB.columns),),
+                      ground_truth(csv_path).missing_from)
+
+
+COMPLAINTS_DIR = Path("goldens/complaints")
+COMPLAINTS_GOAL = (
+    "有三份資料：交易（txn_id / ts / account / amount / channel）、"
+    "帳戶（account / kyc_risk / region）、"
+    "客訴（complaint_id / account / txn_id / filed / text；text 是客戶寫的自由文字）。\n"
+    "請回答：\n"
+    "(1) 全部客訴中，有幾則實際上是在指控交易未經本人授權（盜刷、冒用、不認得的扣款）？"
+    "有些客訴提到盜刷，但說明了其實不是，那些不算。\n"
+    "(2) 依帳戶的 kyc_risk 分組，哪一組的客訴中這類指控的比例最高？\n"
+    "(3) 被指控未授權的交易中，哪一個 channel 的件數最多？\n"
+    "報告最後單獨一行，用資料中的原值回答：\n"
+    "ANSWER: count=<則數>; riskiest=<kyc_risk>; channel=<channel>"
+)
+
+#: The count is judged by reading 2,500 texts; a few misreads are not a wrong
+#: answer, a keyword count is. Counting 盜/冒用 gives 485 against 569 -- 15% off.
+COUNT_TOLERANCE = 0.10
+
+_ANSWER = re.compile(
+    r"ANSWER\s*[:：].*?count\s*=\s*([\d,]+).*?riskiest\s*=\s*(\w+).*?channel\s*=\s*(\w+)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ComplaintsTruth:
+    count: int
+    riskiest: str
+    channel: str
+
+    def missing_from(self, report: str) -> list[str]:
+        """Read off the ANSWER line, not anywhere in the text: a report that
+        lists every channel would otherwise "contain" the right one."""
+        found = _ANSWER.search(report)
+        if found is None:
+            return ["ANSWER line"]
+        count, riskiest, channel = int(found[1].replace(",", "")), found[2], found[3]
+        absent = []
+        if abs(count - self.count) > self.count * COUNT_TOLERANCE:
+            absent.append(f"count ({self.count}±{COUNT_TOLERANCE:.0%}, said {count})")
+        if riskiest.lower() != self.riskiest:
+            absent.append(f"riskiest ({self.riskiest}, said {riskiest})")
+        if channel.lower() != self.channel:
+            absent.append(f"channel ({self.channel}, said {channel})")
+        return absent
+
+
+def complaints_truth(data: Path = COMPLAINTS_DIR, txns: Path = GOLDEN_CSV) -> ComplaintsTruth:
+    """From the answer key, which no agent is given."""
+    import duckdb
+
+    conn = duckdb.connect(":memory:")
+    try:
+        joined = (f"FROM read_csv_auto('{data / 'complaints.csv'}') c "
+                  f"JOIN read_csv_auto('{data / 'labels.csv'}') l USING (complaint_id) "
+                  f"JOIN read_csv_auto('{data / 'accounts.csv'}') a USING (account) "
+                  f"JOIN read_csv_auto('{txns}') t USING (txn_id)")
+        unauthorized = "l.label = 'unauthorized'"
+        (count,), = conn.execute(f"SELECT count(*) {joined} WHERE {unauthorized}").fetchall()
+        (riskiest,), = conn.execute(
+            f"SELECT a.kyc_risk {joined} GROUP BY 1 "
+            f"ORDER BY avg(({unauthorized})::INT) DESC LIMIT 1").fetchall()
+        (channel,), = conn.execute(
+            f"SELECT t.channel {joined} WHERE {unauthorized} "
+            f"GROUP BY 1 ORDER BY count(*) DESC LIMIT 1").fetchall()
+        return ComplaintsTruth(count, riskiest, channel)
+    finally:
+        conn.close()
+
+
+def complaints_task() -> GoldenTask:
+    return GoldenTask("complaints", COMPLAINTS_GOAL, (
+        TXN_BLOB,
+        Blob("raw/accounts", COMPLAINTS_DIR / "accounts.csv", ("account", "kyc_risk", "region")),
+        Blob("raw/complaints", COMPLAINTS_DIR / "complaints.csv",
+             ("complaint_id", "account", "txn_id", "filed", "text")),
+    ), complaints_truth().missing_from)
+
+
+TASKS: dict[str, Callable[[], GoldenTask]] = {"txn": txn_task, "complaints": complaints_task}
 
 ANALYST_TOOLS = (
     "read_note", "write_finding", "update_state",
@@ -162,6 +276,15 @@ class GoldenResult:
         )
 
 
+async def put_task_blobs(store: LocalArtifactStore, job_id: str, task: GoldenTask) -> list[str]:
+    return [str((await store.put_blob(job_id, b.name, source=b.path, produced_by="user",
+                                      schema=b.schema)).id) for b in task.blobs]
+
+
+def available(ids: list[str]) -> str:
+    return "可用資料：\n" + "\n".join(f"- {i}" for i in ids)
+
+
 async def run_golden(
     root: Path,
     *,
@@ -170,19 +293,16 @@ async def run_golden(
     csv_path: Path = GOLDEN_CSV,
     charters: Path = Path("charters"),
     spec_overrides: dict[str, Any] | None = None,
+    task: GoldenTask | None = None,
 ) -> GoldenResult:
+    task = task or txn_task(csv_path)
     store = LocalArtifactStore(root)
     await store.init_job(job_id)
     events = LocalEventLog(root)
 
-    blob = await store.put_blob(
-        job_id, "raw/txn-2024", source=csv_path, produced_by="user",
-        schema={"columns": ["txn_id", "ts", "account", "amount", "channel"],
-                "format": "csv"},
-    )
-
+    ids = await put_task_blobs(store, job_id, task)
     spec = JobSpec(
-        job_id=job_id, goal=f"{GOAL}\n\n可用資料：{blob.id}",
+        job_id=job_id, goal=f"{task.goal}\n\n{available(ids)}",
         max_dispatches=12, max_budget_usd=1.0, max_wall_clock_s=1800.0,
         peek_budget_tokens=8_000, question_quota=2,
         **(spec_overrides or {}),
@@ -210,7 +330,7 @@ async def run_golden(
             )
         except Exception:  # noqa: BLE001 - a missing report is the assertion's job
             report_text = ""
-    return GoldenResult(outcome, delivery, summarize(stream), str(blob.id),
+    return GoldenResult(outcome, delivery, summarize(stream), ids[0],
                         flow, detect(flow), report_text)
 
 

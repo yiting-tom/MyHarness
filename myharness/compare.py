@@ -28,7 +28,14 @@ from myharness.backends.profile import BackendProfile, ModelTier
 from myharness.backends.profile import registry as backends
 from myharness.events.log import LocalEventLog
 from myharness.events.query import footprint
-from myharness.goldens import GOAL, GOLDEN_CSV, ground_truth, lane_types, run_golden
+from myharness.goldens import (
+    TASKS,
+    GoldenTask,
+    available,
+    lane_types,
+    put_task_blobs,
+    run_golden,
+)
 from myharness.lanes.stream import RequestMeter
 from myharness.lanes.transport import SdkTransport
 from myharness.lanes.types import LaneInstance
@@ -60,10 +67,11 @@ class Row:
         return not self.missing and not self.note
 
 
-async def run_baseline(backend: str, csv_path: Path = GOLDEN_CSV) -> Row:
+async def run_baseline(backend: str, task: GoldenTask) -> Row:
     profile = backends.get(backend)
-    goal = GOAL.replace("資料已上傳為 blob，", "資料附在下面，")
-    prompt = f"{goal}\n\n```csv\n{csv_path.read_text(encoding='utf-8')}```"
+    goal = task.goal.replace("資料已上傳為 blob，", "資料附在下面，")
+    prompt = goal + "".join(
+        f"\n\n{b.name}:\n```csv\n{b.path.read_text(encoding='utf-8')}```" for b in task.blobs)
     options = ClaudeAgentOptions(
         model=profile.resolve_model(ModelTier.STRONG), max_turns=1,
         allowed_tools=[], disallowed_tools=BackendProfile.disallowed_for(()),
@@ -90,28 +98,23 @@ async def run_baseline(backend: str, csv_path: Path = GOLDEN_CSV) -> Row:
             row.note = f"{type(exc).__name__}: {text.splitlines()[0][:200] if text else ''}"
     row.seconds = time.monotonic() - started
     row.tokens_in, row.tokens_out, row.peak = meter.tokens_in, meter.tokens_out, meter.peak
-    row.missing = ground_truth(csv_path).missing_from("\n".join(texts))
+    row.missing = task.check("\n".join(texts))
     return row
 
 
-async def run_tool_baseline(root: Path, backend: str, job_id: str,
-                            csv_path: Path = GOLDEN_CSV) -> Row:
+async def run_tool_baseline(root: Path, backend: str, job_id: str, task: GoldenTask) -> Row:
     """One lane worker given the whole task: same model, tools and charter as
     the harness's analyst, no orchestrator, no other lanes."""
     store, events = LocalArtifactStore(root), LocalEventLog(root)
     await store.init_job(job_id)
-    blob = await store.put_blob(
-        job_id, "raw/txn-2024", source=csv_path, produced_by="user",
-        schema={"columns": ["txn_id", "ts", "account", "amount", "channel"],
-                "format": "csv"},
-    )
+    ids = await put_task_blobs(store, job_id, task)
     analyst = lane_types(backend=backend).get_type("tabular-analyst")
     lane = LaneInstance(id="solo", type=replace(
         analyst, max_turns=SOLO_MAX_TURNS, token_budget=SOLO_TOKEN_BUDGET))
     started = time.monotonic()
     handle = await run_lane_worker(
-        WorkerRequest(job_id=job_id, lane=lane, task=f"{GOAL}\n\n可用資料：{blob.id}",
-                      dispatch_id="solo", inputs=(str(blob.id),)),
+        WorkerRequest(job_id=job_id, lane=lane, task=f"{task.goal}\n\n{available(ids)}",
+                      dispatch_id="solo", inputs=tuple(ids)),
         store=store, event_log=events,
     )
     report = handle.headline or ""
@@ -123,19 +126,19 @@ async def run_tool_baseline(root: Path, backend: str, job_id: str,
     fp = footprint(await events.read(job_id))
     return Row(
         "單一 agent（SQL 工具）", fp["in"], fp["out"], fp["peak"], fp["peak_estimated"],
-        time.monotonic() - started, ground_truth(csv_path).missing_from(report),
+        time.monotonic() - started, task.check(report),
         "" if handle.ok else f"{handle.status}: {handle.headline}"[:200],
     )
 
 
-async def run_harness(root: Path, backend: str, job_id: str) -> Row:
+async def run_harness(root: Path, backend: str, job_id: str, task: GoldenTask) -> Row:
     started = time.monotonic()
-    result = await run_golden(root, job_id=job_id, backend=backend)
+    result = await run_golden(root, job_id=job_id, backend=backend, task=task)
     fp = footprint(await LocalEventLog(root).read(job_id))
     return Row(
         "MyHarness", fp["in"], fp["out"], fp["peak"], fp["peak_estimated"],
         time.monotonic() - started,
-        ground_truth().missing_from(result.report_text),
+        task.check(result.report_text),
         "" if result.delivery.report_artifact and not result.outcome.salvaged
         else f"phase={result.outcome.phase} salvaged={result.outcome.salvaged}",
     )
@@ -179,22 +182,25 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     parser.add_argument("--job-id", default=f"compare-{int(time.time())}")
     parser.add_argument("--only", nargs="+", choices=("paste", "tools", "harness"),
                         default=["paste", "tools", "harness"])
+    parser.add_argument("--task", choices=sorted(TASKS), default="txn")
     parser.add_argument("--runs", type=int, default=1,
                         help="each side this many times; prints median and range")
     args = parser.parse_args(argv)
 
+    task = TASKS[args.task]()
     rows = []
     for i in range(1, args.runs + 1):
         run = i if args.runs > 1 else 0
         job_id = f"{args.job_id}-{i}" if run else args.job_id
         if "paste" in args.only:
-            rows.append(asyncio.run(run_baseline(args.backend)))
+            rows.append(asyncio.run(run_baseline(args.backend, task)))
             rows[-1].run = run
         if "tools" in args.only:
-            rows.append(asyncio.run(run_tool_baseline(args.root, args.backend, f"{job_id}-solo")))
+            rows.append(asyncio.run(
+                run_tool_baseline(args.root, args.backend, f"{job_id}-solo", task)))
             rows[-1].run = run
         if "harness" in args.only:
-            rows.append(asyncio.run(run_harness(args.root, args.backend, job_id)))
+            rows.append(asyncio.run(run_harness(args.root, args.backend, job_id, task)))
             rows[-1].run = run
         print(f"run {i}/{args.runs} done", flush=True)
     print(table(rows))

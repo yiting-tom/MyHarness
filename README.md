@@ -161,6 +161,21 @@ SQL 裡不能有檔案路徑 —— 指名 artifact 是唯一的取用方式。
 - `≈`：LiteLLM 串流時每則訊息的 usage 都是 0，只有整次的總數，所以 lane 的單次請求大小用 worker 自己的估算。總輸入／輸出是 backend 回報的實數，包含 orchestrator。
 - 有 SQL 工具的單一 agent（一個 lane worker 拿到整個任務，同樣的模型、工具和 charter，回合與預算放寬；`--only tools --runs 3`）：3 次都答對，總輸入中位數 50,732（20,052–135,441），總輸出 5,070，50 秒（22–141）。**這題它比 MyHarness 便宜也快得多**：一張 138 KB 的表，一個 agent 用 SQL 就夠，多 agent 的協調全是額外成本。MyHarness 要證明的是單一 context 撐不住的題目（多份資料、要 join、要讀文字），這題證明不了。
 
+### 第二題：要讀懂文字的客訴（`--task complaints`）
+
+`goldens/make_complaints.py` 用固定 seed 產生帳戶 KYC 表和 2,500 則客訴（12 萬字元），問：有幾則在指控未授權交易（569）、哪個 kyc_risk 組比例最高（high）、哪個 channel 最多（web）。有些客訴提到盜刷但說明其實不是，關鍵字計數得 485，超出 ±10%。報告最後要有一行 `ANSWER: count=…; riskiest=…; channel=…`。
+
+第一次（cmp-complaints-1）三方都答錯：
+
+| | 結果 | 總輸入 token | 秒 |
+|---|---|---:|---:|
+| 單一 agent（CSV 全文進 prompt） | 放不進 context window | — | 3 |
+| 單一 agent（SQL 工具） | count=504（漏 65） | 143,807 | 95 |
+| MyHarness | orchestrator 沒收工，harness 代寫報告 | 186,063 | 2,405 |
+
+- 單一 agent 沒有讀文字：它用 SQL 反推出產生器的句型（7 種指控、5 種否認），組成 `LIKE` 分類器，只漏了一種句型。**模板產生的文字是有限文法，SQL 破得了**；要測「必須讀」，文字得有真的語意變化（例如由模型改寫）。
+- MyHarness 的 lane 也走 SQL 啟發式（估 330、270），orchestrator 沒有把 2,500 則分給幾個 lane 各讀一段；其中一個 lane 的請求卡了 24 分鐘，job 撞到時間上限。
+
 ## 這個 harness 保證什麼
 
 Golden job 每次跑都斷言這些（`tests/golden/`，`pytest -m live tests/golden`）：

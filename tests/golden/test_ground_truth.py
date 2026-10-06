@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from myharness.goldens import GOLDEN_CSV, GroundTruth, ground_truth
+from myharness.goldens import GOLDEN_CSV, ComplaintsTruth, GroundTruth, ground_truth
 
 pytestmark = pytest.mark.skipif(
     not GOLDEN_CSV.exists(), reason=f"{GOLDEN_CSV} missing"
@@ -46,3 +46,25 @@ def test_a_near_miss_is_not_accepted():
     assert "distinct accounts (765)" in " ".join(
         truth.missing_from("約 700 多個帳戶，app 最低")
     )
+
+
+# --- the complaints task -------------------------------------------------
+
+
+def test_the_complaints_answer_key():
+    from myharness.goldens import complaints_truth
+
+    assert complaints_truth() == ComplaintsTruth(569, "high", "web")
+
+
+def test_a_keyword_count_is_a_wrong_answer():
+    """Counting 盜/冒用 gives 485: the trap is the point of the task."""
+    truth = ComplaintsTruth(569, "high", "web")
+    assert truth.missing_from("ANSWER: count=485; riskiest=high; channel=web")
+    assert not truth.missing_from("……\nANSWER: count=560；riskiest=high；channel=web")
+
+
+def test_naming_every_channel_is_not_an_answer():
+    truth = ComplaintsTruth(569, "high", "web")
+    assert truth.missing_from("web、app、atm、branch 都有，high 風險最多，共 569 則") == [
+        "ANSWER line"]
