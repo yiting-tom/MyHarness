@@ -159,7 +159,7 @@ SQL 裡不能有檔案路徑 —— 指名 artifact 是唯一的取用方式。
 - `--runs 3`（compare-runs-1，同一份程式）：MyHarness 3 次都答對；峰值中位數 ≈8,634（6,890–9,687），總輸入中位數 85,674（66,876–125,635），總輸出 25,957（19,033–26,156），472 秒（225–663）。單一 agent 3 次都沒答到（兩次放不進 context window，一次請求逾時）。總輸入同一題就差到近兩倍，上面任何單次之間 10–30% 的差距都看不出趨勢；要比較改動，至少用 `--runs 3` 看範圍。
 - 峰值是 orchestrator（Claude Code 自己算的 context 用量）；各 lane 單次請求的峰值在 3,835–6,950 之間。
 - `≈`：LiteLLM 串流時每則訊息的 usage 都是 0，只有整次的總數，所以 lane 的單次請求大小用 worker 自己的估算。總輸入／輸出是 backend 回報的實數，包含 orchestrator。
-- 沒比的：給單一 agent 一個 SQL 工具。那樣它也不必讀全文，總 token 很可能比 MyHarness 少；MyHarness 要贏的是單一 context 撐不住的題目，這題還不夠大，證明不了這點。
+- 有 SQL 工具的單一 agent（一個 lane worker 拿到整個任務，同樣的模型、工具和 charter，回合與預算放寬；`--only tools --runs 3`）：3 次都答對，總輸入中位數 50,732（20,052–135,441），總輸出 5,070，50 秒（22–141）。**這題它比 MyHarness 便宜也快得多**：一張 138 KB 的表，一個 agent 用 SQL 就夠，多 agent 的協調全是額外成本。MyHarness 要證明的是單一 context 撐不住的題目（多份資料、要 join、要讀文字），這題證明不了。
 
 ## 這個 harness 保證什麼
 

@@ -2,11 +2,11 @@
 
     myharness compare --backend self-hosted
 
-"Low context" is a claim; this is the measurement. The baseline is the naive
-way to ask: the whole CSV in one prompt, one request, no tools. Both sides are
-scored the same way -- the two numbers the golden report must contain -- and
-measured by what the backend reported per request, so neither side's figure
-is an estimate the other's is not.
+"Low context" is a claim; this is the measurement. Two baselines: the naive
+way to ask (the whole CSV in one prompt, no tools), and the real competitor --
+one agent with the same SQL tools a lane gets and the whole task to itself.
+All sides are scored the same way, by the two numbers the golden report must
+contain.
 """
 
 from __future__ import annotations
@@ -15,23 +15,32 @@ import argparse
 import asyncio
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from statistics import median
 
 from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, ResultMessage, TextBlock
 
+from myharness.artifacts.ids import ArtifactId
+from myharness.artifacts.local import LocalArtifactStore
+from myharness.artifacts.types import GrantSet
 from myharness.backends.profile import BackendProfile, ModelTier
 from myharness.backends.profile import registry as backends
 from myharness.events.log import LocalEventLog
 from myharness.events.query import footprint
-from myharness.goldens import GOAL, GOLDEN_CSV, ground_truth, run_golden
+from myharness.goldens import GOAL, GOLDEN_CSV, ground_truth, lane_types, run_golden
 from myharness.lanes.stream import RequestMeter
 from myharness.lanes.transport import SdkTransport
+from myharness.lanes.types import LaneInstance
+from myharness.lanes.worker import WorkerRequest, run_lane_worker
 from myharness.local_layout import DEFAULT_ROOT
 
 BASELINE_TIMEOUT_S = 1800.0
 BASELINE_MAX_OUTPUT = 8_192
+#: The tool-using agent's limits: generous, so that it is the single context
+#: that has to cope, not a lane's per-dispatch ceilings.
+SOLO_MAX_TURNS = 60
+SOLO_TOKEN_BUDGET = 1_000_000
 
 
 @dataclass
@@ -85,6 +94,40 @@ async def run_baseline(backend: str, csv_path: Path = GOLDEN_CSV) -> Row:
     return row
 
 
+async def run_tool_baseline(root: Path, backend: str, job_id: str,
+                            csv_path: Path = GOLDEN_CSV) -> Row:
+    """One lane worker given the whole task: same model, tools and charter as
+    the harness's analyst, no orchestrator, no other lanes."""
+    store, events = LocalArtifactStore(root), LocalEventLog(root)
+    await store.init_job(job_id)
+    blob = await store.put_blob(
+        job_id, "raw/txn-2024", source=csv_path, produced_by="user",
+        schema={"columns": ["txn_id", "ts", "account", "amount", "channel"],
+                "format": "csv"},
+    )
+    analyst = lane_types(backend=backend).get_type("tabular-analyst")
+    lane = LaneInstance(id="solo", type=replace(
+        analyst, max_turns=SOLO_MAX_TURNS, token_budget=SOLO_TOKEN_BUDGET))
+    started = time.monotonic()
+    handle = await run_lane_worker(
+        WorkerRequest(job_id=job_id, lane=lane, task=f"{GOAL}\n\n可用資料：{blob.id}",
+                      dispatch_id="solo", inputs=(str(blob.id),)),
+        store=store, event_log=events,
+    )
+    report = handle.headline or ""
+    if handle.artifact:
+        report += "\n" + await store.read_note(
+            ArtifactId.parse(handle.artifact), grants=GrantSet.unrestricted(job_id),
+            max_tokens=100_000,
+        )
+    fp = footprint(await events.read(job_id))
+    return Row(
+        "單一 agent（SQL 工具）", fp["in"], fp["out"], fp["peak"], fp["peak_estimated"],
+        time.monotonic() - started, ground_truth(csv_path).missing_from(report),
+        "" if handle.ok else f"{handle.status}: {handle.headline}"[:200],
+    )
+
+
 async def run_harness(root: Path, backend: str, job_id: str) -> Row:
     started = time.monotonic()
     result = await run_golden(root, job_id=job_id, backend=backend)
@@ -134,7 +177,8 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     parser.add_argument("--backend", default="openrouter")
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT / "compare")
     parser.add_argument("--job-id", default=f"compare-{int(time.time())}")
-    parser.add_argument("--only", choices=("baseline", "harness"))
+    parser.add_argument("--only", nargs="+", choices=("paste", "tools", "harness"),
+                        default=["paste", "tools", "harness"])
     parser.add_argument("--runs", type=int, default=1,
                         help="each side this many times; prints median and range")
     args = parser.parse_args(argv)
@@ -142,11 +186,14 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     rows = []
     for i in range(1, args.runs + 1):
         run = i if args.runs > 1 else 0
-        if args.only != "harness":
+        job_id = f"{args.job_id}-{i}" if run else args.job_id
+        if "paste" in args.only:
             rows.append(asyncio.run(run_baseline(args.backend)))
             rows[-1].run = run
-        if args.only != "baseline":
-            job_id = f"{args.job_id}-{i}" if run else args.job_id
+        if "tools" in args.only:
+            rows.append(asyncio.run(run_tool_baseline(args.root, args.backend, f"{job_id}-solo")))
+            rows[-1].run = run
+        if "harness" in args.only:
             rows.append(asyncio.run(run_harness(args.root, args.backend, job_id)))
             rows[-1].run = run
         print(f"run {i}/{args.runs} done", flush=True)
