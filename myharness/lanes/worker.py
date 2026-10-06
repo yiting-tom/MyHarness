@@ -44,6 +44,7 @@ from myharness.lanes.contract import (
     ContractPath,
     extract_json_object,
     failure_handle,
+    handle_format_text,
     handle_only_text,
     reprompt_text,
     validate_payload,
@@ -98,7 +99,8 @@ def build_prompt(request: WorkerRequest, state: str | None) -> str:
         "# 完成方式\n"
         "1. 用 write_finding 寫下完整分析。\n"
         "2. 用 update_state 更新累積認知（只寫結論與開放問題，不寫細節）。\n"
-        "3. 最後回覆一個 handle，指向你寫的 finding。**不要在回覆裡重述分析內容。**"
+        "3. 最後回覆一個 handle，指向你寫的 finding。**不要在回覆裡重述分析內容。**\n\n"
+        + handle_format_text()
     )
     return "\n\n".join(parts)
 

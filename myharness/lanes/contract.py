@@ -158,13 +158,15 @@ _HANDLE_EXAMPLE: Final[dict[str, Any]] = {
 }
 
 
-def reprompt_text(problems: tuple[str, ...]) -> str:
-    """What to send back when the model's output did not validate."""
-    bullets = "\n".join(f"- {p}" for p in problems)
+def handle_format_text() -> str:
+    """The handle's shape, in words a model without schema enforcement can follow.
+
+    Said up front, not only on a re-prompt: the task prompt used to ask for "a
+    handle" and show its shape nowhere, so on the degraded path the first
+    answer was prose -- all four dispatches of compare-live-5 were re-prompted.
+    """
     allowed = ", ".join(HANDLE_SCHEMA["properties"]["confidence"]["enum"])
     return (
-        "Your last message was not a valid handle. Problems:\n"
-        f"{bullets}\n\n"
         "Reply with ONLY a JSON object of exactly this shape -- the same keys, "
         "your values. No prose, no code fence, no wrapper around it:\n"
         f"{json.dumps(_HANDLE_EXAMPLE, ensure_ascii=False)}\n\n"
@@ -172,6 +174,15 @@ def reprompt_text(problems: tuple[str, ...]) -> str:
         f"{allowed}. artifact is the id write_finding handed back, copied "
         "exactly -- not a path you compose yourself. Every value in metrics "
         "must be a number. Leave metrics and followups out if you have none."
+    )
+
+
+def reprompt_text(problems: tuple[str, ...]) -> str:
+    """What to send back when the model's output did not validate."""
+    bullets = "\n".join(f"- {p}" for p in problems)
+    return (
+        "Your last message was not a valid handle. Problems:\n"
+        f"{bullets}\n\n{handle_format_text()}"
     )
 
 

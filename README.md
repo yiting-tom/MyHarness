@@ -155,6 +155,7 @@ SQL 裡不能有檔案路徑 —— 指名 artifact 是唯一的取用方式。
 
 - 之後修了三個浪費：lane 的閘門只看 token 不看 max_turns；handle 格式錯時 re-prompt 會整個重做分析；寫完 finding 後的警告措辭讓 lane 重寫同一份 finding。re-prompt 現在把 finding 全文附上、關掉讀寫工具，一個回合補完 handle。同一題重跑（compare-live-5）：答對，峰值 ≈12,386，總輸入 95,863，總輸出 25,124，290 秒。
 - 修正前的總數少算了：派工被 re-prompt 時只記到最後一次嘗試的 token。上表的 154,093 也是少算的，所以修正前後差多少無從得知；95,863 是修正計帳後的實數。這個模型在無 schema 強制的路徑上幾乎每個派工第一次都用散文交 handle，四個派工全被 re-prompt。
+- 原因是第一份 prompt 只說「回覆一個 handle」，JSON 的樣子只在 re-prompt 才給。改成一開始就給之後（compare-live-6）：五個派工全部一次交出合格 handle，答對，總輸入 105,646（這次 orchestrator 多派了一個 lane，平均每個派工約 21k，上一次約 24k）。單次結果，變異範圍內。
 - 峰值是 orchestrator（Claude Code 自己算的 context 用量）；各 lane 單次請求的峰值在 3,835–6,950 之間。
 - `≈`：LiteLLM 串流時每則訊息的 usage 都是 0，只有整次的總數，所以 lane 的單次請求大小用 worker 自己的估算。總輸入／輸出是 backend 回報的實數，包含 orchestrator。
 - 沒比的：給單一 agent 一個 SQL 工具。那樣它也不必讀全文，總 token 很可能比 MyHarness 少；MyHarness 要贏的是單一 context 撐不住的題目，這題還不夠大，證明不了這點。

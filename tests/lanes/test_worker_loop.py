@@ -1364,3 +1364,11 @@ async def test_a_reprompted_dispatch_reports_every_attempts_tokens(bench):
     (end,) = await bench.events_for(DISPATCH_END)
     assert (end.get("tokens")["in"], end.get("tokens")["out"]) == (3_400, 100)
     assert transport.call_count == 2
+
+
+async def test_the_first_prompt_already_shows_the_handle_shape(bench):
+    """Shown only on a re-prompt, the shape cost compare-live-5 one re-prompt
+    per dispatch: the first answer, asked for "a handle", was prose."""
+    transport = ScriptedTransport([result(structured=GOOD_HANDLE)])
+    await run(bench, transport)
+    assert "ONLY a JSON object" in transport.calls[0][0]
