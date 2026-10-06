@@ -17,6 +17,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from statistics import median
 
 from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, ResultMessage, TextBlock
 
@@ -43,6 +44,7 @@ class Row:
     seconds: float = 0.0
     missing: list[str] = field(default_factory=list)
     note: str = ""
+    run: int = 0
 
     @property
     def correct(self) -> bool:
@@ -103,8 +105,27 @@ def table(rows: list[Row]) -> str:
         why = [r.note] if r.note else r.missing
         verdict = "是" if r.correct else f"否（{'；'.join(why)}）"
         peak = f"{'≈' if r.peak_estimated else ''}{r.peak:,}"
-        lines.append(f"| {r.name} | {verdict} | {peak} | {r.tokens_in:,} | "
+        name = f"{r.name} #{r.run}" if r.run else r.name
+        lines.append(f"| {name} | {verdict} | {peak} | {r.tokens_in:,} | "
                      f"{r.tokens_out:,} | {r.seconds:,.0f} |")
+    return "\n".join(lines)
+
+
+def summary(rows: list[Row]) -> str:
+    """Median and range per side. One run each was all the earlier figures
+    had, and a lane more or less moved a total by 10% (compare-live-5 vs 6)."""
+    lines = []
+    for name in dict.fromkeys(r.name for r in rows):
+        runs = [r for r in rows if r.name == name]
+        def spread(values: list[float]) -> str:
+            return f"{median(values):,.0f}（{min(values):,.0f}–{max(values):,.0f}）"
+        lines.append(
+            f"{name}：{len(runs)} 次，答對 {sum(r.correct for r in runs)}；"
+            f"峰值 {spread([r.peak for r in runs])}；"
+            f"總輸入 {spread([r.tokens_in for r in runs])}；"
+            f"總輸出 {spread([r.tokens_out for r in runs])}；"
+            f"秒 {spread([r.seconds for r in runs])}"
+        )
     return "\n".join(lines)
 
 
@@ -114,14 +135,24 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT / "compare")
     parser.add_argument("--job-id", default=f"compare-{int(time.time())}")
     parser.add_argument("--only", choices=("baseline", "harness"))
+    parser.add_argument("--runs", type=int, default=1,
+                        help="each side this many times; prints median and range")
     args = parser.parse_args(argv)
 
     rows = []
-    if args.only != "harness":
-        rows.append(asyncio.run(run_baseline(args.backend)))
-    if args.only != "baseline":
-        rows.append(asyncio.run(run_harness(args.root, args.backend, args.job_id)))
+    for i in range(1, args.runs + 1):
+        run = i if args.runs > 1 else 0
+        if args.only != "harness":
+            rows.append(asyncio.run(run_baseline(args.backend)))
+            rows[-1].run = run
+        if args.only != "baseline":
+            job_id = f"{args.job_id}-{i}" if run else args.job_id
+            rows.append(asyncio.run(run_harness(args.root, args.backend, job_id)))
+            rows[-1].run = run
+        print(f"run {i}/{args.runs} done", flush=True)
     print(table(rows))
+    if args.runs > 1:
+        print("\n" + summary(rows))
     return 0
 
 
