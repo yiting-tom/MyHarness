@@ -156,6 +156,9 @@ class Accumulated:
     estimated_tokens_in: int = 0
     usd: float = 0.0
     retry_statuses: list[int] = field(default_factory=list)
+    #: The CLI retried a request that got no HTTP status at all: it timed out
+    #: or the connection dropped. A backend problem, not the lane's tools.
+    saw_timeout: bool = False
     max_turns_hit: bool = False
     api_error_status: int | None = None
     terminal_reason: str | None = None
@@ -548,6 +551,8 @@ def _consume(message: Any, acc: Accumulated) -> None:
             status = (message.data or {}).get("error_status")
             if isinstance(status, int):
                 acc.retry_statuses.append(status)
+            else:
+                acc.saw_timeout = True
     elif isinstance(message, ResultMessage):
         acc.result = message
         acc.usage = dict(message.usage or acc.usage)

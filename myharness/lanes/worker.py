@@ -463,6 +463,11 @@ async def _attempt_all(
             carried_rows = acc.full_transcript
 
             if exc is not None:
+                # The real SDK raises on "Request timed out" rather than ending
+                # with is_error; cmp-complaints-1's d4 came this way and was
+                # filed as tool_failure.
+                if acc.saw_timeout and not acc.saw_transient:
+                    return acc, _timed_out(acc, toolbox)
                 status = _classify(acc, exc, profile)
                 if status is HandleStatus.BACKEND_UNAVAILABLE:
                     break  # fall through to the transient-retry loop
@@ -480,6 +485,8 @@ async def _attempt_all(
             # handle out of "API Error: Request rejected (429)" and re-prompting
             # would triple the load on a backend that is already refusing us.
             if acc.result is not None and acc.result.is_error:
+                if acc.saw_timeout and not acc.saw_transient:
+                    return acc, _timed_out(acc, toolbox)
                 if acc.saw_transient or acc.api_error_status in TRANSIENT_STATUSES:
                     break
                 return acc, _failure_from(
@@ -560,6 +567,19 @@ async def _finding_text(toolbox: WorkerToolbox, finding: str) -> str | None:
         )
     except (ArtifactError, ValueError):
         return None
+
+
+def _timed_out(acc: Accumulated, toolbox: WorkerToolbox) -> LaneHandle:
+    """A request that never answered. Not retried here: the CLI already did,
+    each try up to REQUEST_TIMEOUT_S. Filed as the backend's failure so the
+    orchestrator does not go looking at its tools."""
+    return failure_handle(
+        HandleStatus.BACKEND_UNAVAILABLE,
+        headline="後端請求逾時",
+        detail=(acc.text or "")[:200] or None,
+        partial=toolbox.last_finding,
+        suggest="稍後重派，或改用其他 backend profile",
+    )
 
 
 def _classify(acc: Accumulated, exc: BaseException, profile: BackendProfile) -> HandleStatus:

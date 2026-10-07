@@ -1372,3 +1372,25 @@ async def test_the_first_prompt_already_shows_the_handle_shape(bench):
     transport = ScriptedTransport([result(structured=GOOD_HANDLE)])
     await run(bench, transport)
     assert "ONLY a JSON object" in transport.calls[0][0]
+
+
+async def test_a_timed_out_request_is_the_backends_failure_not_the_tools(bench):
+    """cmp-complaints-1's d4: two status-less retries, "Request timed out", and
+    a handle that sent the orchestrator to check its tools."""
+    from claude_agent_sdk import SystemMessage
+
+    timeout = SystemMessage(subtype="api_retry", data={"error_status": None})
+    # Both endings occur: the SDK raises (as d4's did), or the run ends is_error.
+    for ending in ([RuntimeError("Request timed out")], [result(is_error=True)]):
+        transport = ScriptedTransport(
+            [timeout, timeout, assistant("Request timed out"), *ending])
+        handle = await run(bench, transport)
+        assert handle.status is HandleStatus.BACKEND_UNAVAILABLE, ending
+        assert transport.call_count == 1, "the CLI already retried; do not multiply it"
+
+
+def test_every_sdk_call_gets_a_request_timeout():
+    from myharness.backends.profile import REQUEST_TIMEOUT_S, registry
+
+    env = registry.get("anthropic").to_sdk_env()
+    assert env["API_TIMEOUT_MS"] == str(REQUEST_TIMEOUT_S * 1000)

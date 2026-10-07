@@ -21,6 +21,15 @@ from typing import Final
 #: How many times the CLI may retry internally before our gate takes over.
 SDK_INTERNAL_RETRIES: Final = 2
 
+#: Longest one model request may take. The CLI's own default is ten minutes,
+#: and with its retries a request that never answers holds a lane for half an
+#: hour: cmp-complaints-1's d4 sat 24 minutes on "Request timed out" and the
+#: job ran into its deadline behind it. It bounds the wait for a response to
+#: start, not a response that is streaming (measured: a 2 s limit let a 27 s
+#: reply finish), so two minutes covers a long prefill; with the CLI's retries
+#: a dead endpoint now costs about six. A profile can override it in extra_env.
+REQUEST_TIMEOUT_S: Final = 120
+
 
 class BackendCapability(StrEnum):
     """What a backend can enforce for us, as opposed to merely ask for."""
@@ -140,6 +149,7 @@ class BackendProfile:
         # burning minutes inside a single call where the harness can neither see
         # nor coordinate it. Cap it low so the shared BackendGate owns the policy.
         env.setdefault("CLAUDE_CODE_MAX_RETRIES", str(SDK_INTERNAL_RETRIES))
+        env.setdefault("API_TIMEOUT_MS", str(REQUEST_TIMEOUT_S * 1000))
         token = self.credential()
         if token:
             env["ANTHROPIC_AUTH_TOKEN"] = token
