@@ -416,3 +416,14 @@ class TestToolSchemas:
 
         assert probe.input_schema is _QUERY_SCHEMA
         create_sdk_mcp_server(name="probe", version="1", tools=[probe])
+
+
+class TestReadMode:
+    async def test_every_row_comes_back_one_per_line(self, bench):
+        """The stats table caps at 50 rows; reading a range must not."""
+        toolbox, ids, _ = bench
+        out = await call(toolbox, "duckdb_query", artifacts=[str(ids["txns"].id)],
+                         sql="SELECT * FROM txns_csv", read=True)
+        body = [line for line in out.split("\n\n")[-1].splitlines() if " | " in line]
+        assert len(body) == 21, "header and all 20 rows"
+        assert "more exist" not in out

@@ -1394,3 +1394,28 @@ def test_every_sdk_call_gets_a_request_timeout():
 
     env = registry.get("anthropic").to_sdk_env()
     assert env["API_TIMEOUT_MS"] == str(REQUEST_TIMEOUT_S * 1000)
+
+
+async def test_a_stalled_stream_is_abandoned_and_closed(bench, monkeypatch):
+    """cmp-complaints-2's d17 heard nothing for 34 minutes; the CLI cannot
+    time out a custom endpoint's stream, so the lane does."""
+    import asyncio
+
+    from myharness.lanes import worker as W
+
+    monkeypatch.setattr(W, "LANE_IDLE_TIMEOUT_S", 0.05)
+    closed = []
+
+    class Stalling:
+        def stream(self, prompt, options):
+            async def gen():
+                try:
+                    yield assistant("開始")
+                    await asyncio.sleep(3600)
+                finally:
+                    closed.append(True)
+            return gen()
+
+    handle = await run(bench, Stalling())
+    assert handle.status is HandleStatus.BACKEND_UNAVAILABLE
+    assert closed, "the stream (and with it the CLI subprocess) is closed"

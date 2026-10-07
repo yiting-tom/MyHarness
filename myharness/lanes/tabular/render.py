@@ -91,6 +91,47 @@ def render_rows(
     return Rendered(text, len(kept), row_limited, char_limited)
 
 
+#: A row in read mode may be a paragraph; past this it is a document.
+READ_CELL_CHARS = 2_000
+
+
+def render_lines(
+    columns: Sequence[str],
+    rows: Sequence[Sequence[Any]],
+    *,
+    max_chars: int,
+    more_available: bool = False,
+) -> Rendered:
+    """One row per line, `a | b | c`, for reading content rather than counting.
+
+    The aligned table pads every cell to its column's widest, which for free
+    text is mostly spaces: cmp-complaints-2's lanes got about thirty complaints
+    in a 4,000-character result, paged through 250 ten at a time, and ran out
+    of turns. Here the cap is the lane's reading budget, not a stats table's.
+    """
+    if not columns:
+        return Rendered("(no columns)", 0, False, False)
+    lines = [" | ".join(map(str, columns))]
+    used, kept = len(lines[0]), 0
+    for row in rows:
+        line = " | ".join(
+            _NULL if v is None else str(v).replace("\n", " ")[:READ_CELL_CHARS] for v in row)
+        if used + len(line) + 1 > max_chars:
+            break
+        lines.append(line)
+        used += len(line) + 1
+        kept += 1
+    char_limited = kept < len(rows)
+    text = "\n".join(lines) if kept or not rows else lines[0]
+    if not rows:
+        text += "\n(0 rows)"
+    if char_limited or more_available:
+        last = " | ".join(map(str, rows[kept - 1]))[:80] if kept else ""
+        text += (f"\n... {kept} rows shown, more exist. Continue after the last "
+                 f"row shown{f' ({last})' if last else ''} with a narrower range.")
+    return Rendered(text, kept, more_available, char_limited)
+
+
 def _cell(value: Any) -> str:
     if value is None:
         return _NULL
@@ -120,5 +161,6 @@ __all__ = [
     "DEFAULT_MAX_ROWS",
     "MAX_CELL_CHARS",
     "Rendered",
+    "render_lines",
     "render_rows",
 ]

@@ -12,6 +12,8 @@ to do about them (DESIGN.md decision #12).
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -181,8 +183,17 @@ async def _run_once(
         return acc, _LocalBudgetExceeded()
 
     options = _options(request, profile, toolbox, charter=charter, enforce_schema=enforce_schema)
+    stream = transport.stream(prompt, options).__aiter__()
     try:
-        async for message in transport.stream(prompt, options):
+        while True:
+            try:
+                async with asyncio.timeout(LANE_IDLE_TIMEOUT_S):
+                    message = await anext(stream)
+            except StopAsyncIteration:
+                break
+            except TimeoutError:
+                acc.saw_timeout = True
+                raise _Stalled(f"no message for {LANE_IDLE_TIMEOUT_S:.0f}s") from None
             _consume(message, acc)
             if toolbox.on_step is not None:
                 step = step_event(message, acc, budget)
@@ -211,7 +222,25 @@ async def _run_once(
                 return acc, _LocalBudgetExceeded()
     except BaseException as exc:  # noqa: BLE001 - classified below, never re-raised
         return acc, exc
+    finally:
+        # Ends the CLI subprocess too; a stalled one would otherwise hold its
+        # request open on the backend after the lane has given up on it.
+        with contextlib.suppress(Exception):
+            await stream.aclose()
     return acc, None
+
+
+#: Longest a lane waits for the next message before giving up on the request.
+#: The CLI cannot do this against a custom endpoint: its stream-idle limit is
+#: floored at five minutes and its byte watchdog only arms for first-party
+#: hosts. cmp-complaints-2's d17 sent a 70k-token request to self-hosted and
+#: heard nothing for 34 minutes. Messages arrive a block at a time, so a long
+#: finding or a long think is minutes of silence that is not a stall.
+LANE_IDLE_TIMEOUT_S = 600.0
+
+
+class _Stalled(Exception):
+    """No message from the backend for LANE_IDLE_TIMEOUT_S."""
 
 
 class _LocalBudgetExceeded(Exception):

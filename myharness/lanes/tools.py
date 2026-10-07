@@ -57,6 +57,13 @@ _QUERY_SCHEMA: dict[str, Any] = {
                            "to a new blob under this lane instead of being "
                            "returned. Use it for anything large.",
         },
+        "read": {
+            "type": "boolean",
+            "description": "Optional. True when you must read the content itself -- "
+                           "free text you have to judge row by row. Rows come back "
+                           "one per line with a much larger limit. Select only the "
+                           "columns you need and one range at a time.",
+        },
     },
     "required": ["artifacts", "sql"],
 }
@@ -261,6 +268,9 @@ class WorkerToolbox:
             grants=self.grants,
             produced_by=f"lane:{self.lane.id}",
             derived_namespace=self.lane.namespace,
+            # The same reading budget read_note has, in characters: CJK is
+            # about a token a character, ASCII about four, so two is between.
+            read_max_chars=self.read_budget * 2,
         )
 
     @property
@@ -532,6 +542,7 @@ class WorkerToolbox:
                 ids,
                 str(args.get("sql", "")),
                 into=str(args.get("into") or "").strip(),
+                read=bool(args.get("read")),
             )
             if isinstance(result, QueryFailure):
                 return self._result(result.text())

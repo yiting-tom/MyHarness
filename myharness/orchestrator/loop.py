@@ -99,6 +99,20 @@ RESUME_NOTICE = """\
 #: Enough for the orchestrator to plan with; the list is context it pays for.
 MAX_LISTED_BLOBS = 20
 
+#: How much one lane should read into its context in one dispatch. A rule, not
+#: a measurement of any one model: it fits a 64k window with room for the
+#: charter, the tools and the reasoning. cmp-complaints-1's orchestrator was
+#: told byte counts and nothing to compare them with, and sent one lane at
+#: 2,500 complaints that had to be read.
+LANE_READ_TOKENS = 20_000
+
+
+def estimated_tokens(n_bytes: int) -> int:
+    """Rough tokens for a blob read whole. UTF-8 CJK is three bytes a character
+    and about a token each; ASCII runs nearer four bytes a token. Dividing by
+    three errs high, the safe side for deciding whether to split."""
+    return n_bytes // 3
+
 KICKOFF = """\
 你負責統籌一項資料分析工作。
 
@@ -119,6 +133,14 @@ KICKOFF = """\
 2. 用 dispatch 派工 —— 一次派多個，它會立刻返回，之後用 await_tasks 一起收割。
 3. 需要細節時用 peek，但它有整個 job 的預算上限；預算緊時改派 lane 去讀。
 4. 最後派一條 synthesis lane 寫報告，再用 finish 收工。**不要自己寫報告。**
+
+# 資料太大時切段
+一條 lane 一次大約只能讀 {lane_read_tokens:,} token 的內容進 context。
+- 用 SQL 統計就能回答的（計數、平均、分組），不必讀內容，一條 lane 就夠。
+- 必須逐筆讀懂的內容（例如自由文字，要判斷每一則在說什麼），
+  如果超過這個量，就**切段**：按列範圍（例如某個 id 欄位的區間）派多條 lane，
+  每條只讀自己那一段、回報那一段的結果，最後再彙整。
+  不要讓一條 lane 用關鍵字規則代替閱讀 —— 有些內容提到某個詞，意思卻相反。
 
 你看不到原始資料，也不需要看。你的工作是判斷與調度。
 
@@ -252,11 +274,7 @@ class OrchestratorLoop:
         if (await read_plan(self.runner.store, spec.job_id))[0] is None:
             await write_plan(self.runner.store, spec.job_id, initial_plan(spec.goal))
 
-        prompt = KICKOFF.format(
-            goal=spec.goal,
-            available_data=await self._available_data(),
-            lane_types=self.lanes.describe_types(),
-        )
+        prompt = await self._kickoff()
         reason = "finished"
         # The wall-clock ceiling is soft: it asks for wrap-up at the next
         # await_tasks. A request that never returns never reaches one, so the
@@ -463,6 +481,14 @@ class OrchestratorLoop:
         # report success. Idle turns and the turn cap are what bound this.
         return CONTINUE_NUDGE
 
+    async def _kickoff(self) -> str:
+        return KICKOFF.format(
+            goal=self.runner.spec.goal,
+            available_data=await self._available_data(),
+            lane_types=self.lanes.describe_types(),
+            lane_read_tokens=LANE_READ_TOKENS,
+        )
+
     async def _available_data(self) -> str:
         """The blobs already in the job, by id.
 
@@ -483,7 +509,8 @@ class OrchestratorLoop:
             schema = meta.schema or {}
             columns = schema.get("columns")
             detail = f"，欄位 {', '.join(map(str, columns))}" if columns else ""
-            lines.append(f"- `{meta.id}`（{meta.bytes:,} bytes{detail}）")
+            lines.append(f"- `{meta.id}`（{meta.bytes:,} bytes，整份讀進 context 約 "
+                         f"{estimated_tokens(meta.bytes):,} token{detail}）")
         if len(blobs) > MAX_LISTED_BLOBS:
             lines.append(f"- …另有 {len(blobs) - MAX_LISTED_BLOBS} 份")
         lines.append(

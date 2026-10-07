@@ -122,3 +122,17 @@ class TestAlignment:
 
 def test_default_char_limit_is_a_context_budget_not_a_page_size():
     assert 1000 <= DEFAULT_MAX_CHARS <= 8000
+
+
+def test_read_mode_packs_text_without_padding():
+    """cmp-complaints-2: padded to the widest cell, a 4,000-char result held
+    about thirty complaints; a lane paged 250 ten at a time and ran dry."""
+    from myharness.lanes.tabular.render import render_lines
+
+    rows = [(f"C{i:05d}", "短" if i % 2 else "長" * 60) for i in range(100)]
+    out = render_lines(["id", "text"], rows, max_chars=10_000)
+    assert out.rows_shown == 100 and not out.truncated
+    assert "  " not in out.text, "no padding"
+
+    cut = render_lines(["id", "text"], rows, max_chars=500)
+    assert cut.truncated and "Continue after" in cut.text

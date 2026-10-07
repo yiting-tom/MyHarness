@@ -243,11 +243,18 @@ class TestTheOrchestratorKnowsWhatDataExists:
         assert "另有 30 份" in listed
 
     async def test_it_reaches_the_kickoff_prompt(self, tmp_path: Path):
-        from myharness.orchestrator.loop import KICKOFF
-
         loop = await self._loop_for(tmp_path, [("raw/txn.csv", b"a\n1\n", {})])
-        prompt = KICKOFF.format(
-            goal="分析", available_data=await loop._available_data(),
-            lane_types="(none)",
-        )
+        prompt = await loop._kickoff()
         assert "j/blob/raw/txn.csv" in prompt
+
+    async def test_it_says_how_big_each_blob_is_against_what_a_lane_reads(
+        self, tmp_path: Path
+    ):
+        """cmp-complaints-1's orchestrator had byte counts and nothing to
+        compare them with, and sent one lane at 2,500 texts to be read."""
+        from myharness.orchestrator.loop import LANE_READ_TOKENS
+
+        loop = await self._loop_for(tmp_path, [("raw/c.csv", b"x" * 90_000, {})])
+        prompt = await loop._kickoff()
+        assert "約 30,000 token" in prompt
+        assert f"{LANE_READ_TOKENS:,} token" in prompt and "切段" in prompt

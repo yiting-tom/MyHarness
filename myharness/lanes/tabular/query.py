@@ -34,6 +34,7 @@ from myharness.lanes.tabular.render import (
     DEFAULT_MAX_CHARS,
     DEFAULT_MAX_ROWS,
     Rendered,
+    render_lines,
     render_rows,
 )
 from myharness.lanes.tabular.sandbox import (
@@ -119,8 +120,10 @@ class QueryRunner:
         derived_namespace: str,
         max_rows: int = DEFAULT_MAX_ROWS,
         max_chars: int = DEFAULT_MAX_CHARS,
+        read_max_chars: int = DEFAULT_MAX_CHARS,
         timeout_s: float = DEFAULT_TIMEOUT_S,
     ) -> None:
+        self._read_max_chars = read_max_chars
         self._store = store
         self._job_id = job_id
         self._grants = grants
@@ -131,7 +134,7 @@ class QueryRunner:
         self._timeout_s = timeout_s
 
     async def query(
-        self, artifacts: Sequence[str], sql: str, *, into: str = ""
+        self, artifacts: Sequence[str], sql: str, *, into: str = "", read: bool = False
     ) -> QueryResult | IntoResult | QueryFailure:
         if not artifacts:
             return QueryFailure(
@@ -152,7 +155,7 @@ class QueryRunner:
             try:
                 async with _INGEST_SLOTS:
                     outcome = await asyncio.to_thread(
-                        self._execute, prepared, sql, bindings, into, scratch
+                        self._execute, prepared, sql, bindings, into, scratch, read
                     )
             except SandboxError as exc:
                 return QueryFailure("ingest_failed", str(exc), bindings)
@@ -237,21 +240,28 @@ class QueryRunner:
     # ---- execution: inside a thread, behind the sandbox ---------------------
 
     def _execute(
-        self, prepared: _Prepared, sql: str, bindings: str, into: str, scratch: Path
+        self, prepared: _Prepared, sql: str, bindings: str, into: str, scratch: Path,
+        read: bool = False,
     ) -> QueryResult | _PendingInto | QueryFailure:
         with sandboxed(prepared.ingests) as conn:
             if into:
                 return self._run_into(conn, sql, bindings, into, scratch)
             started = time.monotonic()
+            # Read mode is bounded by characters alone; one char a row is the
+            # most rows that could ever fit.
+            fetch = self._read_max_chars + 1 if read else self._max_rows + 1
             try:
                 columns, rows = run_guarded(
-                    conn, sql,
-                    timeout_s=self._timeout_s,
-                    fetch=self._max_rows + 1,
+                    conn, sql, timeout_s=self._timeout_s, fetch=fetch,
                 )
             except duckdb.Error as exc:
                 return self._sql_failure(exc, bindings)
             elapsed = time.monotonic() - started
+            if read:
+                return QueryResult(render_lines(
+                    columns, rows, max_chars=self._read_max_chars,
+                    more_available=len(rows) >= fetch,
+                ), bindings, elapsed)
             rendered = render_rows(
                 columns, rows,
                 max_rows=self._max_rows,
