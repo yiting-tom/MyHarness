@@ -37,6 +37,14 @@ REQUEST_TIMEOUT_S: Final = 120
 #: writes more than a finding per reply.
 SDK_MAX_OUTPUT_TOKENS: Final = 8_192
 
+#: The window the CLI assumes for a model it does not know. Its auto-compact
+#: threshold is a share of this, so on a smaller model it never fires.
+CLI_ASSUMED_WINDOW: Final = 200_000
+#: Where in a backend's real window the CLI should compact. Measured on
+#: self-hosted: CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=10 compacted a 20,499-token
+#: session to 1,078, i.e. the CLI took the window to be 200k.
+COMPACT_AT: Final = 0.7
+
 
 class BackendCapability(StrEnum):
     """What a backend can enforce for us, as opposed to merely ask for."""
@@ -120,6 +128,11 @@ class BackendProfile:
     extra_env: dict[str, str] = field(default_factory=dict)
     #: Set only when this endpoint can be called without the SDK. See WireFormat.
     direct_wire: WireFormat | None = None
+    #: The model's context window. The harness reads it to size what a lane
+    #: reads and when the orchestrator hands off; the CLI is told it through
+    #: the auto-compact threshold, since it cannot be told the window itself
+    #: below 100k (CLAUDE_CODE_AUTO_COMPACT_WINDOW is floored there).
+    context_window: int = CLI_ASSUMED_WINDOW
 
     @property
     def has_direct_path(self) -> bool:
@@ -158,6 +171,11 @@ class BackendProfile:
         env.setdefault("CLAUDE_CODE_MAX_RETRIES", str(SDK_INTERNAL_RETRIES))
         env.setdefault("API_TIMEOUT_MS", str(REQUEST_TIMEOUT_S * 1000))
         env.setdefault("CLAUDE_CODE_MAX_OUTPUT_TOKENS", str(SDK_MAX_OUTPUT_TOKENS))
+        if self.context_window < CLI_ASSUMED_WINDOW:
+            # Without this a 64k model fills up, is refused with a 400, and
+            # never compacts: the CLI is waiting for 200k.
+            pct = 100 * COMPACT_AT * self.context_window / CLI_ASSUMED_WINDOW
+            env.setdefault("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE", f"{pct:.1f}")
         token = self.credential()
         if token:
             env["ANTHROPIC_AUTH_TOKEN"] = token
@@ -224,6 +242,7 @@ SELF_HOSTED: Final = BackendProfile(
 #: repository.
 PROXY_BASE_URL_ENV: Final = "HARNESS_PROXY_BASE_URL"
 PROXY_MODEL_ENV: Final = "HARNESS_PROXY_MODEL"
+PROXY_CONTEXT_WINDOW_ENV: Final = "HARNESS_PROXY_CONTEXT_WINDOW"
 
 
 def self_hosted_from_env() -> BackendProfile | None:
@@ -247,6 +266,7 @@ def self_hosted_from_env() -> BackendProfile | None:
         models=dict.fromkeys(ModelTier, model),
         base_url=base_url,
         auth_token_env="HARNESS_PROXY_KEY" if os.environ.get("HARNESS_PROXY_KEY") else None,
+        context_window=int(os.environ.get(PROXY_CONTEXT_WINDOW_ENV) or CLI_ASSUMED_WINDOW),
     )
 
 #: Env vars for an OpenAI-compatible endpoint reached without the SDK.

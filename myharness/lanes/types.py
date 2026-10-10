@@ -20,8 +20,18 @@ from myharness.backends.profile import BackendProfile, ModelTier, registry
 
 #: Defaults; design.md leaves these open pending real calibration data.
 DEFAULT_STATE_MAX_TOKENS: Final = 8_000
-DEFAULT_TOKEN_BUDGET: Final = 150_000
-DEFAULT_MAX_TURNS: Final = 25
+#: What a dispatch may spend in all, across every request it sends. A cost
+#: ceiling, not a context limit: auto-compact keeps each request inside the
+#: model's window (backends/profile.py, COMPACT_AT), so a lane can work past
+#: one window's worth. At 150k a lane that read one 64k-model segment and
+#: judged it ran dry (cmp-complaints-6); the target is 200k models working on
+#: more than 200k.
+DEFAULT_TOKEN_BUDGET: Final = 500_000
+DEFAULT_MAX_TURNS: Final = 40
+#: The analyst reads and queries; the support lanes (critic, synthesizer) read
+#: findings and write one.
+LANE_BUDGET_ANALYST: Final = 1_000_000
+LANE_BUDGET_SUPPORT: Final = 400_000
 DEFAULT_INPUT_TOKEN_BUDGET: Final = 12_000
 
 

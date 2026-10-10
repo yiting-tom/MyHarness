@@ -23,7 +23,12 @@ from mcp.server import NotificationOptions, Server
 from mcp.server.models import InitializationOptions
 from mcp.server.stdio import stdio_server
 
-from myharness.lanes.types import LaneRegistry, LaneType
+from myharness.lanes.types import (
+    LANE_BUDGET_ANALYST,
+    LANE_BUDGET_SUPPORT,
+    LaneRegistry,
+    LaneType,
+)
 from myharness.local_layout import DEFAULT_ROOT
 from myharness.mcp.service import AnalysisService
 from myharness.mcp.tools import TOOL_DESCRIPTIONS, TOOL_SCHEMAS, build_handlers, call
@@ -49,7 +54,7 @@ def default_lanes(
             tools=("read_note", "write_finding", "update_state",
                    "localize_blob", "inspect_blob", "duckdb_query"),
             model_tier="strong", backend=backend,
-            token_budget=150_000, max_turns=12, state_max_tokens=2_000,
+            token_budget=LANE_BUDGET_ANALYST, max_turns=40, state_max_tokens=2_000,
             description="表格與交易資料的統計分析；可直接查詢大型 CSV/Parquet",
         ),
         LaneType(
@@ -62,7 +67,7 @@ def default_lanes(
             # stands on the evidence it presents -- which is the job.
             tools=("read_note", "write_finding"),
             model_tier="strong", backend=backend,
-            token_budget=150_000, max_turns=8, state_max_tokens=1_000,
+            token_budget=LANE_BUDGET_SUPPORT, max_turns=20, state_max_tokens=1_000,
             description=(
                 "讀其他 lane 的 finding，找出沒有樣本數支撐的結論、"
                 "大於證據的宣稱、未經檢驗的假設。不查資料，只檢查推論。"
@@ -74,7 +79,7 @@ def default_lanes(
             charter_path=charters / "synthesizer.md",
             tools=("read_note", "write_finding"),
             model_tier="strong", backend=backend,
-            token_budget=150_000, max_turns=8, state_max_tokens=1_000,
+            token_budget=LANE_BUDGET_SUPPORT, max_turns=20, state_max_tokens=1_000,
             description="讀取多份 finding 並收斂成一份給人閱讀的報告",
         ),
     )

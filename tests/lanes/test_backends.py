@@ -155,3 +155,26 @@ async def test_local_token_ceiling_stops_a_backend_without_api_budget(bench):
     )
     assert handle.status is HandleStatus.BUDGET_EXCEEDED
     assert transport.call_count == 1, "a local ceiling is a semantic failure, not a retry"
+
+
+def test_a_smaller_window_moves_the_clis_compact_threshold():
+    """The CLI assumes 200k for a model it does not know and would never
+    compact a 64k one; the threshold is scaled into the real window."""
+    from dataclasses import replace
+
+    from myharness.backends.profile import COMPACT_AT, SELF_HOSTED
+
+    keyless = replace(SELF_HOSTED, auth_token_env=None)
+    small = replace(keyless, context_window=65_536).to_sdk_env()
+    pct = float(small["CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"])
+    assert abs(pct / 100 * 200_000 - COMPACT_AT * 65_536) < 200
+    assert "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE" not in keyless.to_sdk_env()
+
+
+def test_the_window_comes_from_the_environment(monkeypatch):
+    from myharness.backends.profile import self_hosted_from_env
+
+    monkeypatch.setenv("HARNESS_PROXY_BASE_URL", "http://h:4000")
+    monkeypatch.setenv("HARNESS_PROXY_MODEL", "m")
+    monkeypatch.setenv("HARNESS_PROXY_CONTEXT_WINDOW", "65536")
+    assert self_hosted_from_env().context_window == 65_536

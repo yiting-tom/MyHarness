@@ -27,7 +27,12 @@ from myharness.events.log import LocalEventLog
 from myharness.events.query import summarize
 from myharness.jobs.runner import JobRunner
 from myharness.jobs.spec import JobSpec
-from myharness.lanes.types import LaneRegistry, LaneType
+from myharness.lanes.types import (
+    LANE_BUDGET_ANALYST,
+    LANE_BUDGET_SUPPORT,
+    LaneRegistry,
+    LaneType,
+)
 from myharness.local_layout import DEFAULT_ROOT
 from myharness.orchestrator.delivery import Delivery, build_delivery
 from myharness.orchestrator.loop import LoopOutcome, OrchestratorLoop
@@ -193,7 +198,7 @@ def complaints_task() -> GoldenTask:
         Blob("raw/complaints", COMPLAINTS_DIR / "complaints.csv",
              ("complaint_id", "account", "txn_id", "filed", "text")),
     ), complaints_truth().missing_from,
-        # Reading 2,500 texts at LANE_READ_TOKENS a lane is a dozen dispatches
+        # Reading 2,500 texts at LANE_READ_SHARE a lane is a dozen dispatches
         # before any synthesis; at the golden twelve, cmp-complaints-7 went to
         # wrap-up having read 550.
         spec={"max_dispatches": 30, "max_wall_clock_s": 3600.0})
@@ -221,7 +226,7 @@ def lane_types(
             name="tabular-analyst",
             charter_path=charters / "tabular-analyst.md",
             tools=ANALYST_TOOLS, model_tier="strong", backend=backend,
-            token_budget=150_000, max_turns=12, state_max_tokens=2_000,
+            token_budget=LANE_BUDGET_ANALYST, max_turns=40, state_max_tokens=2_000,
             description="表格與交易資料的統計分析；可直接處理大型 CSV",
         ),
         LaneType(
@@ -234,7 +239,7 @@ def lane_types(
             # stands on the evidence it presents -- which is the job.
             tools=("read_note", "write_finding"),
             model_tier="strong", backend=backend,
-            token_budget=150_000, max_turns=8, state_max_tokens=1_000,
+            token_budget=LANE_BUDGET_SUPPORT, max_turns=20, state_max_tokens=1_000,
             description=(
                 "讀其他 lane 的 finding，找出沒有樣本數支撐的結論、"
                 "大於證據的宣稱、未經檢驗的假設。不查資料，只檢查推論。"
@@ -245,7 +250,7 @@ def lane_types(
             name="synthesizer",
             charter_path=charters / "synthesizer.md",
             tools=("read_note", "write_finding"), model_tier="strong", backend=backend,
-            token_budget=150_000, max_turns=8, state_max_tokens=1_000,
+            token_budget=LANE_BUDGET_SUPPORT, max_turns=20, state_max_tokens=1_000,
             description="讀取多份 finding 並收斂成一份給人閱讀的報告",
         ),
     )

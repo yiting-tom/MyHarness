@@ -99,14 +99,13 @@ RESUME_NOTICE = """\
 #: Enough for the orchestrator to plan with; the list is context it pays for.
 MAX_LISTED_BLOBS = 20
 
-#: How much one lane should read into its context in one dispatch. A rule, not
-#: a measurement of any one model. cmp-complaints-1's orchestrator was told
-#: byte counts and nothing to compare them with, and sent one lane at 2,500
-#: complaints that had to be read. 20k then proved too much: what a lane reads
-#: is re-sent on every later turn, and a lane takes six to nine more to judge
-#: and write, so cmp-complaints-6's six 416-row segments each blew a 150k
-#: budget, where cmp-complaints-5's 250-row ones mostly finished near 100k.
-LANE_READ_TOKENS = 10_000
+#: How much one lane should read into its context in one dispatch, as a share
+#: of the lanes' model window: 50k on a 200k model, 16k on a 64k one.
+#: cmp-complaints-1's orchestrator had byte counts and nothing to compare them
+#: with, and sent one lane at 2,500 complaints that had to be read. What a lane
+#: reads stays in its context while it judges and writes; a quarter leaves the
+#: rest for that, and auto-compact (profile.COMPACT_AT) for what overflows.
+LANE_READ_SHARE = 0.25
 
 
 def estimated_tokens(n_bytes: int) -> int:
@@ -251,6 +250,16 @@ class OrchestratorLoop:
     def profile(self) -> BackendProfile:
         return backends.get(self.backend)
 
+    def lane_read_tokens(self) -> int:
+        """LANE_READ_SHARE of the smallest window any lane type runs on."""
+        windows = []
+        for name in self.lanes.type_names():
+            try:
+                windows.append(backends.get(self.lanes.get_type(name).backend).context_window)
+            except Exception:  # noqa: BLE001 - an unregistered backend fails at dispatch
+                continue
+        return int(min(windows or [self.profile.context_window]) * LANE_READ_SHARE)
+
     def _options(self) -> ClaudeAgentOptions:
         assert self.tools is not None
         return ClaudeAgentOptions(
@@ -335,9 +344,13 @@ class OrchestratorLoop:
         """Run one conversation. Returns True if it ended in a handoff."""
         assert self.tools is not None
         spec = self.runner.spec
-        threshold = spec.handoff_threshold_tokens
+        # The spec's window is a default; the model's is the fact. On a 64k
+        # backend the spec's 196k put the handoff where the session had long
+        # since been refused.
+        window = min(spec.context_window, self.profile.context_window)
+        threshold = int(window * spec.handoff_ratio)
 
-        async with self.sessions.open(self._options(), limit=spec.context_window) as session:
+        async with self.sessions.open(self._options(), limit=window) as session:
             prompt: str | None = first_prompt
             idle_turns = 0
             while prompt is not None:
@@ -490,7 +503,7 @@ class OrchestratorLoop:
             goal=self.runner.spec.goal,
             available_data=await self._available_data(),
             lane_types=self.lanes.describe_types(),
-            lane_read_tokens=LANE_READ_TOKENS,
+            lane_read_tokens=self.lane_read_tokens(),
         )
 
     async def _available_data(self) -> str:

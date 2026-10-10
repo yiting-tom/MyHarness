@@ -252,9 +252,7 @@ class TestTheOrchestratorKnowsWhatDataExists:
     ):
         """cmp-complaints-1's orchestrator had byte counts and nothing to
         compare them with, and sent one lane at 2,500 texts to be read."""
-        from myharness.orchestrator.loop import LANE_READ_TOKENS
-
         loop = await self._loop_for(tmp_path, [("raw/c.csv", b"x" * 90_000, {})])
         prompt = await loop._kickoff()
         assert "約 30,000 token" in prompt
-        assert f"{LANE_READ_TOKENS:,} token" in prompt and "切段" in prompt
+        assert f"{loop.lane_read_tokens():,} token" in prompt and "切段" in prompt
