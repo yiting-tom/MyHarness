@@ -100,11 +100,13 @@ RESUME_NOTICE = """\
 MAX_LISTED_BLOBS = 20
 
 #: How much one lane should read into its context in one dispatch. A rule, not
-#: a measurement of any one model: it fits a 64k window with room for the
-#: charter, the tools and the reasoning. cmp-complaints-1's orchestrator was
-#: told byte counts and nothing to compare them with, and sent one lane at
-#: 2,500 complaints that had to be read.
-LANE_READ_TOKENS = 20_000
+#: a measurement of any one model. cmp-complaints-1's orchestrator was told
+#: byte counts and nothing to compare them with, and sent one lane at 2,500
+#: complaints that had to be read. 20k then proved too much: what a lane reads
+#: is re-sent on every later turn, and a lane takes six to nine more to judge
+#: and write, so cmp-complaints-6's six 416-row segments each blew a 150k
+#: budget, where cmp-complaints-5's 250-row ones mostly finished near 100k.
+LANE_READ_TOKENS = 10_000
 
 
 def estimated_tokens(n_bytes: int) -> int:
