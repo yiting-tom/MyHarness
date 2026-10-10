@@ -135,6 +135,8 @@ KICKOFF = """\
 2. 用 dispatch 派工 —— 一次派多個，它會立刻返回，之後用 await_tasks 一起收割。
 3. 需要細節時用 peek，但它有整個 job 的預算上限；預算緊時改派 lane 去讀。
 4. 最後派一條 synthesis lane 寫報告，再用 finish 收工。**不要自己寫報告。**
+   synthesis lane 不能查原始資料，它讀的是 finding：
+   dispatch 時把各 lane 回報的 finding id 放進 inputs。
 
 # 資料太大時切段
 一條 lane 一次大約只能讀 {lane_read_tokens:,} token 的內容進 context。

@@ -68,3 +68,25 @@ def test_naming_every_channel_is_not_an_answer():
     truth = ComplaintsTruth(569, "high", "web")
     assert truth.missing_from("web、app、atm、branch 都有，high 風險最多，共 569 則") == [
         "ANSWER line"]
+
+
+async def test_a_task_raises_the_job_bounds(tmp_path, monkeypatch):
+    """The complaints task needs more than the golden twelve dispatches; a
+    task's bounds and the defaults must merge, not collide."""
+    from myharness import goldens
+
+    seen = {}
+
+    class Stop(Exception):
+        pass
+
+    def capture(spec, **_):
+        seen["spec"] = spec
+        raise Stop
+
+    monkeypatch.setattr(goldens, "JobRunner", capture)
+    with pytest.raises(Stop):
+        await goldens.run_golden(tmp_path, task=goldens.complaints_task())
+    assert seen["spec"].max_dispatches == 30
+    assert seen["spec"].max_wall_clock_s == 3600.0
+    assert seen["spec"].question_quota == 2

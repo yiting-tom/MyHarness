@@ -16,7 +16,7 @@ import json
 import re
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -104,6 +104,8 @@ class GoldenTask:
     blobs: tuple[Blob, ...]
     #: What the report is missing; empty means answered.
     check: Callable[[str], list[str]]
+    #: JobSpec fields this task needs beyond the golden defaults.
+    spec: dict[str, Any] = field(default_factory=dict)
 
 
 TXN_BLOB = Blob("raw/txn-2024", GOLDEN_CSV, ("txn_id", "ts", "account", "amount", "channel"))
@@ -190,7 +192,11 @@ def complaints_task() -> GoldenTask:
         Blob("raw/accounts", COMPLAINTS_DIR / "accounts.csv", ("account", "kyc_risk", "region")),
         Blob("raw/complaints", COMPLAINTS_DIR / "complaints.csv",
              ("complaint_id", "account", "txn_id", "filed", "text")),
-    ), complaints_truth().missing_from)
+    ), complaints_truth().missing_from,
+        # Reading 2,500 texts at LANE_READ_TOKENS a lane is a dozen dispatches
+        # before any synthesis; at the golden twelve, cmp-complaints-7 went to
+        # wrap-up having read 550.
+        spec={"max_dispatches": 30, "max_wall_clock_s": 3600.0})
 
 
 TASKS: dict[str, Callable[[], GoldenTask]] = {"txn": txn_task, "complaints": complaints_task}
@@ -301,12 +307,10 @@ async def run_golden(
     events = LocalEventLog(root)
 
     ids = await put_task_blobs(store, job_id, task)
-    spec = JobSpec(
-        job_id=job_id, goal=f"{task.goal}\n\n{available(ids)}",
-        max_dispatches=12, max_budget_usd=1.0, max_wall_clock_s=1800.0,
-        peek_budget_tokens=8_000, question_quota=2,
-        **(spec_overrides or {}),
-    )
+    bounds = {"max_dispatches": 12, "max_budget_usd": 1.0, "max_wall_clock_s": 1800.0,
+              "peek_budget_tokens": 8_000, "question_quota": 2,
+              **task.spec, **(spec_overrides or {})}
+    spec = JobSpec(job_id=job_id, goal=f"{task.goal}\n\n{available(ids)}", **bounds)
     runner = JobRunner(spec, store=store, event_log=events)
     loop = OrchestratorLoop(
         runner=runner, lanes=lane_types(charters, backend=backend), backend=backend

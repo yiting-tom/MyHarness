@@ -17,7 +17,7 @@ import math
 import re
 from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from claude_agent_sdk import ToolAnnotations, create_sdk_mcp_server, tool
@@ -149,6 +149,27 @@ HANDLE_ONLY_SHUT: frozenset[str] = frozenset({
 #: Longest a finding's name may be. Names appear in artifact ids, grant lists
 #: and the flow graph; a sentence there is unreadable everywhere at once.
 MAX_FINDING_NAME_CHARS = 60
+
+
+def _refuse_truncated(t: Any) -> Any:
+    """Say plainly when a call's input was cut off by the output limit.
+
+    The CLI hands a tool `{"__unparsedToolInput": ...}` when the model's JSON
+    did not parse -- which is what a reply cut at the output cap looks like.
+    cmp-complaints-7's lanes wrote a judgment per complaint into one finding,
+    ran past 8k output tokens, got a generic error, and sent the same call
+    three times until the budget was gone.
+    """
+    async def guarded(args: dict[str, Any]) -> dict[str, Any]:
+        if "__unparsedToolInput" in args:
+            return _err({
+                "code": "input_truncated",
+                "message": "這次呼叫的內容太長，超過單次回覆的輸出上限而被截斷，"
+                           "沒有執行。不要原樣重送：寫精簡版（結論、計數、id 清單，"
+                           "不寫逐筆理由），或拆成幾次、用不同 name 分開寫。",
+            })
+        return await t.handler(args)
+    return replace(t, handler=guarded)
 
 
 def _ok(text: str) -> dict[str, Any]:
@@ -561,6 +582,7 @@ class WorkerToolbox:
             "inspect_blob": inspect_blob,
             "duckdb_query": duckdb_query,
         }
+        available = {name: _refuse_truncated(t) for name, t in available.items()}
         declared = [name for name in self.lane.type.tools if name in available]
         if not declared:
             declared = list(available)

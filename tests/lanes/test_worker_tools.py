@@ -397,3 +397,13 @@ async def test_a_handle_only_run_can_neither_read_nor_rewrite(bench):
     for tool in ("duckdb_query", "read_note", "write_finding"):
         assert error_of(toolbox._gate(tool))["code"] == "handle_only", tool
     assert toolbox._gate("update_state") is None
+
+
+async def test_a_call_cut_off_by_the_output_limit_is_named_as_such(bench):
+    """cmp-complaints-7: a finding too long for one reply came through as
+    __unparsedToolInput, got a generic error, and was resent three times."""
+    toolbox, _ = bench
+    body = error_of(await toolbox.handlers["write_finding"](
+        {"__unparsedToolInput": {"raw": '{"name": "x", "text": "很長'}}))
+    assert body["code"] == "input_truncated"
+    assert "不要原樣重送" in body["message"]
