@@ -30,6 +30,13 @@ SDK_INTERNAL_RETRIES: Final = 2
 #: a dead endpoint now costs about six. A profile can override it in extra_env.
 REQUEST_TIMEOUT_S: Final = 120
 
+#: Output the CLI reserves per request. Its default is 32,000, which on a 64k
+#: model leaves half the window for input: cmp-complaints-5's orchestrator died
+#: at 33,537 input tokens ("you requested 32000 output tokens ... 65537"), with
+#: every segment classified and nothing left but the synthesis. Nothing here
+#: writes more than a finding per reply.
+SDK_MAX_OUTPUT_TOKENS: Final = 8_192
+
 
 class BackendCapability(StrEnum):
     """What a backend can enforce for us, as opposed to merely ask for."""
@@ -150,6 +157,7 @@ class BackendProfile:
         # nor coordinate it. Cap it low so the shared BackendGate owns the policy.
         env.setdefault("CLAUDE_CODE_MAX_RETRIES", str(SDK_INTERNAL_RETRIES))
         env.setdefault("API_TIMEOUT_MS", str(REQUEST_TIMEOUT_S * 1000))
+        env.setdefault("CLAUDE_CODE_MAX_OUTPUT_TOKENS", str(SDK_MAX_OUTPUT_TOKENS))
         token = self.credential()
         if token:
             env["ANTHROPIC_AUTH_TOKEN"] = token

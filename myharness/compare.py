@@ -43,7 +43,6 @@ from myharness.lanes.worker import WorkerRequest, run_lane_worker
 from myharness.local_layout import DEFAULT_ROOT
 
 BASELINE_TIMEOUT_S = 1800.0
-BASELINE_MAX_OUTPUT = 8_192
 #: The tool-using agent's limits: generous, so that it is the single context
 #: that has to cope, not a lane's per-dispatch ceilings.
 SOLO_MAX_TURNS = 60
@@ -75,10 +74,10 @@ async def run_baseline(backend: str, task: GoldenTask) -> Row:
     options = ClaudeAgentOptions(
         model=profile.resolve_model(ModelTier.STRONG), max_turns=1,
         allowed_tools=[], disallowed_tools=BackendProfile.disallowed_for(()),
-        # Claude Code reserves 32,000 output tokens by default, which alone
-        # pushed the golden CSV one token past a 64k window. The baseline is
-        # meant to be the naive approach given a fair chance, not a strawman.
-        env={**profile.to_sdk_env(), "CLAUDE_CODE_MAX_OUTPUT_TOKENS": str(BASELINE_MAX_OUTPUT)},
+        # The output reservation is capped for every SDK call (profile.py,
+        # SDK_MAX_OUTPUT_TOKENS): the CLI's 32,000 alone pushed the golden CSV
+        # one token past a 64k window.
+        env=profile.to_sdk_env(),
     )
     row, meter, texts = Row("單一 agent（CSV 全文進 prompt）"), RequestMeter(), []
     started = time.monotonic()

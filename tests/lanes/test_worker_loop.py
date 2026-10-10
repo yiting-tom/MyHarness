@@ -1396,6 +1396,14 @@ def test_every_sdk_call_gets_a_request_timeout():
     assert env["API_TIMEOUT_MS"] == str(REQUEST_TIMEOUT_S * 1000)
 
 
+def test_the_output_reservation_leaves_a_64k_window_for_input():
+    """cmp-complaints-5: 33,537 in + the CLI's default 32,000 out > 65,536."""
+    from myharness.backends.profile import SDK_MAX_OUTPUT_TOKENS, registry
+
+    env = registry.get("anthropic").to_sdk_env()
+    assert int(env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"]) == SDK_MAX_OUTPUT_TOKENS <= 8_192
+
+
 async def test_a_stalled_stream_is_abandoned_and_closed(bench, monkeypatch):
     """cmp-complaints-2's d17 heard nothing for 34 minutes; the CLI cannot
     time out a custom endpoint's stream, so the lane does."""
